@@ -14,15 +14,17 @@ enum AppConfig {
     // App Group identifier shared between main app and helper for sandboxed IPC.
     static let appGroupID = "group.com.shahine.homeclaw"
 
-    // CLI Socket — uses App Group container in sandboxed builds, /tmp in direct builds.
+    // CLI Socket — uses App Group container when available (sandboxed builds),
+    // falls back to /tmp for Developer ID / direct builds.
     static let socketPath: String = {
-        #if APP_STORE
         if let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID
         ) {
-            return container.appendingPathComponent("homeclaw.sock").path
+            let groupPath = container.appendingPathComponent("homeclaw.sock").path
+            if FileManager.default.fileExists(atPath: groupPath) {
+                return groupPath
+            }
         }
-        #endif
         return "/tmp/homeclaw.sock"
     }()
 

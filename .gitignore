@@ -14,5 +14,9 @@ DerivedData/
 # Local configuration (contains developer Team ID)
 .env.local
 
+# Generated device maps (user-specific snapshots)
+device-map*.json
+device-map*.md
+
 # Node.js
 node_modules/

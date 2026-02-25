@@ -20805,7 +20805,18 @@ var tools = [
 
 // lib/socket-client.js
 import { createConnection } from "node:net";
-var SOCKET_PATH = "/tmp/homeclaw.sock";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+var APP_GROUP_SOCKET = join(
+  homedir(),
+  "Library",
+  "Group Containers",
+  "group.com.shahine.homeclaw",
+  "homeclaw.sock"
+);
+var LEGACY_SOCKET = "/tmp/homeclaw.sock";
+var SOCKET_PATH = existsSync(APP_GROUP_SOCKET) ? APP_GROUP_SOCKET : LEGACY_SOCKET;
 var TIMEOUT_MS = 3e4;
 function sendCommand(command, args = {}) {
   return new Promise((resolve, reject) => {
