@@ -40,3 +40,7 @@ targets:
       path: HomeClawHelper.entitlements
       properties:
         com.apple.developer.homekit: true
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - group.com.shahine.homeclaw
+        com.apple.security.network.server: true

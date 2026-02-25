@@ -7,7 +7,20 @@ import Foundation
 /// which would block a cooperative thread and cause issues with Swift concurrency.
 final class HelperSocketServer: @unchecked Sendable {
     static let shared = HelperSocketServer()
-    static let socketPath = "/tmp/homeclaw.sock"
+
+    /// App Group identifier shared with the main app for sandboxed IPC.
+    private static let appGroupID = "group.com.shahine.homeclaw"
+
+    /// Socket path — uses App Group container when available (sandboxed builds),
+    /// falls back to /tmp for Developer ID builds.
+    static let socketPath: String = {
+        if let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) {
+            return container.appendingPathComponent("homeclaw.sock").path
+        }
+        return "/tmp/homeclaw.sock"
+    }()
 
     private var serverFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?

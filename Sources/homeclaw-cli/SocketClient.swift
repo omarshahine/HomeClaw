@@ -2,7 +2,23 @@ import Foundation
 
 /// Connects to the HomeClaw app via Unix domain socket.
 enum SocketClient {
-    static let socketPath = "/tmp/homeclaw.sock"
+    /// App Group identifier shared with the main app and helper.
+    private static let appGroupID = "group.com.shahine.homeclaw"
+
+    /// Socket path — checks App Group container first (for App Store builds),
+    /// then falls back to /tmp (Developer ID builds).
+    static let socketPath: String = {
+        // App Group container: ~/Library/Group Containers/group.com.shahine.homeclaw/
+        if let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID
+        ) {
+            let groupPath = container.appendingPathComponent("homeclaw.sock").path
+            if FileManager.default.fileExists(atPath: groupPath) {
+                return groupPath
+            }
+        }
+        return "/tmp/homeclaw.sock"
+    }()
 
     struct CLIRequest: Codable {
         let command: String
