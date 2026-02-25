@@ -10,7 +10,7 @@ import MCP
 actor MCPServer {
     private var channel: Channel?
     private var sessions: [String: SessionContext] = [:]
-    private let logger = Logger(label: "com.shahine.homekit-bridge.mcp")
+    private let logger = Logger(label: "com.shahine.homeclaw.mcp")
 
     struct SessionContext {
         let server: Server

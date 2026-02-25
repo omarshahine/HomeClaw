@@ -17,7 +17,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHomeKitUsageDescription</key>
-	<string>HomeKit Bridge needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
+	<string>HomeClaw needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
 	<key>UIApplicationSupportsMultipleScenes</key>
 	<false/>
 </dict>

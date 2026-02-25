@@ -1,6 +1,6 @@
 ---
 description: |
-  Control HomeKit smart home accessories via the homekit-cli command-line tool.
+  Control HomeKit smart home accessories via the homeclaw-cli command-line tool.
   Also includes reference data for accessory categories, characteristics, and value formats.
   This skill should be used when the user wants to:
   - Turn lights on or off, set brightness, or change color temperature
@@ -9,25 +9,25 @@ description: |
   - Run a HomeKit scene like "Good Morning" or "Movie Time"
   - Check which devices are on, off, or unreachable
   - List accessories in a room or search by name
-  - Check HomeKit Bridge status or configure default home
+  - Check HomeClaw status or configure default home
   - Look up characteristic names, value types, ranges, or enum mappings
   Example triggers: "turn on the kitchen lights", "lock all doors",
   "set the thermostat to 72", "run the goodnight scene", "what lights are on",
-  "list devices in the living room", "is the HomeKit bridge running",
+  "list devices in the living room", "is HomeClaw running",
   "what characteristics does a thermostat have", "what are the lock state values"
 ---
 
 # HomeKit Smart Home Control
 
-HomeKit Bridge exposes Apple HomeKit accessories via the `homekit-cli` command-line tool. The CLI communicates with the HomeKit Bridge app over a Unix domain socket at `/tmp/homekit-bridge.sock`.
+HomeClaw exposes Apple HomeKit accessories via the `homeclaw-cli` command-line tool. The CLI communicates with the HomeClaw app over a Unix domain socket at `/tmp/homeclaw.sock`.
 
 ## CLI Commands
 
-The `homekit-cli` binary is the primary interface. Read commands support `--json` for raw JSON output suitable for parsing.
+The `homeclaw-cli` binary is the primary interface. Read commands support `--json` for raw JSON output suitable for parsing.
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
-| `status` | `[--json]` | Show HomeKit Bridge status (connectivity, home/accessory counts) |
+| `status` | `[--json]` | Show HomeClaw status (connectivity, home/accessory counts) |
 | `list` | `[--room NAME] [--category TYPE] [--json]` | List HomeKit accessories with optional filters. Returns enriched results with `semantic_type`, `display_name`, `manufacturer`, `zone`. |
 | `get` | `<name-or-uuid> [--json]` | Get detailed info about an accessory (all services and characteristics) |
 | `set` | `<name-or-uuid> <characteristic> <value>` | Set a characteristic on an accessory |
@@ -42,11 +42,11 @@ The `homekit-cli` binary is the primary interface. Read commands support `--json
 **Human-readable** (default): Compact text output for terminal use.
 
 ```bash
-homekit-cli list --room "Kitchen"
+homeclaw-cli list --room "Kitchen"
 # + Kitchen Light [lightbulb] in Kitchen — power=true, brightness=75
 # + Kitchen Outlet [outlet] in Kitchen — power=false
 
-homekit-cli get "Kitchen Light"
+homeclaw-cli get "Kitchen Light"
 # Kitchen Light
 #   Category:  lightbulb
 #   Room:      Kitchen
@@ -55,24 +55,24 @@ homekit-cli get "Kitchen Light"
 #     power: true (writable)
 #     brightness: 75 (writable)
 
-homekit-cli set "Kitchen Light" brightness 50
+homeclaw-cli set "Kitchen Light" brightness 50
 # Set Kitchen Light.brightness = 50
 
-homekit-cli search thermostat
+homeclaw-cli search thermostat
 # Found 2 result(s):
 #   Nest Thermostat [thermostat] in Hallway
 #   Ecobee [thermostat] in Living Room
 
-homekit-cli scenes
+homeclaw-cli scenes
 #   Good Morning [builtin] — 5 action(s)
 #   Movie Time [user] — 3 action(s)
 
-homekit-cli status
-# HomeKit Bridge v?
+homeclaw-cli status
+# HomeClaw v?
 #   HomeKit:     Connected
 #   Homes:       2
 #   Accessories: 192
-#   CLI Socket:  /tmp/homekit-bridge.sock
+#   CLI Socket:  /tmp/homeclaw.sock
 ```
 
 **JSON** (`--json`): Raw JSON for scripting and parsing. Returns the full response data from the socket.
@@ -83,37 +83,37 @@ homekit-cli status
 
 ```bash
 # Find the light
-homekit-cli search "kitchen light"
+homeclaw-cli search "kitchen light"
 
 # Turn it on (by name or UUID)
-homekit-cli set "Kitchen Light" power true
+homeclaw-cli set "Kitchen Light" power true
 ```
 
 ### Set brightness
 
 ```bash
-homekit-cli set "Kitchen Light" brightness 50
+homeclaw-cli set "Kitchen Light" brightness 50
 ```
 
 ### Lock all doors
 
 ```bash
 # Find all locks
-homekit-cli search lock --category lock
+homeclaw-cli search lock --category lock
 
 # Lock each one
-homekit-cli set "Front Door" lock_target_state locked
-homekit-cli set "Back Door" lock_target_state locked
+homeclaw-cli set "Front Door" lock_target_state locked
+homeclaw-cli set "Back Door" lock_target_state locked
 ```
 
 ### Check temperature
 
 ```bash
 # Find thermostats
-homekit-cli search thermostat --category thermostat
+homeclaw-cli search thermostat --category thermostat
 
 # Get detailed readings
-homekit-cli get "Nest Thermostat"
+homeclaw-cli get "Nest Thermostat"
 # Look for current_temperature in the output
 ```
 
@@ -121,52 +121,52 @@ homekit-cli get "Nest Thermostat"
 
 ```bash
 # Set target temperature (in user's configured unit)
-homekit-cli set "Nest Thermostat" target_temperature 72
+homeclaw-cli set "Nest Thermostat" target_temperature 72
 
 # Set mode
-homekit-cli set "Nest Thermostat" target_heating_cooling auto
+homeclaw-cli set "Nest Thermostat" target_heating_cooling auto
 ```
 
 ### Run a scene
 
 ```bash
 # List available scenes
-homekit-cli scenes
+homeclaw-cli scenes
 
 # Trigger by name
-homekit-cli trigger "Movie Time"
+homeclaw-cli trigger "Movie Time"
 ```
 
 ### List accessories by room
 
 ```bash
-homekit-cli list --room "Living Room"
+homeclaw-cli list --room "Living Room"
 ```
 
 ### Switch active home
 
 ```bash
 # View current config (shows active home)
-homekit-cli config
+homeclaw-cli config
 
 # Set active home
-homekit-cli config --default-home "My Home"
+homeclaw-cli config --default-home "My Home"
 
 # Reset to primary home
-homekit-cli config --clear
+homeclaw-cli config --clear
 
 # Show all devices with filter status
-homekit-cli config --list-devices
+homeclaw-cli config --list-devices
 ```
 
 ### Get the device map
 
 ```bash
 # Human-readable tree view
-homekit-cli device-map
+homeclaw-cli device-map
 
 # Full JSON with semantic types, aliases, and state
-homekit-cli device-map --json
+homeclaw-cli device-map --json
 ```
 
 The device map returns devices organized by home/zone/room with:
@@ -182,7 +182,7 @@ The device map returns devices organized by home/zone/room with:
 
 ```bash
 # Get all lights that are on
-homekit-cli list --category lightbulb --json | python3 -c "
+homeclaw-cli list --category lightbulb --json | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
 lights = [a for a in data if a.get('state',{}).get('power')=='true']
@@ -193,12 +193,12 @@ for l in lights:
 
 ## Direct Socket Fallback
 
-If `homekit-cli` is not available, you can talk directly to the HomeKit Bridge helper over the Unix socket.
+If `homeclaw-cli` is not available, you can talk directly to the HomeClaw helper over the Unix socket.
 
 **Pattern**: Send a JSON command with newline delimiter via `nc`, save to a temp file, then parse:
 
 ```bash
-echo '{"command":"<COMMAND>","args":{<ARGS>}}' | nc -U /tmp/homekit-bridge.sock > /tmp/hk-result.json 2>/dev/null
+echo '{"command":"<COMMAND>","args":{<ARGS>}}' | nc -U /tmp/homeclaw.sock > /tmp/hk-result.json 2>/dev/null
 python3 -c "import json; d=json.load(open('/tmp/hk-result.json')); print(json.dumps(d['data'], indent=2))"
 ```
 
@@ -225,7 +225,7 @@ python3 -c "import json; d=json.load(open('/tmp/hk-result.json')); print(json.du
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| "HomeKit Bridge is not running" | App not launched or socket missing | Launch HomeKit Bridge.app |
+| "HomeClaw is not running" | App not launched or socket missing | Launch HomeClaw.app |
 | "Connection failed" | Socket exists but app not responding | Restart the app |
 | 0 homes / `ready: false` | Missing entitlement or iCloud not signed in | Check codesign entitlements and iCloud |
 | "Accessory not found" | Wrong UUID or name | Use `search` to find the correct identifier |
@@ -234,7 +234,7 @@ python3 -c "import json; d=json.load(open('/tmp/hk-result.json')); print(json.du
 
 ## Configuration
 
-Config file: `~/.config/homekit-bridge/config.json`
+Config file: `~/.config/homeclaw/config.json`
 
 | Setting | Values | Default |
 |---------|--------|---------|
@@ -243,7 +243,7 @@ Config file: `~/.config/homekit-bridge/config.json`
 | `allowed_accessory_ids` | Array of UUIDs | `[]` |
 | `temperature_unit` | `fahrenheit`, `celsius`, `auto` | `auto` (uses system locale) |
 
-Use `homekit-cli config` to view and modify settings. The `--list-devices` flag shows all accessories with their allowed/filtered status. When `temperature_unit` changes, the characteristic cache is automatically invalidated and refreshed.
+Use `homeclaw-cli config` to view and modify settings. The `--list-devices` flag shows all accessories with their allowed/filtered status. When `temperature_unit` changes, the characteristic cache is automatically invalidated and refreshed.
 
 ---
 

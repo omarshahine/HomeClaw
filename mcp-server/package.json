@@ -1,8 +1,8 @@
 {
-  "name": "@homekit-bridge/mcp-server",
+  "name": "@homeclaw/mcp-server",
   "version": "0.0.1",
   "private": true,
-  "description": "MCP server for HomeKit Bridge",
+  "description": "MCP server for HomeClaw",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {

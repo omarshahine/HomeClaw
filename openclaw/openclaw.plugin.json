@@ -5,7 +5,7 @@
     "properties": {
       "binDir": {
         "type": "string",
-        "description": "Path to directory containing the homekit-cli binary"
+        "description": "Path to directory containing the homeclaw-cli binary"
       }
     }
   },

@@ -7,11 +7,11 @@ import Foundation
 /// which would block a cooperative thread and cause issues with Swift concurrency.
 final class HelperSocketServer: @unchecked Sendable {
     static let shared = HelperSocketServer()
-    static let socketPath = "/tmp/homekit-bridge.sock"
+    static let socketPath = "/tmp/homeclaw.sock"
 
     private var serverFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    private let queue = DispatchQueue(label: "com.shahine.homekit-bridge.helper.socket", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.shahine.homeclaw.helper.socket", qos: .userInitiated)
 
     /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources).
     func start() {

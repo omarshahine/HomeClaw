@@ -3,8 +3,8 @@ import Foundation
 
 struct HomeKitCLI: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "homekit-cli",
-        abstract: "Control HomeKit accessories via HomeKit Bridge",
+        commandName: "homeclaw-cli",
+        abstract: "Control HomeKit accessories via HomeClaw",
         subcommands: [
             List.self,
             Get.self,

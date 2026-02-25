@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct HomeKitBridgeApp: App {
+struct HomeClawApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("HomeKit Bridge", systemImage: "house.badge.wifi.fill") {
+        MenuBarExtra("HomeClaw", systemImage: "house.badge.wifi.fill") {
             MenuBarView()
         }
 

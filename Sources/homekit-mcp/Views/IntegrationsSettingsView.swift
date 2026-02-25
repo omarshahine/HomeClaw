@@ -45,13 +45,13 @@ struct IntegrationsSettingsView: View {
 
     // MARK: - Constants & Paths
 
-    private static let serverName = "homekit-bridge"
-    private static let pluginPrefix = "homekit-bridge@"
+    private static let serverName = "homeclaw"
+    private static let pluginPrefix = "homeclaw@"
     private static let githubRepo = "omarshahine/HomeClaw"
     private static let openClawPluginID = "homeclaw"
-    private static let cliSymlinkPath = "/usr/local/bin/homekit-cli"
+    private static let cliSymlinkPath = "/usr/local/bin/homeclaw-cli"
     private static var bundledCLIPath: String {
-        Bundle.main.bundlePath + "/Contents/MacOS/homekit-cli"
+        Bundle.main.bundlePath + "/Contents/MacOS/homeclaw-cli"
     }
 
     private static var claudeDesktopConfigPath: String {
@@ -232,7 +232,7 @@ struct IntegrationsSettingsView: View {
 
             switch claudeCodeStatus {
             case .pluginInstalled:
-                Text("HomeKit Bridge plugin is installed and active.")
+                Text("HomeClaw plugin is installed and active.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -258,7 +258,7 @@ struct IntegrationsSettingsView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("/plugin marketplace add \(Self.githubRepo)")
-                Text("/plugin install homekit-bridge@homekit-bridge")
+                Text("/plugin install homeclaw@homeclaw")
             }
             .font(.system(.caption, design: .monospaced))
             .foregroundStyle(.secondary)
@@ -426,7 +426,7 @@ struct IntegrationsSettingsView: View {
         return .notInstalled
     }
 
-    /// Checks ~/.claude/settings.json enabledPlugins for any key matching "homekit-bridge@*".
+    /// Checks ~/.claude/settings.json enabledPlugins for any key matching "homeclaw@*".
     private func isPluginEnabled() -> Bool {
         guard let config = readConfig(at: Self.claudeCodeSettingsPath),
             let enabled = config["enabledPlugins"] as? [String: Any]
@@ -554,7 +554,7 @@ struct IntegrationsSettingsView: View {
     private func copyInstallCommands() {
         let commands = """
             /plugin marketplace add \(Self.githubRepo)
-            /plugin install homekit-bridge@homekit-bridge
+            /plugin install homeclaw@homeclaw
             """
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(commands, forType: .string)
@@ -563,7 +563,7 @@ struct IntegrationsSettingsView: View {
 
     private func copyOpenClawSetupInstructions() {
         let bundledPath = Self.bundledOpenClawPluginPath
-            ?? "/Applications/HomeKit Bridge.app/Contents/Resources/openclaw"
+            ?? "/Applications/HomeClaw.app/Contents/Resources/openclaw"
         let instructions = """
             # Install from the bundled plugin (if OpenClaw runs on the same Mac):
             openclaw plugins install "\(bundledPath)"

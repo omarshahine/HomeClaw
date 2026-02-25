@@ -21,11 +21,11 @@ jobs:
             exit 1
           fi
 
-      - name: Build homekit-mcp
-        run: swift build --product homekit-mcp
+      - name: Build homeclaw
+        run: swift build --product homeclaw
 
-      - name: Build homekit-cli
-        run: swift build --product homekit-cli
+      - name: Build homeclaw-cli
+        run: swift build --product homeclaw-cli
 
       - name: Setup Node
         uses: actions/setup-node@v4

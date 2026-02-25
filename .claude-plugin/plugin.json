@@ -1,5 +1,5 @@
 {
-  "name": "homekit-bridge",
+  "name": "homeclaw",
   "version": "0.0.1",
   "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
   "author": {

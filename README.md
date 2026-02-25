@@ -20,15 +20,15 @@ Apple HomeKit has no public API, no CLI, and no way to integrate with AI assista
 ```
 Claude Code → Plugin (.claude-plugin/) → stdio MCP server (Node.js) ─┐
 Claude Desktop → stdio MCP server (Node.js) ─────────────────────────┤
-OpenClaw → Plugin (openclaw/) → homekit-cli ─────────────────────────┤
+OpenClaw → Plugin (openclaw/) → homeclaw-cli ─────────────────────────┤
                                                                      ▼
-                                              /tmp/homekit-bridge.sock
+                                              /tmp/homeclaw.sock
                                                                      │
                                               HomeKitHelper (Mac Catalyst, headless)
                                                 ├── HMHomeManager (Apple HomeKit framework)
                                                 └── Unix socket server
 
-homekit-mcp (SwiftUI menu bar app)
+homeclaw (SwiftUI menu bar app)
     ├── Menu bar UI + Settings window
     ├── HelperManager (launches & monitors HomeKitHelper)
     └── Unix socket client (HomeKitClient)
@@ -69,7 +69,7 @@ scripts/build.sh --release --install
 
 Find your Team ID at [developer.apple.com/account](https://developer.apple.com/account) under Membership Details.
 
-Launch from `/Applications` or: `open "/Applications/HomeKit Bridge.app"`
+Launch from `/Applications` or: `open "/Applications/HomeClaw.app"`
 
 On first launch, grant HomeKit access when prompted. The menu bar icon appears -- click it to see your connected homes.
 
@@ -77,7 +77,7 @@ On first launch, grant HomeKit access when prompted. The menu bar icon appears -
 
 ## MCP Tools
 
-The stdio MCP server wraps `homekit-cli` and exposes these tools:
+The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 
 | Tool | Description |
 |------|-------------|
@@ -90,14 +90,14 @@ The stdio MCP server wraps `homekit-cli` and exposes these tools:
 
 ### Connecting an MCP Client
 
-Any MCP-compatible client can connect via the **stdio server**, which wraps `homekit-cli` and requires no authentication (the HomeKit Bridge app must be running for the socket). Add this to your MCP client config (e.g. `claude_desktop_config.json`):
+Any MCP-compatible client can connect via the **stdio server**, which wraps `homeclaw-cli` and requires no authentication (the HomeClaw app must be running for the socket). Add this to your MCP client config (e.g. `claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
-    "homekit-bridge": {
+    "homeclaw": {
       "command": "node",
-      "args": ["/Applications/HomeKit Bridge.app/Contents/Resources/mcp-server.js"]
+      "args": ["/Applications/HomeClaw.app/Contents/Resources/mcp-server.js"]
     }
   }
 }
@@ -107,37 +107,37 @@ The `mcp-server.js` is bundled inside the app. You can also use the Integrations
 
 ## CLI
 
-The `homekit-cli` command-line tool communicates directly over the Unix domain socket. All read commands support `--json` for machine-readable output.
+The `homeclaw-cli` command-line tool communicates directly over the Unix domain socket. All read commands support `--json` for machine-readable output.
 
 ```bash
 # List accessories
-homekit-cli list
-homekit-cli list --room "Kitchen"
-homekit-cli list --category thermostat
+homeclaw-cli list
+homeclaw-cli list --room "Kitchen"
+homeclaw-cli list --category thermostat
 
 # Control devices
-homekit-cli set "Living Room Light" brightness 75
-homekit-cli set "Front Door Lock" lock_target_state locked
-homekit-cli set "Thermostat" target_temperature 72
+homeclaw-cli set "Living Room Light" brightness 75
+homeclaw-cli set "Front Door Lock" lock_target_state locked
+homeclaw-cli set "Thermostat" target_temperature 72
 
 # Get detailed device info
-homekit-cli get "Kitchen Light" --json
+homeclaw-cli get "Kitchen Light" --json
 
 # Search across all homes
-homekit-cli search "bedroom" --category lightbulb
+homeclaw-cli search "bedroom" --category lightbulb
 
 # Scenes
-homekit-cli scenes
-homekit-cli trigger "Good Night"
+homeclaw-cli scenes
+homeclaw-cli trigger "Good Night"
 
 # LLM-optimized device map
-homekit-cli device-map
+homeclaw-cli device-map
 
 # Status and configuration
-homekit-cli status
-homekit-cli config --default-home "Main House"
-homekit-cli config --filter-mode allowlist
-homekit-cli config --list-devices
+homeclaw-cli status
+homeclaw-cli config --default-home "Main House"
+homeclaw-cli config --filter-mode allowlist
+homeclaw-cli config --list-devices
 ```
 
 ## Using with Claude Code
@@ -156,7 +156,7 @@ git clone https://github.com/omarshahine/HomeClaw.git ~/GitHub/HomeClaw
 
 # Inside Claude Code, register the marketplace and install
 /plugin marketplace add ~/GitHub/HomeClaw
-/plugin install homekit-bridge@homekit-bridge
+/plugin install homeclaw@homeclaw
 ```
 
 **From GitHub (no local clone needed):**
@@ -166,7 +166,7 @@ git clone https://github.com/omarshahine/HomeClaw.git ~/GitHub/HomeClaw
 /plugin marketplace add https://github.com/omarshahine/HomeClaw
 
 # Install the plugin
-/plugin install homekit-bridge@homekit-bridge
+/plugin install homeclaw@homeclaw
 ```
 
 After installing, restart Claude Code. Then just ask:
@@ -192,18 +192,18 @@ HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers HomeK
 
 ### Same-Mac Install (Recommended)
 
-If HomeKit Bridge and OpenClaw run on the same Mac, use the one-click installer:
+If HomeClaw and OpenClaw run on the same Mac, use the one-click installer:
 
 1. Open **Settings > Integrations** and click **Install** in the OpenClaw section.
 
 Or from the terminal:
 
 ```bash
-openclaw plugins install "/Applications/HomeKit Bridge.app/Contents/Resources/openclaw/"
+openclaw plugins install "/Applications/HomeClaw.app/Contents/Resources/openclaw/"
 openclaw plugins enable homeclaw
 ```
 
-The plugin files and `homekit-cli` binary are bundled inside the app -- no git clone needed.
+The plugin files and `homeclaw-cli` binary are bundled inside the app -- no git clone needed.
 
 ### Remote Gateway
 
@@ -218,9 +218,9 @@ openclaw plugins install ~/GitHub/HomeClaw/openclaw
 openclaw plugins enable homeclaw
 ```
 
-The plugin discovers `homekit-cli` via standard paths (`/Applications/HomeKit Bridge.app/Contents/MacOS/homekit-cli`, `/usr/local/bin/homekit-cli`, `~/.local/bin/`, build output directories).
+The plugin discovers `homeclaw-cli` via standard paths (`/Applications/HomeClaw.app/Contents/MacOS/homeclaw-cli`, `/usr/local/bin/homeclaw-cli`, `~/.local/bin/`, build output directories).
 
-> **Note:** The `homekit-cli` binary must be accessible from the gateway, and the HomeKit Bridge app must be running on a Mac reachable via the Unix socket at `/tmp/homekit-bridge.sock`.
+> **Note:** The `homeclaw-cli` binary must be accessible from the gateway, and the HomeClaw app must be running on a Mac reachable via the Unix socket at `/tmp/homeclaw.sock`.
 
 ## Supported Accessories
 
@@ -274,7 +274,7 @@ Control which accessories are exposed to MCP clients and the CLI. Switch between
 Install and manage connections to AI assistants. The app detects existing configurations and guides you through setup:
 
 - **Claude Desktop** -- one-click install of the bundled stdio MCP server (requires Node.js)
-- **Claude Code** -- detects the installed plugin (`homekit-bridge@homekit-bridge`)
+- **Claude Code** -- detects the installed plugin (`homeclaw@homeclaw`)
 - **OpenClaw** -- detects plugin configuration on the remote gateway and provides setup instructions
 
 <p align="center"><img src="docs/images/settings-integrations.png" width="500" alt="Integrations settings tab"></p>
@@ -284,12 +284,12 @@ Install and manage connections to AI assistants. The app detects existing config
 Use the [Devices tab](#devices) in Settings or the CLI to control which accessories are exposed:
 
 ```bash
-homekit-cli config --filter-mode allowlist
-homekit-cli config --allow-accessories "uuid1,uuid2,uuid3"
-homekit-cli config --list-devices  # shows allowed/filtered status
+homeclaw-cli config --filter-mode allowlist
+homeclaw-cli config --allow-accessories "uuid1,uuid2,uuid3"
+homeclaw-cli config --list-devices  # shows allowed/filtered status
 ```
 
-Config stored at `~/.config/homekit-bridge/config.json`.
+Config stored at `~/.config/homeclaw/config.json`.
 
 ## Helper Process Management
 
@@ -332,7 +332,7 @@ Version is derived from git tags at build time. To release a new version:
 scripts/bump-version.sh 0.2.0   # Updates source files + prints tag commands
 npm run build:mcp                # Rebuild MCP server with new version
 git add -A && git commit -m "Bump version to 0.2.0"
-git tag -a v0.2.0 -m "HomeKit Bridge v0.2.0"
+git tag -a v0.2.0 -m "HomeClaw v0.2.0"
 git push && git push origin v0.2.0
 ```
 
@@ -357,7 +357,7 @@ Development-signed builds are tied to registered devices. To run HomeClaw on ano
    scripts/build.sh --release --install --clean
    ```
 
-4. **Copy** `/Applications/HomeKit Bridge.app` to the target Mac (AirDrop, USB, network share, etc.)
+4. **Copy** `/Applications/HomeClaw.app` to the target Mac (AirDrop, USB, network share, etc.)
 
 5. **Grant HomeKit access** on first launch when prompted.
 
@@ -371,14 +371,14 @@ Apple restricts the `com.apple.developer.homekit` entitlement to **development s
 
 ```
 Sources/
-  homekit-mcp/             Main app (SPM executable)
+  homeclaw/                Main app (SPM executable)
     App/                   SwiftUI entry, AppDelegate, HelperManager
     HomeKit/               HomeKitClient (socket client to helper)
     Views/                 MenuBarView, SettingsView
     Shared/                AppConfig, Logger
     MCP/_disabled/         Preserved HTTP MCP server code (not compiled)
     Shared/_disabled/      Preserved KeychainManager (not compiled)
-  homekit-cli/             CLI tool (SPM executable)
+  homeclaw-cli/             CLI tool (SPM executable)
     Commands/              list, get, set, search, scenes, status, config, device-map
     SocketClient.swift     Direct socket communication
   HomeKitHelper/           Catalyst helper app (Xcode project via XcodeGen)
@@ -390,7 +390,7 @@ Resources/                 Info.plist, entitlements, app icons
 scripts/
   build.sh                 Build, sign, and install
   bump-version.sh          Update version across all 9 files
-mcp-server/                Node.js stdio MCP server (wraps homekit-cli)
+mcp-server/                Node.js stdio MCP server (wraps homeclaw-cli)
 openclaw/                  OpenClaw plugin (HomeClaw)
   skills/homekit/          HomeKit skill with full characteristic reference
 ```
@@ -399,10 +399,10 @@ openclaw/                  OpenClaw plugin (HomeClaw)
 
 ```bash
 # Check if helper is running and HomeKit is ready
-echo '{"command":"status"}' | nc -U /tmp/homekit-bridge.sock
+echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 
 # Verify HomeKit entitlement on installed app
-codesign -d --entitlements - "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app"
+codesign -d --entitlements - "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
 
 # View HomeKitHelper logs
 log show --predicate 'process == "HomeKitHelper"' --last 10m --style compact
@@ -483,7 +483,7 @@ The helper is running but can't see any HomeKit data. Check in order:
 1. **iCloud signed in?** HomeKit data lives in iCloud. Open System Settings > Apple Account and verify.
 2. **HomeKit entitlement present?** Run:
    ```bash
-   codesign -d --entitlements :- "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app"
+   codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
    ```
    You should see `com.apple.developer.homekit` → `true`.
 3. **TCC permission granted?** On first launch, macOS asks for HomeKit access. If you denied it, re-grant in System Settings > Privacy & Security > HomeKit.
@@ -496,26 +496,26 @@ Development-signed apps are tied to registered devices. See [Installing on Addit
 1. Get the target Mac's Provisioning UDID: `system_profiler SPHardwareDataType | grep "Provisioning UDID"`
 2. Register it at [developer.apple.com](https://developer.apple.com/account/resources/devices/add) (Platform: macOS)
 3. Rebuild with `--clean` on your dev machine (Xcode regenerates the profile to include the new device)
-4. Copy `/Applications/HomeKit Bridge.app` to the target Mac
+4. Copy `/Applications/HomeClaw.app` to the target Mac
 5. Grant HomeKit access on first launch
 
 ### How do I see what's happening?
 
 ```bash
-# HomeKit Bridge app logs (includes helper launch diagnostics)
-log show --predicate 'process == "homekit-mcp"' --last 10m --style compact
+# HomeClaw app logs (includes helper launch diagnostics)
+log show --predicate 'process == "homeclaw"' --last 10m --style compact
 
 # HomeKitHelper logs
 log show --predicate 'process == "HomeKitHelper"' --last 10m --style compact
 
 # Check helper status directly over the socket
-echo '{"command":"status"}' | nc -U /tmp/homekit-bridge.sock
+echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 
 # Verify code signature and entitlements
-codesign -d --entitlements :- "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app"
+codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
 
 # Check which devices are in the provisioning profile
-security cms -D -i "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app/Contents/embedded.provisionprofile" 2>/dev/null | plutil -extract ProvisionedDevices json -o - -
+security cms -D -i "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app/Contents/embedded.provisionprofile" 2>/dev/null | plutil -extract ProvisionedDevices json -o - -
 ```
 
 ## License

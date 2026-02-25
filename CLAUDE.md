@@ -1,36 +1,36 @@
-# HomeKit Bridge
+# HomeClaw
 
-HomeKit Bridge exposes Apple HomeKit accessories via a CLI tool, plugins for Claude Code and OpenClaw, and a stdio MCP server for Claude Desktop. It uses a split-process architecture to work around Apple's framework restrictions.
+HomeClaw exposes Apple HomeKit accessories via a CLI tool, plugins for Claude Code and OpenClaw, and a stdio MCP server for Claude Desktop. It uses a split-process architecture to work around Apple's framework restrictions.
 
 ## Architecture
 
 ```
 Claude Code → Plugin (.claude-plugin/) → stdio MCP server (Node.js) ─┐
 Claude Desktop → stdio MCP server (Node.js) ─────────────────────────┤
-OpenClaw → Plugin (openclaw/) → homekit-cli ─────────────────────────┤
+OpenClaw → Plugin (openclaw/) → homeclaw-cli ────────────────────────┤
                                                                      ▼
-                                              /tmp/homekit-bridge.sock (JSON newline-delimited)
+                                              /tmp/homeclaw.sock (JSON newline-delimited)
                                                                      │
                                               HomeKitHelper (Mac Catalyst UIKit app, headless)
                                                 ├── HMHomeManager (requires @MainActor)
                                                 ├── HomeKit device discovery & control
                                                 └── Unix socket server (GCD-based)
 
-homekit-mcp (SPM, SwiftUI menu bar app)
+homeclaw (SPM, SwiftUI menu bar app)
   ├── Menu bar UI + Settings window
   ├── HelperManager (launches & monitors HomeKitHelper)
   └── Unix socket client (HomeKitClient)
 ```
 
-**Why two processes?** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app (`homekit-mcp`) handles UI and helper lifecycle; the helper (`HomeKitHelper`) handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
+**Why two processes?** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app (`homeclaw`) handles UI and helper lifecycle; the helper (`HomeKitHelper`) handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
 
-**Note:** The HTTP MCP server (port 9090, bearer token auth) has been disabled. The implementation is preserved in `Sources/homekit-mcp/MCP/_disabled/` and `Sources/homekit-mcp/Shared/_disabled/` for reference but is not compiled. All MCP clients now use the stdio server or CLI.
+**Note:** The HTTP MCP server (port 9090, bearer token auth) has been disabled. The implementation is preserved in `Sources/homeclaw/MCP/_disabled/` and `Sources/homeclaw/Shared/_disabled/` for reference but is not compiled. All MCP clients now use the stdio server or CLI.
 
 ## Project Structure
 
 ```
 Sources/
-  homekit-mcp/           # Main app (SPM executable)
+  homeclaw/              # Main app (SPM executable)
     App/                 # SwiftUI app entry, AppDelegate, HelperManager
     MCP/                 # (empty — HTTP server moved to _disabled/)
     MCP/_disabled/       # Preserved HTTP MCP server code (not compiled)
@@ -38,7 +38,7 @@ Sources/
     Views/               # MenuBarView, SettingsView
     Shared/              # AppConfig, Logger
     Shared/_disabled/    # Preserved KeychainManager (not compiled)
-  homekit-cli/           # CLI tool (SPM executable)
+  homeclaw-cli/          # CLI tool (SPM executable)
     Commands/            # list, get, set, search, scenes, status, config, device-map
     Commands/_disabled/  # Preserved token command (not compiled)
     SocketClient.swift   # Direct socket communication
@@ -49,15 +49,15 @@ Sources/
     AccessoryModel.swift      # JSON serialization models
 Resources/               # Info.plist, entitlements, app icons
 scripts/build.sh         # Build & install script
-mcp-server/              # Node.js stdio MCP server (wraps homekit-cli)
+mcp-server/              # Node.js stdio MCP server (wraps homeclaw-cli)
 openclaw/                # HomeClaw — OpenClaw plugin
   openclaw.plugin.json   # Plugin manifest (configurable binDir)
   src/index.ts           # Plugin entry point
   skills/homekit/        # HomeKit skill definition
 
 App bundle layout (after build):
-  Contents/MacOS/homekit-mcp     # Main app executable
-  Contents/MacOS/homekit-cli     # Bundled CLI binary
+  Contents/MacOS/homeclaw        # Main app executable
+  Contents/MacOS/homeclaw-cli    # Bundled CLI binary
   Contents/Helpers/HomeKitHelper.app  # Catalyst helper
   Contents/Resources/mcp-server.js    # Node.js stdio MCP server
   Contents/Resources/openclaw/        # Bundled OpenClaw plugin files
@@ -66,7 +66,7 @@ App bundle layout (after build):
 ## Build System
 
 Three build systems:
-- **SPM** (`swift build`): Builds `homekit-mcp` and `homekit-cli`
+- **SPM** (`swift build`): Builds `homeclaw` and `homeclaw-cli`
 - **Xcode** (`xcodebuild`): Builds `HomeKitHelper` as Mac Catalyst app
 - **npm** (esbuild): Builds `mcp-server` Node.js MCP server
 
@@ -94,13 +94,13 @@ cd Sources/HomeKitHelper && xcodegen
 ```bash
 # Build and run from build dir (no install)
 scripts/build.sh --debug
-open .build/app/HomeKit\ Bridge.app
+open .build/app/HomeClaw.app
 
 # Iterate on SPM code only (skip slow Catalyst build)
 scripts/build.sh --debug --skip-helper
 
 # Test HomeKit connection over the socket
-echo '{"command":"status"}' | nc -U /tmp/homekit-bridge.sock
+echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 ```
 
 ## Critical: Entitlements & Distribution
@@ -131,7 +131,7 @@ The build script does **not** re-sign HomeKitHelper. Xcode automatic signing pro
 
 **Do NOT re-sign the helper.** Xcode embeds identity entitlements (`application-identifier`, `com.apple.developer.team-identifier`) from the provisioning profile. Plain `codesign --entitlements FILE` does a full replacement — signing with just the HomeKit key strips identity keys, causing launchd error 163.
 
-Verify with: `codesign -d --entitlements :- "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app"`
+Verify with: `codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"`
 
 ### For other developers
 
@@ -155,28 +155,28 @@ Xcode automatic signing creates the required provisioning profile for the develo
 
 | Setting | Location | Default |
 |---------|----------|---------|
-| Device filter | `~/.config/homekit-bridge/config.json` | `"accessoryFilterMode": "all"` |
-| Default home | `~/.config/homekit-bridge/config.json` | First home |
-| Socket path | Hardcoded | `/tmp/homekit-bridge.sock` |
+| Device filter | `~/.config/homeclaw/config.json` | `"accessoryFilterMode": "all"` |
+| Default home | `~/.config/homeclaw/config.json` | First home |
+| Socket path | Hardcoded | `/tmp/homeclaw.sock` |
 
 ## MCP Tools
 
-The stdio MCP server (`mcp-server/`) wraps `homekit-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, and search. Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
+The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, and search. Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
 
 ## Concurrency Model
 
 - **HomeKitHelper**: `HomeKitManager` is `@MainActor` (required by `HMHomeManager`). Socket server uses GCD with semaphore+ResponseBox to bridge to MainActor.
-- **homekit-mcp**: SwiftUI views use `@State` + `Task` for async data loading.
+- **homeclaw**: SwiftUI views use `@State` + `Task` for async data loading.
 - Swift 6 strict concurrency is enabled (`SWIFT_STRICT_CONCURRENCY: complete`).
 
 ## Debugging
 
 ```bash
 # Check if helper is running and HomeKit is ready
-echo '{"command":"status"}' | nc -U /tmp/homekit-bridge.sock
+echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 
 # Check entitlements on installed app
-codesign -d --entitlements - "/Applications/HomeKit Bridge.app/Contents/Helpers/HomeKitHelper.app"
+codesign -d --entitlements - "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
 
 # Check TCC (privacy) permissions
 sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db \
@@ -217,6 +217,6 @@ For manual diagnosis:
 ## CI
 
 GitHub Actions (`.github/workflows/tests.yml`) runs on `macos-26`:
-- Builds `homekit-mcp` and `homekit-cli` via SPM
+- Builds `homeclaw` and `homeclaw-cli` via SPM
 - Builds `mcp-server` (Node.js) on ubuntu-latest
 - HomeKitHelper is NOT built in CI (requires signing identity + provisioning)

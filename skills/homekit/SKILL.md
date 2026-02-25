@@ -1,6 +1,6 @@
 ---
 description: |
-  Control HomeKit smart home accessories via HomeKit Bridge MCP tools.
+  Control HomeKit smart home accessories via HomeClaw MCP tools.
   Also includes reference data for accessory categories, characteristics, and value formats.
   This skill should be used when the user wants to:
   - Turn lights on or off, set brightness, or change color temperature
@@ -9,17 +9,17 @@ description: |
   - Run a HomeKit scene like "Good Morning" or "Movie Time"
   - Check which devices are on, off, or unreachable
   - List accessories in a room or search by name
-  - Check HomeKit Bridge status or configure default home
+  - Check HomeClaw status or configure default home
   - Look up characteristic names, value types, ranges, or enum mappings
   Example triggers: "turn on the kitchen lights", "lock all doors",
   "set the thermostat to 72", "run the goodnight scene", "what lights are on",
-  "list devices in the living room", "is the HomeKit bridge running",
+  "list devices in the living room", "is HomeClaw running",
   "what characteristics does a thermostat have", "what are the lock state values"
 ---
 
 # HomeKit Smart Home Control
 
-HomeKit Bridge exposes Apple HomeKit accessories via MCP tools. Use the `homekit_*` tools as the interface for all HomeKit operations.
+HomeClaw exposes Apple HomeKit accessories via MCP tools. Use the `homekit_*` tools as the interface for all HomeKit operations.
 
 ## MCP Tools
 
@@ -135,7 +135,7 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 | Error | Cause | Resolution |
 |-------|-------|------------|
-| "HomeKit Bridge is not running" | App not launched or socket missing | Launch HomeKit Bridge.app |
+| "HomeClaw is not running" | App not launched or socket missing | Launch HomeClaw.app |
 | "Connection failed" | Socket exists but app not responding | Restart the app |
 | 0 homes / `ready: false` | Missing entitlement or iCloud not signed in | Check codesign entitlements and iCloud |
 | "Accessory not found" | Wrong UUID or name | Use `search` to find the correct identifier |
@@ -144,7 +144,7 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 ## Configuration
 
-Config file: `~/.config/homekit-bridge/config.json`
+Config file: `~/.config/homeclaw/config.json`
 
 | Setting | Values | Default |
 |---------|--------|---------|

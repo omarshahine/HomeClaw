@@ -20677,7 +20677,7 @@ var StdioServerTransport = class {
 var tools = [
   {
     name: "homekit_status",
-    description: "Check HomeKit Bridge status \u2014 shows connectivity, home count, and accessory count.",
+    description: "Check HomeClaw status \u2014 shows connectivity, home count, and accessory count.",
     inputSchema: {
       type: "object",
       properties: {}
@@ -20775,7 +20775,7 @@ var tools = [
   },
   {
     name: "homekit_config",
-    description: "View or update HomeKit Bridge configuration. Set a default home, or configure device filtering to control which accessories are exposed.",
+    description: "View or update HomeClaw configuration. Set a default home, or configure device filtering to control which accessories are exposed.",
     inputSchema: {
       type: "object",
       properties: {
@@ -20805,7 +20805,7 @@ var tools = [
 
 // lib/socket-client.js
 import { createConnection } from "node:net";
-var SOCKET_PATH = "/tmp/homekit-bridge.sock";
+var SOCKET_PATH = "/tmp/homeclaw.sock";
 var TIMEOUT_MS = 3e4;
 function sendCommand(command, args = {}) {
   return new Promise((resolve, reject) => {
@@ -20820,7 +20820,7 @@ function sendCommand(command, args = {}) {
       try {
         const parsed = JSON.parse(data);
         if (!parsed.success) {
-          reject(new Error(parsed.error || "Unknown error from HomeKit Bridge"));
+          reject(new Error(parsed.error || "Unknown error from HomeClaw"));
         } else {
           resolve(parsed.data);
         }
@@ -20831,11 +20831,11 @@ function sendCommand(command, args = {}) {
     socket.on("error", (err) => {
       if (err.code === "ENOENT") {
         reject(new Error(
-          "HomeKit Bridge is not running (socket not found at " + SOCKET_PATH + "). Launch HomeKit Bridge.app first."
+          "HomeClaw is not running (socket not found at " + SOCKET_PATH + "). Launch HomeClaw.app first."
         ));
       } else if (err.code === "ECONNREFUSED") {
         reject(new Error(
-          "HomeKit Bridge socket exists but connection was refused. Try restarting the app."
+          "HomeClaw socket exists but connection was refused. Try restarting the app."
         ));
       } else {
         reject(err);
@@ -20843,7 +20843,7 @@ function sendCommand(command, args = {}) {
     });
     socket.setTimeout(TIMEOUT_MS, () => {
       socket.destroy();
-      reject(new Error("HomeKit Bridge request timed out after " + TIMEOUT_MS / 1e3 + "s"));
+      reject(new Error("HomeClaw request timed out after " + TIMEOUT_MS / 1e3 + "s"));
     });
   });
 }
@@ -20945,7 +20945,7 @@ async function handleConfig(args) {
 
 // mcp-server/server.js
 var server = new Server(
-  { name: "homekit-bridge", version: "0.0.1" },
+  { name: "homeclaw", version: "0.0.1" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

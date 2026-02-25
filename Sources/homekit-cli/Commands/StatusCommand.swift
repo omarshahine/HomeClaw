@@ -3,7 +3,7 @@ import Foundation
 
 struct Status: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Show HomeKit Bridge status"
+        abstract: "Show HomeClaw status"
     )
 
     @Flag(name: .long, help: "Output raw JSON")
@@ -31,7 +31,7 @@ struct Status: ParsableCommand {
         let accessories = status["accessories"] as? Int ?? 0
         let version = status["version"] as? String ?? "?"
 
-        print("HomeKit Bridge v\(version)")
+        print("HomeClaw v\(version)")
         print("  HomeKit:     \(ready)")
         print("  Homes:       \(homes)")
         print("  Accessories: \(accessories)")

@@ -30,7 +30,7 @@ final class CharacteristicCache: @unchecked Sendable {
 
     private init() {
         let home = URL(fileURLWithPath: NSHomeDirectory())
-        configDir = home.appendingPathComponent(".config/homekit-bridge")
+        configDir = home.appendingPathComponent(".config/homeclaw")
         cacheFile = configDir.appendingPathComponent("cache.json")
 
         if let fileData = try? Data(contentsOf: cacheFile),

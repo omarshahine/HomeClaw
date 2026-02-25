@@ -1,7 +1,7 @@
 import Foundation
 
 /// Persistent configuration for the HomeKit helper.
-/// Stored as JSON at ~/.config/homekit-bridge/config.json.
+/// Stored as JSON at ~/.config/homeclaw/config.json.
 final class HelperConfig: @unchecked Sendable {
     static let shared = HelperConfig()
 
@@ -18,7 +18,7 @@ final class HelperConfig: @unchecked Sendable {
 
     private init() {
         let home = URL(fileURLWithPath: NSHomeDirectory())
-        configDir = home.appendingPathComponent(".config/homekit-bridge")
+        configDir = home.appendingPathComponent(".config/homeclaw")
         configFile = configDir.appendingPathComponent("config.json")
 
         // Load existing config or start with defaults

@@ -1,11 +1,11 @@
 {
-  "name": "homekit-bridge",
+  "name": "homeclaw",
   "owner": {
     "name": "Omar Shahine"
   },
   "plugins": [
     {
-      "name": "homekit-bridge",
+      "name": "homeclaw",
       "source": "./",
       "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
       "version": "0.0.1",

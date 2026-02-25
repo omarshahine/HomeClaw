@@ -3,7 +3,7 @@ import Foundation
 
 struct Config: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "View or update HomeKit Bridge configuration"
+        abstract: "View or update HomeClaw configuration"
     )
 
     @Option(name: .long, help: "Set active home by name or UUID")
@@ -114,8 +114,8 @@ struct Config: ParsableCommand {
         let totalCount = data["total_accessories"] as? Int ?? 0
         let filteredCount = data["filtered_accessories"] as? Int ?? 0
 
-        print("HomeKit Bridge Configuration")
-        print("  Config file:   ~/.config/homekit-bridge/config.json")
+        print("HomeClaw Configuration")
+        print("  Config file:   ~/.config/homeclaw/config.json")
 
         // Resolve active home name from available homes
         let homes = data["available_homes"] as? [[String: Any]] ?? []

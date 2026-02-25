@@ -1,8 +1,8 @@
 import Foundation
 
-/// Connects to the HomeKit Bridge app via Unix domain socket.
+/// Connects to the HomeClaw app via Unix domain socket.
 enum SocketClient {
-    static let socketPath = "/tmp/homekit-bridge.sock"
+    static let socketPath = "/tmp/homeclaw.sock"
 
     struct CLIRequest: Codable {
         let command: String
@@ -23,7 +23,7 @@ enum SocketClient {
         var errorDescription: String? {
             switch self {
             case .appNotRunning:
-                "HomeKit Bridge is not running. Launch the app first."
+                "HomeClaw is not running. Launch the app first."
             case .connectionFailed(let reason):
                 "Connection failed: \(reason)"
             case .invalidResponse:

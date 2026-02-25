@@ -24,7 +24,7 @@ targets:
       - path: ../../Resources/HomeClaw.icns
         buildPhase: resources
     settings:
-      PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homekit-bridge.helper
+      PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw.helper
       INFOPLIST_FILE: Info.plist
       CODE_SIGN_ENTITLEMENTS: HomeKitHelper.entitlements
       CODE_SIGN_STYLE: Automatic

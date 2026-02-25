@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>homekit-mcp</string>
+    <string>homeclaw</string>
     <key>CFBundleIdentifier</key>
-    <string>com.shahine.homekit-bridge</string>
+    <string>com.shahine.homeclaw</string>
     <key>CFBundleName</key>
-    <string>HomeKit Bridge</string>
+    <string>HomeClaw</string>
     <key>CFBundleDisplayName</key>
-    <string>HomeKit Bridge</string>
+    <string>HomeClaw</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
@@ -21,7 +21,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSHomeKitUsageDescription</key>
-    <string>HomeKit Bridge needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
+    <string>HomeClaw needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
 </dict>

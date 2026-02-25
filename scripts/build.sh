@@ -1,12 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# HomeKit Bridge — Build & Install Script
+# HomeClaw — Build & Install Script
 # Assembles a proper .app bundle from SPM + Xcode Catalyst builds,
 # code-signs everything, and optionally installs to /Applications.
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="HomeKit Bridge"
+APP_NAME="HomeClaw"
 BUNDLE_DIR="$PROJECT_ROOT/.build/app"
 APP_BUNDLE="$BUNDLE_DIR/$APP_NAME.app"
 HELPER_PROJECT="$PROJECT_ROOT/Sources/HomeKitHelper"
@@ -104,7 +104,7 @@ if [[ "$BUILD_CONFIG" == "debug" ]]; then
 fi
 
 # Entitlements paths (used by both build validation and code signing)
-MAIN_ENTITLEMENTS="$PROJECT_ROOT/Resources/HomeKitBridge.entitlements"
+MAIN_ENTITLEMENTS="$PROJECT_ROOT/Resources/HomeClaw.entitlements"
 HELPER_ENTITLEMENTS="$HELPER_PROJECT/HomeKitHelper.entitlements"
 
 # Map SPM config flag
@@ -155,19 +155,19 @@ fi
 
 # Phase 1: Build SPM targets
 next_step
-step "$CURRENT_STEP" "$TOTAL_STEPS" "Building homekit-mcp ($BUILD_CONFIG)"
-if swift build $SPM_CONFIG_FLAG --package-path "$PROJECT_ROOT" --product homekit-mcp 2>/dev/null; then
+step "$CURRENT_STEP" "$TOTAL_STEPS" "Building homeclaw ($BUILD_CONFIG)"
+if swift build $SPM_CONFIG_FLAG --package-path "$PROJECT_ROOT" --product homeclaw 2>/dev/null; then
     step_done
 else
-    step_fail "swift build --product homekit-mcp failed"
+    step_fail "swift build --product homeclaw failed"
 fi
 
 next_step
-step "$CURRENT_STEP" "$TOTAL_STEPS" "Building homekit-cli ($BUILD_CONFIG)"
-if swift build $SPM_CONFIG_FLAG --package-path "$PROJECT_ROOT" --product homekit-cli 2>/dev/null; then
+step "$CURRENT_STEP" "$TOTAL_STEPS" "Building homeclaw-cli ($BUILD_CONFIG)"
+if swift build $SPM_CONFIG_FLAG --package-path "$PROJECT_ROOT" --product homeclaw-cli 2>/dev/null; then
     step_done
 else
-    step_fail "swift build --product homekit-cli failed"
+    step_fail "swift build --product homeclaw-cli failed"
 fi
 
 # Phase 2: Build HomeKitHelper (Mac Catalyst)
@@ -250,8 +250,8 @@ if [[ -d "$OPENCLAW_SRC" ]]; then
 fi
 
 # Copy main executable and CLI binary
-cp "$SPM_BUILD_DIR/homekit-mcp" "$APP_BUNDLE/Contents/MacOS/homekit-mcp"
-cp "$SPM_BUILD_DIR/homekit-cli" "$APP_BUNDLE/Contents/MacOS/homekit-cli"
+cp "$SPM_BUILD_DIR/homeclaw" "$APP_BUNDLE/Contents/MacOS/homeclaw"
+cp "$SPM_BUILD_DIR/homeclaw-cli" "$APP_BUNDLE/Contents/MacOS/homeclaw-cli"
 
 # Copy HomeKitHelper.app (entire bundle)
 if ! $SKIP_HELPER; then
@@ -293,10 +293,10 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
 
     codesign "${CODESIGN_FLAGS[@]}" \
         --entitlements "$MAIN_ENTITLEMENTS" \
-        "$APP_BUNDLE/Contents/MacOS/homekit-mcp" 2>/dev/null
+        "$APP_BUNDLE/Contents/MacOS/homeclaw" 2>/dev/null
 
     codesign "${CODESIGN_FLAGS[@]}" \
-        "$APP_BUNDLE/Contents/MacOS/homekit-cli" 2>/dev/null
+        "$APP_BUNDLE/Contents/MacOS/homeclaw-cli" 2>/dev/null
 
     codesign "${CODESIGN_FLAGS[@]}" \
         --entitlements "$MAIN_ENTITLEMENTS" \
@@ -338,12 +338,12 @@ if $DO_INSTALL; then
     echo "  Installed: /Applications/$APP_NAME.app"
 
     # Symlink CLI to /usr/local/bin (points to bundled binary in the app)
-    BUNDLED_CLI="/Applications/$APP_NAME.app/Contents/MacOS/homekit-cli"
-    if ln -sf "$BUNDLED_CLI" /usr/local/bin/homekit-cli 2>/dev/null; then
-        echo "  CLI linked: /usr/local/bin/homekit-cli -> $BUNDLED_CLI"
+    BUNDLED_CLI="/Applications/$APP_NAME.app/Contents/MacOS/homeclaw-cli"
+    if ln -sf "$BUNDLED_CLI" /usr/local/bin/homeclaw-cli 2>/dev/null; then
+        echo "  CLI linked: /usr/local/bin/homeclaw-cli -> $BUNDLED_CLI"
     else
         echo "  CLI symlink needs elevated permissions. Run:"
-        echo "    sudo ln -sf '$BUNDLED_CLI' /usr/local/bin/homekit-cli"
+        echo "    sudo ln -sf '$BUNDLED_CLI' /usr/local/bin/homeclaw-cli"
     fi
 
     echo ""
