@@ -337,13 +337,18 @@ if $DO_INSTALL; then
     cp -R "$APP_BUNDLE" "/Applications/$APP_NAME.app"
     echo "  Installed: /Applications/$APP_NAME.app"
 
-    # Symlink CLI to /usr/local/bin (points to bundled binary in the app)
+    # Symlink CLI into Homebrew bin (Apple Silicon: /opt/homebrew/bin, Intel: /usr/local/bin)
     BUNDLED_CLI="/Applications/$APP_NAME.app/Contents/MacOS/homeclaw-cli"
-    if ln -sf "$BUNDLED_CLI" /usr/local/bin/homeclaw-cli 2>/dev/null; then
-        echo "  CLI linked: /usr/local/bin/homeclaw-cli -> $BUNDLED_CLI"
+    if [[ "$(uname -m)" == "arm64" ]]; then
+        CLI_BIN_DIR="/opt/homebrew/bin"
+    else
+        CLI_BIN_DIR="/usr/local/bin"
+    fi
+    if ln -sf "$BUNDLED_CLI" "$CLI_BIN_DIR/homeclaw-cli" 2>/dev/null; then
+        echo "  CLI linked: $CLI_BIN_DIR/homeclaw-cli -> $BUNDLED_CLI"
     else
         echo "  CLI symlink needs elevated permissions. Run:"
-        echo "    sudo ln -sf '$BUNDLED_CLI' /usr/local/bin/homeclaw-cli"
+        echo "    sudo ln -sf '$BUNDLED_CLI' '$CLI_BIN_DIR/homeclaw-cli'"
     fi
 
     echo ""

@@ -188,7 +188,7 @@ After installing, verify Claude can reach HomeKit:
 
 ## Using with OpenClaw
 
-HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers HomeKit tools on the gateway.
+HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers a HomeKit skill on the gateway. The skill calls `homeclaw-cli` by name, so it must be in your PATH.
 
 ### Same-Mac Install (Recommended)
 
@@ -196,14 +196,24 @@ If HomeClaw and OpenClaw run on the same Mac, use the one-click installer:
 
 1. Open **Settings > Integrations** and click **Install** in the OpenClaw section.
 
+This handles all four steps automatically: installs the plugin, enables it, symlinks `homeclaw-cli` into your PATH, and restarts the gateway.
+
 Or from the terminal:
 
 ```bash
+# 1. Install the plugin from the bundled files
 openclaw plugins install "/Applications/HomeClaw.app/Contents/Resources/openclaw/"
 openclaw plugins enable homeclaw
-```
 
-The plugin files and `homeclaw-cli` binary are bundled inside the app -- no git clone needed.
+# 2. Symlink the CLI into PATH (the skill calls homeclaw-cli by name)
+# Apple Silicon (M1/M2/M3/M4):
+ln -sf '/Applications/HomeClaw.app/Contents/MacOS/homeclaw-cli' /opt/homebrew/bin/homeclaw-cli
+# Intel:
+ln -sf '/Applications/HomeClaw.app/Contents/MacOS/homeclaw-cli' /usr/local/bin/homeclaw-cli
+
+# 3. Restart the gateway to load the plugin
+openclaw gateway restart
+```
 
 ### Remote Gateway
 
@@ -216,11 +226,15 @@ git clone https://github.com/omarshahine/HomeClaw.git ~/GitHub/HomeClaw
 # Install the plugin
 openclaw plugins install ~/GitHub/HomeClaw/openclaw
 openclaw plugins enable homeclaw
+
+# Symlink the CLI into PATH
+ln -sf /path/to/homeclaw-cli /opt/homebrew/bin/homeclaw-cli
+
+# Restart the gateway
+openclaw gateway restart
 ```
 
-The plugin discovers `homeclaw-cli` via standard paths (`/Applications/HomeClaw.app/Contents/MacOS/homeclaw-cli`, `/usr/local/bin/homeclaw-cli`, `~/.local/bin/`, build output directories).
-
-> **Note:** The `homeclaw-cli` binary must be accessible from the gateway, and the HomeClaw app must be running on a Mac reachable via the Unix socket at `/tmp/homeclaw.sock`.
+> **Note:** The `homeclaw-cli` binary must be accessible from the gateway (in PATH), and the HomeClaw app must be running on a Mac reachable via the Unix socket at `/tmp/homeclaw.sock`.
 
 ## Supported Accessories
 

@@ -49,7 +49,19 @@ struct IntegrationsSettingsView: View {
     private static let pluginPrefix = "homeclaw@"
     private static let githubRepo = "omarshahine/HomeClaw"
     private static let openClawPluginID = "homeclaw"
-    private static let cliSymlinkPath = "/usr/local/bin/homeclaw-cli"
+    /// Homebrew bin directory — `/opt/homebrew/bin` on Apple Silicon, `/usr/local/bin` on Intel.
+    private static var homebrewBinDir: String {
+        #if arch(arm64)
+        return "/opt/homebrew/bin"
+        #else
+        return "/usr/local/bin"
+        #endif
+    }
+
+    private static var cliSymlinkPath: String {
+        homebrewBinDir + "/homeclaw-cli"
+    }
+
     private static var bundledCLIPath: String {
         Bundle.main.bundlePath + "/Contents/MacOS/homeclaw-cli"
     }
@@ -303,7 +315,7 @@ struct IntegrationsSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     } else {
-                        Text("Installs the bundled HomeClaw plugin into OpenClaw.")
+                        Text("Installs the plugin, symlinks homeclaw-cli into PATH, and restarts the gateway.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -340,6 +352,8 @@ struct IntegrationsSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("openclaw plugins install <path-to-openclaw-dir>")
                 Text("openclaw plugins enable homeclaw")
+                Text("ln -sf /path/to/homeclaw-cli /opt/homebrew/bin/homeclaw-cli")
+                Text("openclaw gateway restart")
             }
             .font(.system(.caption, design: .monospaced))
             .foregroundStyle(.secondary)
@@ -569,10 +583,18 @@ struct IntegrationsSettingsView: View {
             openclaw plugins install "\(bundledPath)"
             openclaw plugins enable homeclaw
 
+            # Symlink the CLI into PATH (the skill calls homeclaw-cli by name):
+            ln -sf '/Applications/HomeClaw.app/Contents/MacOS/homeclaw-cli' '\(Self.cliSymlinkPath)'
+
+            # Restart the gateway to load the plugin:
+            openclaw gateway restart
+
             # Or for a remote gateway, clone the repo:
             git clone https://github.com/\(Self.githubRepo).git ~/GitHub/HomeClaw
             openclaw plugins install ~/GitHub/HomeClaw/openclaw
             openclaw plugins enable homeclaw
+            ln -sf /path/to/homeclaw-cli /opt/homebrew/bin/homeclaw-cli
+            openclaw gateway restart
             """
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(instructions, forType: .string)
@@ -590,22 +612,42 @@ struct IntegrationsSettingsView: View {
             return
         }
 
-        // Run: openclaw plugins install <bundledPlugin>
+        // Step 1: openclaw plugins install <bundledPlugin>
         let installResult = runProcess(cliPath, arguments: ["plugins", "install", pluginPath])
         guard installResult.success else {
             showStatus("Install failed: \(installResult.output)", isError: true)
             return
         }
 
-        // Run: openclaw plugins enable homeclaw
+        // Step 2: openclaw plugins enable homeclaw
         let enableResult = runProcess(cliPath, arguments: ["plugins", "enable", Self.openClawPluginID])
-        if enableResult.success {
-            openClawStatus = .installed
-            showStatus("HomeClaw plugin installed in OpenClaw", isError: false)
-            AppLogger.app.info("Installed OpenClaw plugin from bundled path")
-        } else {
+        guard enableResult.success else {
             showStatus("Enable failed: \(enableResult.output)", isError: true)
+            return
         }
+
+        // Step 3: Symlink homeclaw-cli into PATH so the skill can find it.
+        // The skill references `homeclaw-cli` by name, so it must be in PATH.
+        let symlinkScript = """
+            do shell script "ln -sf '\(Self.bundledCLIPath)' '\(Self.cliSymlinkPath)'" \
+            with administrator privileges
+            """
+        if runAppleScript(symlinkScript) {
+            cliStatus = .installed
+            AppLogger.app.info("Installed CLI symlink at \(Self.cliSymlinkPath) for OpenClaw")
+        } else {
+            AppLogger.app.warning("CLI symlink skipped — user cancelled admin prompt")
+        }
+
+        // Step 4: Restart gateway so the plugin loads
+        let restartResult = runProcess(cliPath, arguments: ["gateway", "restart"])
+        if !restartResult.success {
+            AppLogger.app.warning("Gateway restart failed: \(restartResult.output)")
+        }
+
+        openClawStatus = .installed
+        showStatus("HomeClaw plugin installed in OpenClaw", isError: false)
+        AppLogger.app.info("Installed OpenClaw plugin from bundled path")
     }
 
     private func removeOpenClawPlugin() {
