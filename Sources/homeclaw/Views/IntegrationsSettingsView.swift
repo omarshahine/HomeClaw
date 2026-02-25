@@ -739,10 +739,20 @@ struct IntegrationsSettingsView: View {
     }
 
     /// Runs a process synchronously and returns the combined output.
+    /// Extends PATH with Homebrew bin directories so that scripts using
+    /// `#!/usr/bin/env node` (like the openclaw CLI) can find Node.js.
     private func runProcess(_ path: String, arguments: [String]) -> (success: Bool, output: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
+
+        // GUI apps get a minimal PATH. Extend it so child processes
+        // can find node, npm, and other Homebrew-installed tools.
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin"]
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+        process.environment = env
 
         let pipe = Pipe()
         process.standardOutput = pipe
