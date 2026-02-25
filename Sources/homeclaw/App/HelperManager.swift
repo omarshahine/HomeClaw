@@ -112,16 +112,19 @@ final class HelperManager {
 
         resolvedHelperPath = helperPath
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", helperPath, "--args", "--background"]
+        let helperURL = URL(fileURLWithPath: helperPath)
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false
 
-        do {
-            try process.run()
-            AppLogger.helper.info("HomeClaw helper launched from \(helperPath)")
-        } catch {
-            AppLogger.helper.error("Failed to launch HomeClaw helper: \(error.localizedDescription)")
-            state = .helperDown
+        NSWorkspace.shared.openApplication(at: helperURL, configuration: config) { app, error in
+            if let error {
+                Task { @MainActor in
+                    AppLogger.helper.error("Failed to launch HomeClaw helper: \(error.localizedDescription)")
+                    self.state = .helperDown
+                }
+            } else {
+                AppLogger.helper.info("HomeClaw helper launched from \(helperPath)")
+            }
         }
     }
 
@@ -129,16 +132,15 @@ final class HelperManager {
         // Remove stale socket so health checks fail fast during restart
         try? FileManager.default.removeItem(atPath: AppConfig.socketPath)
 
-        // Find and terminate the actual HomeClawHelper process.
-        // We can't hold a Process reference because `open -a` returns immediately.
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        task.arguments = ["-f", "HomeClawHelper"]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try? task.run()
-        task.waitUntilExit()
-        AppLogger.helper.info("Sent kill signal to HomeClawHelper")
+        // Find and terminate the actual HomeClawHelper process via NSRunningApplication.
+        // This is sandbox-safe — no shell commands needed.
+        let helpers = NSRunningApplication.runningApplications(
+            withBundleIdentifier: "com.shahine.homeclaw.helper"
+        )
+        for helper in helpers {
+            helper.terminate()
+        }
+        AppLogger.helper.info("Sent terminate signal to \(helpers.count) HomeClawHelper instance(s)")
     }
 
     // MARK: - Health Check Loop
@@ -190,13 +192,17 @@ final class HelperManager {
             )
 
             if consecutiveFailures >= consecutiveFailureThreshold {
-                // Run diagnostics once to distinguish transient vs permanent failures
+                // Run diagnostics once to distinguish transient vs permanent failures.
+                // Diagnostics use shell commands (codesign, security, system_profiler)
+                // which are unavailable in App Store sandbox builds.
+                #if !APP_STORE
                 if launchDiagnostic == nil, let helperPath = resolvedHelperPath {
                     let path = helperPath
                     launchDiagnostic = await Task.detached {
                         HelperManager.diagnoseLaunchFailure(helperPath: path)
                     }.value
                 }
+                #endif
 
                 if let diagnostic = launchDiagnostic {
                     // Permanent issue — auto-restart won't help
@@ -269,8 +275,11 @@ final class HelperManager {
 
     // MARK: - Launch Diagnostics
 
+    #if !APP_STORE
     /// Diagnoses permanent launch failures (provisioning, code signature, device registration).
     /// Runs synchronous process checks — called from a detached task to avoid blocking the main thread.
+    /// Not available in App Store builds (shell commands are blocked by sandbox, and
+    /// App Store distribution handles signing/provisioning automatically).
     static nonisolated func diagnoseLaunchFailure(helperPath: String) -> String? {
         // Check 1: Provisioning profile must exist for Mac Catalyst apps with restricted entitlements
         let profilePath = helperPath + "/Contents/embedded.provisionprofile"
@@ -380,6 +389,7 @@ final class HelperManager {
 
         return nil
     }
+    #endif
 }
 
 // MARK: - Timeout Helper

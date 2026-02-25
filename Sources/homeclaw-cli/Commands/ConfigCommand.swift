@@ -115,7 +115,7 @@ struct Config: ParsableCommand {
         let filteredCount = data["filtered_accessories"] as? Int ?? 0
 
         print("HomeClaw Configuration")
-        print("  Config file:   ~/.config/homeclaw/config.json")
+        print("  Config file:   ~/Library/Application Support/HomeClaw/config.json")
 
         // Resolve active home name from available homes
         let homes = data["available_homes"] as? [[String: Any]] ?? []

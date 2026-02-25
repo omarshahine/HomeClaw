@@ -14,7 +14,11 @@ struct SettingsView: View {
                 DeviceFilterSettingsView()
             }
             Tab("Integrations", systemImage: "puzzlepiece") {
+                #if APP_STORE
+                AppStoreIntegrationsView()
+                #else
                 IntegrationsSettingsView()
+                #endif
             }
         }
         .frame(width: 550, height: 550)
@@ -436,3 +440,133 @@ private struct DeviceFilterSettingsView: View {
         }
     }
 }
+
+// MARK: - App Store Integrations (sandbox-safe, copy-only)
+
+#if APP_STORE
+private struct AppStoreIntegrationsView: View {
+    @State private var copied: String?
+
+    private static let githubRepo = "omarshahine/HomeClaw"
+
+    private static var bundledCLIPath: String {
+        "/Applications/HomeClaw.app/Contents/MacOS/homeclaw-cli"
+    }
+
+    private static var homebrewBinDir: String {
+        #if arch(arm64)
+        return "/opt/homebrew/bin"
+        #else
+        return "/usr/local/bin"
+        #endif
+    }
+
+    var body: some View {
+        Form {
+            // CLI
+            Section("Command Line") {
+                LabeledContent("Binary") {
+                    Text(Self.bundledCLIPath)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Button("Copy Symlink Command") {
+                    let cmd = "ln -sf '\(Self.bundledCLIPath)' '\(Self.homebrewBinDir)/homeclaw-cli'"
+                    copyToClipboard(cmd, label: "CLI")
+                }
+
+                Text("Run this command in Terminal to add homeclaw-cli to your PATH.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Claude Desktop
+            Section("Claude Desktop") {
+                Button("Copy MCP Config") {
+                    let serverJS = "/Applications/HomeClaw.app/Contents/Resources/mcp-server.js"
+                    let config = """
+                        {
+                          "mcpServers": {
+                            "homeclaw": {
+                              "command": "node",
+                              "args": ["\(serverJS)"]
+                            }
+                          }
+                        }
+                        """
+                    copyToClipboard(config, label: "Claude Desktop")
+                }
+
+                Text("Paste into ~/Library/Application Support/Claude/claude_desktop_config.json")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Claude Code
+            Section("Claude Code") {
+                Button("Copy Install Commands") {
+                    let commands = """
+                        /plugin marketplace add \(Self.githubRepo)
+                        /plugin install homeclaw@homeclaw
+                        """
+                    copyToClipboard(commands, label: "Claude Code")
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Run these commands in Claude Code:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("/plugin marketplace add \(Self.githubRepo)")
+                    Text("/plugin install homeclaw@homeclaw")
+                }
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+
+            // OpenClaw
+            Section("OpenClaw") {
+                Button("Copy Setup Commands") {
+                    let instructions = """
+                        openclaw plugins install "/Applications/HomeClaw.app/Contents/Resources/openclaw"
+                        openclaw plugins enable homeclaw
+                        ln -sf '\(Self.bundledCLIPath)' '\(Self.homebrewBinDir)/homeclaw-cli'
+                        openclaw gateway restart
+                        """
+                    copyToClipboard(instructions, label: "OpenClaw")
+                }
+
+                Text("Run these commands to install the HomeClaw plugin in OpenClaw.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let copied {
+                Section {
+                    Label("\(copied) config copied to clipboard", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                }
+            }
+
+            Section {
+                Text("Integration setup requires running commands in Terminal or the target app. The CLI, MCP server, and OpenClaw plugin are bundled inside the app.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func copyToClipboard(_ text: String, label: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copied = label
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if copied == label { copied = nil }
+        }
+    }
+}
+#endif

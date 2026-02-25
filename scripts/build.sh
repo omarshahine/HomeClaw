@@ -23,6 +23,7 @@ BUILD_CONFIG="release"
 DO_INSTALL=false
 DO_CLEAN=false
 SKIP_HELPER=false
+APP_STORE=false
 
 # ─── Helpers ────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ Options:
   --install       Install to /Applications and symlink CLI
   --clean         Clean build artifacts first
   --skip-helper   Skip building HomeClawHelper (faster iteration)
+  --app-store     Build for Mac App Store (Apple Distribution signing, APP_STORE flag)
   --team-id ID    Apple Developer Team ID (required, or set HOMEKIT_TEAM_ID)
   --help          Show this help
 
@@ -73,6 +75,7 @@ while [[ $# -gt 0 ]]; do
         --install)      DO_INSTALL=true; shift ;;
         --clean)        DO_CLEAN=true; shift ;;
         --skip-helper)  SKIP_HELPER=true; shift ;;
+        --app-store)    APP_STORE=true; shift ;;
         --team-id)      TEAM_ID="$2"; shift 2 ;;
         --help|-h)      usage ;;
         *)              echo "Unknown option: $1"; usage ;;
@@ -109,6 +112,9 @@ HELPER_ENTITLEMENTS="$HELPER_PROJECT/HomeClawHelper.entitlements"
 
 # Map SPM config flag
 SPM_CONFIG_FLAG="-c $BUILD_CONFIG"
+if $APP_STORE; then
+    SPM_CONFIG_FLAG="$SPM_CONFIG_FLAG -Xswiftc -DAPP_STORE"
+fi
 
 # Map xcodebuild configuration name
 XCODE_CONFIG="Release"
@@ -120,7 +126,12 @@ fi
 
 detect_signing_identity() {
     local identity
-    local search_term="Apple Development"
+    local search_term
+    if $APP_STORE; then
+        search_term="Apple Distribution"
+    else
+        search_term="Apple Development"
+    fi
     identity=$(security find-identity -v -p codesigning | grep "$search_term" | head -1 | sed 's/.*"\(.*\)".*/\1/')
     if [[ -z "$identity" ]]; then
         echo "Warning: No $search_term signing identity found. Skipping code signing." >&2
@@ -143,7 +154,11 @@ next_step() { CURRENT_STEP=$((CURRENT_STEP + 1)); }
 # ─── Main ───────────────────────────────────────────────────────────
 
 echo ""
-echo "$(bold "Building $APP_NAME...") ($BUILD_CONFIG) v$MARKETING_VERSION build $BUILD_NUMBER"
+if $APP_STORE; then
+    echo "$(bold "Building $APP_NAME...") ($BUILD_CONFIG, App Store) v$MARKETING_VERSION build $BUILD_NUMBER"
+else
+    echo "$(bold "Building $APP_NAME...") ($BUILD_CONFIG) v$MARKETING_VERSION build $BUILD_NUMBER"
+fi
 echo ""
 
 # Clean if requested
@@ -190,16 +205,26 @@ if ! $SKIP_HELPER; then
         step_fail "HomeKit entitlement missing from $HELPER_ENTITLEMENTS — readValue() will silently fail. Check project.yml entitlements.properties."
     fi
 
+    XCODE_SIGN_ARGS=(
+        DEVELOPMENT_TEAM="$TEAM_ID"
+        MARKETING_VERSION="$MARKETING_VERSION"
+        CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+        ONLY_ACTIVE_ARCH=NO
+    )
+    if $APP_STORE; then
+        XCODE_SIGN_ARGS+=(
+            CODE_SIGN_IDENTITY="Apple Distribution"
+            CODE_SIGN_STYLE=Manual
+        )
+    fi
+
     if xcodebuild -project "$HELPER_PROJECT/HomeClawHelper.xcodeproj" \
         -scheme HomeClawHelper \
         -configuration "$XCODE_CONFIG" \
         -destination 'platform=macOS,variant=Mac Catalyst' \
         -derivedDataPath "$DERIVED_DATA" \
         -allowProvisioningUpdates \
-        DEVELOPMENT_TEAM="$TEAM_ID" \
-        MARKETING_VERSION="$MARKETING_VERSION" \
-        CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-        ONLY_ACTIVE_ARCH=NO \
+        "${XCODE_SIGN_ARGS[@]}" \
         -quiet 2>/dev/null; then
         step_done
     else

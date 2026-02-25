@@ -1,7 +1,11 @@
 import Foundation
 
 /// Persistent configuration for the HomeKit helper.
-/// Stored as JSON at ~/.config/homeclaw/config.json.
+/// Stored as JSON at ~/Library/Application Support/HomeClaw/config.json.
+/// This path is sandbox-safe (accessible without special entitlements).
+///
+/// Migration: If the legacy path (~/.config/homeclaw/config.json) exists
+/// and the new path does not, config is automatically migrated on first launch.
 final class HelperConfig: @unchecked Sendable {
     static let shared = HelperConfig()
 
@@ -16,10 +20,19 @@ final class HelperConfig: @unchecked Sendable {
         var temperatureUnit: String?        // "F" or "C" (nil = auto-detect from locale)
     }
 
+    /// Sandbox-safe config directory under Application Support.
+    static var configDirectory: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        return appSupport.appendingPathComponent("HomeClaw")
+    }
+
     private init() {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
-        configDir = home.appendingPathComponent(".config/homeclaw")
+        configDir = Self.configDirectory
         configFile = configDir.appendingPathComponent("config.json")
+
+        // Migrate from legacy path if needed
+        Self.migrateIfNeeded(to: configDir)
 
         // Load existing config or start with defaults
         if let data = try? Data(contentsOf: configFile),
@@ -98,6 +111,32 @@ final class HelperConfig: @unchecked Sendable {
         }
         dict["temperature_unit"] = temperatureUnit
         return dict
+    }
+
+    /// Migrates config from legacy ~/.config/homeclaw/ to new Application Support path.
+    private static func migrateIfNeeded(to newDir: URL) {
+        let fm = FileManager.default
+        let legacyDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config/homeclaw")
+        let legacyConfig = legacyDir.appendingPathComponent("config.json")
+        let newConfig = newDir.appendingPathComponent("config.json")
+
+        guard fm.fileExists(atPath: legacyConfig.path),
+              !fm.fileExists(atPath: newConfig.path)
+        else { return }
+
+        do {
+            try fm.createDirectory(at: newDir, withIntermediateDirectories: true)
+            try fm.copyItem(at: legacyConfig, to: newConfig)
+
+            // Also migrate cache.json if it exists
+            let legacyCache = legacyDir.appendingPathComponent("cache.json")
+            let newCache = newDir.appendingPathComponent("cache.json")
+            if fm.fileExists(atPath: legacyCache.path), !fm.fileExists(atPath: newCache.path) {
+                try fm.copyItem(at: legacyCache, to: newCache)
+            }
+        } catch {
+            // Migration is best-effort; new defaults will be created
+        }
     }
 
     private func save() {
