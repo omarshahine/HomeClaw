@@ -7,13 +7,13 @@ import UIKit
 /// We set the activation policy to .accessory via the ObjC runtime so no
 /// window or dock icon is ever shown.
 @main
-class HomeKitHelperApp: UIResponder, UIApplicationDelegate {
+class HomeClawHelperApp: UIResponder, UIApplicationDelegate {
 
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        HelperLogger.app.info("HomeKit Helper starting...")
+        HelperLogger.app.info("HomeClaw helper starting...")
 
         // Hide all UI: no dock icon, no window
         #if targetEnvironment(macCatalyst)

@@ -9,7 +9,7 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="HomeClaw"
 BUNDLE_DIR="$PROJECT_ROOT/.build/app"
 APP_BUNDLE="$BUNDLE_DIR/$APP_NAME.app"
-HELPER_PROJECT="$PROJECT_ROOT/Sources/HomeKitHelper"
+HELPER_PROJECT="$PROJECT_ROOT/Sources/HomeClawHelper"
 
 # Load local configuration (Team ID, etc.)
 if [[ -f "$PROJECT_ROOT/.env.local" ]]; then
@@ -54,7 +54,7 @@ Options:
   --debug         Build in debug mode
   --install       Install to /Applications and symlink CLI
   --clean         Clean build artifacts first
-  --skip-helper   Skip building HomeKitHelper (faster iteration)
+  --skip-helper   Skip building HomeClawHelper (faster iteration)
   --team-id ID    Apple Developer Team ID (required, or set HOMEKIT_TEAM_ID)
   --help          Show this help
 
@@ -105,7 +105,7 @@ fi
 
 # Entitlements paths (used by both build validation and code signing)
 MAIN_ENTITLEMENTS="$PROJECT_ROOT/Resources/HomeClaw.entitlements"
-HELPER_ENTITLEMENTS="$HELPER_PROJECT/HomeKitHelper.entitlements"
+HELPER_ENTITLEMENTS="$HELPER_PROJECT/HomeClawHelper.entitlements"
 
 # Map SPM config flag
 SPM_CONFIG_FLAG="-c $BUILD_CONFIG"
@@ -170,17 +170,17 @@ else
     step_fail "swift build --product homeclaw-cli failed"
 fi
 
-# Phase 2: Build HomeKitHelper (Mac Catalyst)
+# Phase 2: Build HomeClawHelper (Mac Catalyst)
 if ! $SKIP_HELPER; then
     next_step
-    step "$CURRENT_STEP" "$TOTAL_STEPS" "Building HomeKitHelper (Catalyst)"
+    step "$CURRENT_STEP" "$TOTAL_STEPS" "Building HomeClawHelper (Catalyst)"
 
     # Ensure xcodeproj exists (regenerate from project.yml if missing)
-    if [[ ! -d "$HELPER_PROJECT/HomeKitHelper.xcodeproj" ]]; then
+    if [[ ! -d "$HELPER_PROJECT/HomeClawHelper.xcodeproj" ]]; then
         if command -v xcodegen &>/dev/null; then
             xcodegen generate --spec "$HELPER_PROJECT/project.yml" --project "$HELPER_PROJECT" 2>/dev/null
         else
-            step_fail "HomeKitHelper.xcodeproj missing and xcodegen not installed. Install with: brew install xcodegen"
+            step_fail "HomeClawHelper.xcodeproj missing and xcodegen not installed. Install with: brew install xcodegen"
         fi
     fi
 
@@ -190,8 +190,8 @@ if ! $SKIP_HELPER; then
         step_fail "HomeKit entitlement missing from $HELPER_ENTITLEMENTS — readValue() will silently fail. Check project.yml entitlements.properties."
     fi
 
-    if xcodebuild -project "$HELPER_PROJECT/HomeKitHelper.xcodeproj" \
-        -scheme HomeKitHelper \
+    if xcodebuild -project "$HELPER_PROJECT/HomeClawHelper.xcodeproj" \
+        -scheme HomeClawHelper \
         -configuration "$XCODE_CONFIG" \
         -destination 'platform=macOS,variant=Mac Catalyst' \
         -derivedDataPath "$DERIVED_DATA" \
@@ -203,7 +203,7 @@ if ! $SKIP_HELPER; then
         -quiet 2>/dev/null; then
         step_done
     else
-        step_fail "xcodebuild HomeKitHelper failed"
+        step_fail "xcodebuild HomeClawHelper failed"
     fi
 fi
 
@@ -253,10 +253,10 @@ fi
 cp "$SPM_BUILD_DIR/homeclaw" "$APP_BUNDLE/Contents/MacOS/homeclaw"
 cp "$SPM_BUILD_DIR/homeclaw-cli" "$APP_BUNDLE/Contents/MacOS/homeclaw-cli"
 
-# Copy HomeKitHelper.app (entire bundle)
+# Copy HomeClawHelper.app (entire bundle)
 if ! $SKIP_HELPER; then
-    if [[ -d "$CATALYST_PRODUCTS/HomeKitHelper.app" ]]; then
-        cp -R "$CATALYST_PRODUCTS/HomeKitHelper.app" "$APP_BUNDLE/Contents/Helpers/HomeKitHelper.app"
+    if [[ -d "$CATALYST_PRODUCTS/HomeClawHelper.app" ]]; then
+        cp -R "$CATALYST_PRODUCTS/HomeClawHelper.app" "$APP_BUNDLE/Contents/Helpers/HomeClawHelper.app"
 
         # IMPORTANT: Do NOT modify the helper's provisioning profile or re-sign it
         # for development builds. Xcode automatic signing embeds a development
@@ -268,7 +268,7 @@ if ! $SKIP_HELPER; then
         # See: https://developer.apple.com/forums/thread/699085
         :  # no-op; Xcode's signing is preserved as-is
     else
-        step_fail "HomeKitHelper.app not found at $CATALYST_PRODUCTS/HomeKitHelper.app"
+        step_fail "HomeClawHelper.app not found at $CATALYST_PRODUCTS/HomeClawHelper.app"
     fi
 fi
 
@@ -287,7 +287,7 @@ if [[ -n "$SIGNING_IDENTITY" ]]; then
 
     CODESIGN_FLAGS=(--force --sign "$SIGNING_IDENTITY")
 
-    # HomeKitHelper: Do NOT re-sign. Xcode automatic signing produces a correctly
+    # HomeClawHelper: Do NOT re-sign. Xcode automatic signing produces a correctly
     # signed helper with HomeKit entitlement + matching provisioning profile.
     # Re-signing would strip the provisioning profile or entitlements.
 

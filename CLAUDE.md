@@ -11,18 +11,18 @@ OpenClaw → Plugin (openclaw/) → homeclaw-cli ──────────�
                                                                      ▼
                                               /tmp/homeclaw.sock (JSON newline-delimited)
                                                                      │
-                                              HomeKitHelper (Mac Catalyst UIKit app, headless)
+                                              HomeClawHelper (Mac Catalyst UIKit app, headless)
                                                 ├── HMHomeManager (requires @MainActor)
                                                 ├── HomeKit device discovery & control
                                                 └── Unix socket server (GCD-based)
 
 homeclaw (SPM, SwiftUI menu bar app)
   ├── Menu bar UI + Settings window
-  ├── HelperManager (launches & monitors HomeKitHelper)
+  ├── HelperManager (launches & monitors HomeClawHelper)
   └── Unix socket client (HomeKitClient)
 ```
 
-**Why two processes?** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app (`homeclaw`) handles UI and helper lifecycle; the helper (`HomeKitHelper`) handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
+**Why two processes?** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement and a valid provisioning profile. Plain Swift CLI/SPM apps cannot access HomeKit. The main app (`homeclaw`) handles UI and helper lifecycle; the helper (`HomeClawHelper`) handles HomeKit. They communicate over a Unix domain socket with JSON newline-delimited messages.
 
 **Note:** The HTTP MCP server (port 9090, bearer token auth) has been disabled. The implementation is preserved in `Sources/homeclaw/MCP/_disabled/` and `Sources/homeclaw/Shared/_disabled/` for reference but is not compiled. All MCP clients now use the stdio server or CLI.
 
@@ -42,7 +42,7 @@ Sources/
     Commands/            # list, get, set, search, scenes, status, config, device-map
     Commands/_disabled/  # Preserved token command (not compiled)
     SocketClient.swift   # Direct socket communication
-  HomeKitHelper/         # Catalyst helper app (Xcode project via XcodeGen)
+  HomeClawHelper/         # Catalyst helper app (Xcode project via XcodeGen)
     HomeKitManager.swift # HMHomeManager wrapper (@MainActor)
     HelperSocketServer.swift  # Unix socket server (GCD)
     CharacteristicMapper.swift # HomeKit type mappings
@@ -58,7 +58,7 @@ openclaw/                # HomeClaw — OpenClaw plugin
 App bundle layout (after build):
   Contents/MacOS/homeclaw        # Main app executable
   Contents/MacOS/homeclaw-cli    # Bundled CLI binary
-  Contents/Helpers/HomeKitHelper.app  # Catalyst helper
+  Contents/Helpers/HomeClawHelper.app  # Catalyst helper
   Contents/Resources/mcp-server.js    # Node.js stdio MCP server
   Contents/Resources/openclaw/        # Bundled OpenClaw plugin files
 ```
@@ -67,7 +67,7 @@ App bundle layout (after build):
 
 Three build systems:
 - **SPM** (`swift build`): Builds `homeclaw` and `homeclaw-cli`
-- **Xcode** (`xcodebuild`): Builds `HomeKitHelper` as Mac Catalyst app
+- **Xcode** (`xcodebuild`): Builds `HomeClawHelper` as Mac Catalyst app
 - **npm** (esbuild): Builds `mcp-server` Node.js MCP server
 
 The `scripts/build.sh` orchestrates SPM + Xcode, assembles the `.app` bundle, and code-signs:
@@ -84,9 +84,9 @@ npm run build:mcp                      # Build Node.js MCP server only
 
 ### XcodeGen
 
-HomeKitHelper uses XcodeGen (`project.yml`) to generate its `.xcodeproj`. The generated `.xcodeproj` is gitignored — regenerate after cloning:
+HomeClawHelper uses XcodeGen (`project.yml`) to generate its `.xcodeproj`. The generated `.xcodeproj` is gitignored — regenerate after cloning:
 ```bash
-cd Sources/HomeKitHelper && xcodegen
+cd Sources/HomeClawHelper && xcodegen
 ```
 
 ### Development Workflow
@@ -117,7 +117,7 @@ Reference: [Apple DTS confirmation](https://developer.apple.com/forums/thread/69
 
 ### HomeKit entitlement file
 
-The HomeKit entitlement **must** be in `Sources/HomeKitHelper/HomeKitHelper.entitlements`:
+The HomeKit entitlement **must** be in `Sources/HomeClawHelper/HomeClawHelper.entitlements`:
 ```xml
 <key>com.apple.developer.homekit</key>
 <true/>
@@ -127,11 +127,11 @@ The HomeKit entitlement **must** be in `Sources/HomeKitHelper/HomeKitHelper.enti
 
 ### How the build script handles signing
 
-The build script does **not** re-sign HomeKitHelper. Xcode automatic signing produces a correctly signed helper with the HomeKit entitlement, identity keys, and embedded provisioning profile. Re-signing would strip these.
+The build script does **not** re-sign HomeClawHelper. Xcode automatic signing produces a correctly signed helper with the HomeKit entitlement, identity keys, and embedded provisioning profile. Re-signing would strip these.
 
 **Do NOT re-sign the helper.** Xcode embeds identity entitlements (`application-identifier`, `com.apple.developer.team-identifier`) from the provisioning profile. Plain `codesign --entitlements FILE` does a full replacement — signing with just the HomeKit key strips identity keys, causing launchd error 163.
 
-Verify with: `codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"`
+Verify with: `codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeClawHelper.app"`
 
 ### For other developers
 
@@ -165,7 +165,7 @@ The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for 
 
 ## Concurrency Model
 
-- **HomeKitHelper**: `HomeKitManager` is `@MainActor` (required by `HMHomeManager`). Socket server uses GCD with semaphore+ResponseBox to bridge to MainActor.
+- **HomeClawHelper**: `HomeKitManager` is `@MainActor` (required by `HMHomeManager`). Socket server uses GCD with semaphore+ResponseBox to bridge to MainActor.
 - **homeclaw**: SwiftUI views use `@State` + `Task` for async data loading.
 - Swift 6 strict concurrency is enabled (`SWIFT_STRICT_CONCURRENCY: complete`).
 
@@ -176,14 +176,14 @@ The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for 
 echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 
 # Check entitlements on installed app
-codesign -d --entitlements - "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
+codesign -d --entitlements - "/Applications/HomeClaw.app/Contents/Helpers/HomeClawHelper.app"
 
 # Check TCC (privacy) permissions
 sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db \
   "SELECT client, auth_value FROM access WHERE service = 'kTCCServiceWillow'"
 
-# View HomeKitHelper logs
-log show --predicate 'process == "HomeKitHelper"' --last 10m --style compact
+# View HomeClawHelper logs
+log show --predicate 'process == "HomeClawHelper"' --last 10m --style compact
 ```
 
 If status shows `ready: false` with 0 homes:
@@ -202,7 +202,7 @@ The app automatically diagnoses permanent launch failures via `HelperManager.dia
 The diagnostic result is stored in `HelperManager.launchDiagnostic` and displayed in the menu bar under "Helper Not Running". When a permanent issue is detected, auto-restart is skipped (it would never succeed). Manual restart clears the diagnostic.
 
 For manual diagnosis:
-1. Verify identity entitlements are present: `codesign -d --entitlements :- .../HomeKitHelper.app` should show `application-identifier` and `com.apple.developer.team-identifier`
+1. Verify identity entitlements are present: `codesign -d --entitlements :- .../HomeClawHelper.app` should show `application-identifier` and `com.apple.developer.team-identifier`
 2. Verify `embedded.provisionprofile` exists in the helper bundle — Mac Catalyst apps with restricted entitlements require it
 3. Ensure the provisioning profile matches the signing identity (Apple Development profile + Apple Development signing, NOT mixed with Developer ID)
 4. Check AMFI logs: `/usr/bin/log show --predicate 'eventMessage CONTAINS "HomeKit"' --last 2m` — look for "unsatisfied entitlements" or "no eligible provisioning profiles"
@@ -219,4 +219,4 @@ For manual diagnosis:
 GitHub Actions (`.github/workflows/tests.yml`) runs on `macos-26`:
 - Builds `homeclaw` and `homeclaw-cli` via SPM
 - Builds `mcp-server` (Node.js) on ubuntu-latest
-- HomeKitHelper is NOT built in CI (requires signing identity + provisioning)
+- HomeClawHelper is NOT built in CI (requires signing identity + provisioning)

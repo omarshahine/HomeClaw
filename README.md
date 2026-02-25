@@ -24,13 +24,13 @@ OpenClaw → Plugin (openclaw/) → homeclaw-cli ──────────�
                                                                      ▼
                                               /tmp/homeclaw.sock
                                                                      │
-                                              HomeKitHelper (Mac Catalyst, headless)
+                                              HomeClawHelper (Mac Catalyst, headless)
                                                 ├── HMHomeManager (Apple HomeKit framework)
                                                 └── Unix socket server
 
 homeclaw (SwiftUI menu bar app)
     ├── Menu bar UI + Settings window
-    ├── HelperManager (launches & monitors HomeKitHelper)
+    ├── HelperManager (launches & monitors HomeClawHelper)
     └── Unix socket client (HomeKitClient)
 ```
 
@@ -57,8 +57,8 @@ cd HomeClaw
 # Configure your Apple Developer Team ID (one-time setup)
 echo "HOMEKIT_TEAM_ID=YOUR_TEAM_ID" > .env.local
 
-# Generate the HomeKitHelper Xcode project
-cd Sources/HomeKitHelper && xcodegen && cd ../..
+# Generate the HomeClawHelper Xcode project
+cd Sources/HomeClawHelper && xcodegen && cd ../..
 
 # Install Node.js dependencies
 npm install
@@ -293,7 +293,7 @@ Config stored at `~/.config/homeclaw/config.json`.
 
 ## Helper Process Management
 
-The HomeKitHelper runs as a background process with automatic lifecycle management:
+The HomeClawHelper runs as a background process with automatic lifecycle management:
 
 - **Health monitoring** -- polls every 30 seconds with 5-second timeout
 - **Auto-restart** -- up to 5 restarts per 15-minute window (budget resets automatically)
@@ -315,7 +315,7 @@ scripts/build.sh --release --install --team-id ABCDE12345
 # Debug build (faster)
 scripts/build.sh --debug
 
-# Skip HomeKitHelper for fast SPM-only iteration
+# Skip HomeClawHelper for fast SPM-only iteration
 scripts/build.sh --debug --skip-helper
 
 # Clean build artifacts first
@@ -381,7 +381,7 @@ Sources/
   homeclaw-cli/             CLI tool (SPM executable)
     Commands/              list, get, set, search, scenes, status, config, device-map
     SocketClient.swift     Direct socket communication
-  HomeKitHelper/           Catalyst helper app (Xcode project via XcodeGen)
+  HomeClawHelper/           Catalyst helper app (Xcode project via XcodeGen)
     HomeKitManager.swift   HMHomeManager wrapper (@MainActor)
     HelperSocketServer.swift   Unix socket server (GCD)
     CharacteristicMapper.swift HomeKit type mappings
@@ -402,10 +402,10 @@ openclaw/                  OpenClaw plugin (HomeClaw)
 echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 
 # Verify HomeKit entitlement on installed app
-codesign -d --entitlements - "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
+codesign -d --entitlements - "/Applications/HomeClaw.app/Contents/Helpers/HomeClawHelper.app"
 
-# View HomeKitHelper logs
-log show --predicate 'process == "HomeKitHelper"' --last 10m --style compact
+# View HomeClawHelper logs
+log show --predicate 'process == "HomeClawHelper"' --last 10m --style compact
 
 # Check TCC (privacy) permissions
 sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db \
@@ -426,14 +426,14 @@ sqlite3 ~/Library/Application\ Support/com.apple.TCC/TCC.db \
 - **Mac Catalyst** for HomeKit framework access
 - **[Swift Argument Parser](https://github.com/apple/swift-argument-parser)** for CLI
 - **Node.js** + **[@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk)** for stdio MCP server
-- **XcodeGen** for HomeKitHelper project generation
+- **XcodeGen** for HomeClawHelper project generation
 - **GCD** + Unix domain sockets for IPC
 
 ## FAQ
 
 ### The helper won't start (error 162, "Launch failed")
 
-This means macOS (AMFI) rejected the HomeKitHelper app at launch. The menu bar app automatically diagnoses the cause and shows it inline — look for the red "Helper Not Running" status with a reason underneath.
+This means macOS (AMFI) rejected the HomeClawHelper app at launch. The menu bar app automatically diagnoses the cause and shows it inline — look for the red "Helper Not Running" status with a reason underneath.
 
 The most common causes:
 
@@ -445,10 +445,10 @@ The most common causes:
 scripts/build.sh --release --install --clean
 ```
 
-**Missing provisioning profile.** If the `embedded.provisionprofile` file is missing from the helper bundle, Xcode automatic signing may have failed silently. Rebuild with `--clean` or open the HomeKitHelper project in Xcode to check signing status:
+**Missing provisioning profile.** If the `embedded.provisionprofile` file is missing from the helper bundle, Xcode automatic signing may have failed silently. Rebuild with `--clean` or open the HomeClawHelper project in Xcode to check signing status:
 
 ```bash
-cd Sources/HomeKitHelper && xcodegen && open HomeKitHelper.xcodeproj
+cd Sources/HomeClawHelper && xcodegen && open HomeClawHelper.xcodeproj
 ```
 
 ### `spctl --assess` says "rejected" — is that a problem?
@@ -471,7 +471,7 @@ Use `scripts/build.sh --clean` when:
 - Switching Apple Developer Team IDs
 - After major Xcode version updates
 - Build fails with signing or entitlement errors
-- HomeKitHelper previously worked but now won't launch (error 162)
+- HomeClawHelper previously worked but now won't launch (error 162)
 - You see "Invalid code signature" in the menu bar diagnostic
 
 The `--clean` flag removes all build artifacts — SPM's `.build/` directory, Xcode derived data, and the assembled app bundle — before building fresh. Without it, stale signed binaries or cached provisioning profiles from a previous team/identity can cause hard-to-debug launch failures.
@@ -483,7 +483,7 @@ The helper is running but can't see any HomeKit data. Check in order:
 1. **iCloud signed in?** HomeKit data lives in iCloud. Open System Settings > Apple Account and verify.
 2. **HomeKit entitlement present?** Run:
    ```bash
-   codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
+   codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeClawHelper.app"
    ```
    You should see `com.apple.developer.homekit` → `true`.
 3. **TCC permission granted?** On first launch, macOS asks for HomeKit access. If you denied it, re-grant in System Settings > Privacy & Security > HomeKit.
@@ -505,17 +505,17 @@ Development-signed apps are tied to registered devices. See [Installing on Addit
 # HomeClaw app logs (includes helper launch diagnostics)
 log show --predicate 'process == "homeclaw"' --last 10m --style compact
 
-# HomeKitHelper logs
-log show --predicate 'process == "HomeKitHelper"' --last 10m --style compact
+# HomeClawHelper logs
+log show --predicate 'process == "HomeClawHelper"' --last 10m --style compact
 
 # Check helper status directly over the socket
 echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
 
 # Verify code signature and entitlements
-codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app"
+codesign -d --entitlements :- "/Applications/HomeClaw.app/Contents/Helpers/HomeClawHelper.app"
 
 # Check which devices are in the provisioning profile
-security cms -D -i "/Applications/HomeClaw.app/Contents/Helpers/HomeKitHelper.app/Contents/embedded.provisionprofile" 2>/dev/null | plutil -extract ProvisionedDevices json -o - -
+security cms -D -i "/Applications/HomeClaw.app/Contents/Helpers/HomeClawHelper.app/Contents/embedded.provisionprofile" 2>/dev/null | plutil -extract ProvisionedDevices json -o - -
 ```
 
 ## License

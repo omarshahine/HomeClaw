@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 
 /// Centralized helper lifecycle manager. Owns launching, killing, health-checking,
-/// and auto-restarting the HomeKitHelper Catalyst process.
+/// and auto-restarting the HomeClawHelper Catalyst process.
 ///
 /// `@Observable` so SwiftUI views (MenuBarView) can react to `state` changes
 /// without manual bindings or Combine publishers.
@@ -26,7 +26,7 @@ final class HelperManager {
     /// Diagnostic message when a permanent launch failure is detected (e.g. provisioning, code signature).
     private(set) var launchDiagnostic: String?
 
-    /// Path to the resolved HomeKitHelper.app bundle (set on first successful find).
+    /// Path to the resolved HomeClawHelper.app bundle (set on first successful find).
     private var resolvedHelperPath: String?
 
     /// Cached home count from last status check — used to detect changes
@@ -96,7 +96,7 @@ final class HelperManager {
     // MARK: - Helper Process Lifecycle
 
     private func launchHelper() {
-        let helperName = "HomeKitHelper"
+        let helperName = "HomeClawHelper"
         let possiblePaths = [
             Bundle.main.bundlePath + "/Contents/Helpers/\(helperName).app",
             (Bundle.main.executableURL?.deletingLastPathComponent().path ?? "")
@@ -105,7 +105,7 @@ final class HelperManager {
 
         guard let helperPath = possiblePaths.first(where: { FileManager.default.fileExists(atPath: $0) }) else {
             AppLogger.helper.warning(
-                "HomeKit Helper not found at expected paths. CLI/MCP will use socket when helper is running separately."
+                "HomeClaw helper not found at expected paths. CLI/MCP will use socket when helper is running separately."
             )
             return
         }
@@ -118,9 +118,9 @@ final class HelperManager {
 
         do {
             try process.run()
-            AppLogger.helper.info("HomeKit Helper launched from \(helperPath)")
+            AppLogger.helper.info("HomeClaw helper launched from \(helperPath)")
         } catch {
-            AppLogger.helper.error("Failed to launch HomeKit Helper: \(error.localizedDescription)")
+            AppLogger.helper.error("Failed to launch HomeClaw helper: \(error.localizedDescription)")
             state = .helperDown
         }
     }
@@ -129,16 +129,16 @@ final class HelperManager {
         // Remove stale socket so health checks fail fast during restart
         try? FileManager.default.removeItem(atPath: AppConfig.socketPath)
 
-        // Find and terminate the actual HomeKitHelper process.
+        // Find and terminate the actual HomeClawHelper process.
         // We can't hold a Process reference because `open -a` returns immediately.
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        task.arguments = ["-f", "HomeKitHelper"]
+        task.arguments = ["-f", "HomeClawHelper"]
         task.standardOutput = FileHandle.nullDevice
         task.standardError = FileHandle.nullDevice
         try? task.run()
         task.waitUntilExit()
-        AppLogger.helper.info("Sent kill signal to HomeKitHelper")
+        AppLogger.helper.info("Sent kill signal to HomeClawHelper")
     }
 
     // MARK: - Health Check Loop
