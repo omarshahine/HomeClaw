@@ -14,7 +14,6 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "homeclaw",
-            path: "Sources/homekit-mcp",
             exclude: ["MCP/_disabled", "Shared/_disabled"]
         ),
         .executableTarget(
@@ -22,7 +21,6 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/homekit-cli",
             exclude: ["Commands/_disabled"]
         ),
     ]
