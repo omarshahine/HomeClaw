@@ -16,13 +16,10 @@ jobs:
 
       - name: Verify HomeKit entitlement
         run: |
-          if ! grep -q 'com.apple.developer.homekit' Sources/HomeClawHelper/HomeClawHelper.entitlements; then
-            echo "::error::HomeKit entitlement missing from HomeClawHelper.entitlements — readValue() will silently fail"
+          if ! grep -q 'com.apple.developer.homekit' Resources/HomeClaw.entitlements; then
+            echo "::error::HomeKit entitlement missing from HomeClaw.entitlements — readValue() will silently fail"
             exit 1
           fi
-
-      - name: Build homeclaw
-        run: swift build --product homeclaw
 
       - name: Build homeclaw-cli
         run: swift build --product homeclaw-cli

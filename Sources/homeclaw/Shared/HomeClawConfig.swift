@@ -6,8 +6,8 @@ import Foundation
 ///
 /// Migration: If the legacy path (~/.config/homeclaw/config.json) exists
 /// and the new path does not, config is automatically migrated on first launch.
-final class HelperConfig: @unchecked Sendable {
-    static let shared = HelperConfig()
+final class HomeClawConfig: @unchecked Sendable {
+    static let shared = HomeClawConfig()
 
     private let configDir: URL
     private let configFile: URL
@@ -116,7 +116,7 @@ final class HelperConfig: @unchecked Sendable {
     /// Migrates config from legacy ~/.config/homeclaw/ to new Application Support path.
     private static func migrateIfNeeded(to newDir: URL) {
         let fm = FileManager.default
-        let legacyDir = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".config/homeclaw")
+        let legacyDir = URL(fileURLWithPath: AppConfig.realHomeDirectory).appendingPathComponent(".config/homeclaw")
         let legacyConfig = legacyDir.appendingPathComponent("config.json")
         let newConfig = newDir.appendingPathComponent("config.json")
 

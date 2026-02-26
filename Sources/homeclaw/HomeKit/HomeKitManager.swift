@@ -1,5 +1,4 @@
 import HomeKit
-import OSLog
 
 /// Central HomeKit interface. Must run on @MainActor because HMHomeManager
 /// requires main-thread delegate callbacks.
@@ -176,7 +175,7 @@ final class HomeKitManager: NSObject, Observable {
         // Write
         do {
             try await hmCharacteristic.writeValue(parsedValue)
-            HelperLogger.homekit.info("Set \(accessory.name).\(characteristic) = \(value)")
+            AppLogger.homekit.info("Set \(accessory.name).\(characteristic) = \(value)")
         } catch {
             throw ControlError.writeFailed("\(error.localizedDescription)")
         }
@@ -204,7 +203,7 @@ final class HomeKitManager: NSObject, Observable {
         for home in targetHomes {
             if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
                 try await home.executeActionSet(actionSet)
-                HelperLogger.homekit.info("Triggered scene: \(actionSet.name)")
+                AppLogger.homekit.info("Triggered scene: \(actionSet.name)")
                 return AccessoryModel.sceneSummary(actionSet)
             }
         }
@@ -215,7 +214,7 @@ final class HomeKitManager: NSObject, Observable {
                 $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
             }) {
                 try await home.executeActionSet(actionSet)
-                HelperLogger.homekit.info("Triggered scene: \(actionSet.name)")
+                AppLogger.homekit.info("Triggered scene: \(actionSet.name)")
                 return AccessoryModel.sceneSummary(actionSet)
             }
         }
@@ -345,7 +344,7 @@ final class HomeKitManager: NSObject, Observable {
         // If device set changed, invalidate stale entries
         if !cache.deviceHashMatches(currentHash) {
             cache.invalidateValues()
-            HelperLogger.homekit.info("Device set changed, cache invalidated")
+            AppLogger.homekit.info("Device set changed, cache invalidated")
         }
 
         var warmedCount = 0
@@ -374,7 +373,7 @@ final class HomeKitManager: NSObject, Observable {
 
         cache.markWarmed(deviceHash: currentHash)
         let elapsed = Date().timeIntervalSince(start)
-        HelperLogger.homekit.info(
+        AppLogger.homekit.info(
             "Cache warmed: \(warmedCount)/\(filtered.count) accessories in \(String(format: "%.1f", elapsed))s"
         )
     }
@@ -454,7 +453,7 @@ final class HomeKitManager: NSObject, Observable {
     }
 
     private func filterAccessories(_ accessories: [HMAccessory]) -> [HMAccessory] {
-        let config = HelperConfig.shared
+        let config = HomeClawConfig.shared
         guard config.filterMode == "allowlist",
               let allowed = config.allowedIDs
         else { return accessories }
@@ -462,7 +461,7 @@ final class HomeKitManager: NSObject, Observable {
     }
 
     private func isAccessoryAllowed(_ accessory: HMAccessory) -> Bool {
-        let config = HelperConfig.shared
+        let config = HomeClawConfig.shared
         guard config.filterMode == "allowlist",
               let allowed = config.allowedIDs
         else { return true }
@@ -474,7 +473,7 @@ final class HomeKitManager: NSObject, Observable {
         if homes.count <= 1 { return homes }
 
         // Use explicit homeID if provided, otherwise fall back to configured default
-        let effectiveID = homeID ?? HelperConfig.shared.defaultHomeID
+        let effectiveID = homeID ?? HomeClawConfig.shared.defaultHomeID
 
         if let effectiveID {
             // Match by UUID first, then by name
@@ -535,7 +534,7 @@ extension HomeKitManager: HMHomeManagerDelegate {
     nonisolated func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
         Task { @MainActor in
             homes = manager.homes
-            HelperLogger.homekit.info(
+            AppLogger.homekit.info(
                 "HomeKit updated: \(manager.homes.count) home(s), \(self.totalAccessoryCount) accessory(ies)"
             )
 
@@ -556,8 +555,20 @@ extension HomeKitManager: HMHomeManagerDelegate {
 
             // Warm cache after initial load and device set changes
             Task { await self.warmCache() }
+
+            // Notify macOSBridge (menu bar) of updated state
+            let names = manager.homes.map(\.name)
+            NotificationCenter.default.post(
+                name: .homeKitStatusDidChange,
+                object: nil,
+                userInfo: ["ready": self.homesReady, "homeNames": names]
+            )
         }
     }
+}
+
+extension Notification.Name {
+    static let homeKitStatusDidChange = Notification.Name("HomeKitStatusDidChange")
 }
 
 // MARK: - HMAccessoryDelegate
@@ -585,7 +596,7 @@ extension HomeKitManager: HMAccessoryDelegate {
             cache.setValues(for: accessoryID, state: state)
             cache.save()
 
-            HelperLogger.homekit.debug(
+            AppLogger.homekit.debug(
                 "Live update: \(accessory.name).\(name) = \(value)"
             )
         }

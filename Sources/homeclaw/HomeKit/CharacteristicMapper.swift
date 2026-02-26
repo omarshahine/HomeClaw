@@ -238,7 +238,7 @@ enum CharacteristicMapper {
     // MARK: - Value Formatting
 
     /// Formats a characteristic value for display, handling enums like door/lock states.
-    /// Temperature values are converted to the configured unit (F/C) via HelperConfig.
+    /// Temperature values are converted to the configured unit (F/C) via HomeClawConfig.
     static func formatValue(_ value: Any?, for characteristicType: String) -> String {
         guard let value else { return "nil" }
 
@@ -246,9 +246,9 @@ enum CharacteristicMapper {
         case HMCharacteristicTypeCurrentTemperature,
              HMCharacteristicTypeTargetTemperature:
             if let num = value as? Double {
-                return HelperConfig.shared.formatTemperature(num)
+                return HomeClawConfig.shared.formatTemperature(num)
             } else if let num = value as? NSNumber {
-                return HelperConfig.shared.formatTemperature(num.doubleValue)
+                return HomeClawConfig.shared.formatTemperature(num.doubleValue)
             }
 
         case HMCharacteristicTypeCurrentLockMechanismState,

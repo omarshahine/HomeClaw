@@ -1,34 +1,20 @@
 import Foundation
 
-/// Unix domain socket server for the HomeKit helper process.
-/// Accepts JSON commands from the main app and CLI, routes to HomeKitManager.
+/// Unix domain socket server for HomeKit IPC.
+/// Accepts JSON commands from the CLI and MCP server, routes to HomeKitManager.
 ///
 /// Uses GCD (DispatchSource) for non-blocking socket I/O instead of POSIX accept(),
 /// which would block a cooperative thread and cause issues with Swift concurrency.
-final class HelperSocketServer: @unchecked Sendable {
-    static let shared = HelperSocketServer()
-
-    /// App Group identifier shared with the main app for sandboxed IPC.
-    private static let appGroupID = "group.com.shahine.homeclaw"
-
-    /// Socket path — uses App Group container when available (sandboxed builds),
-    /// falls back to /tmp for Developer ID builds.
-    static let socketPath: String = {
-        if let container = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: appGroupID
-        ) {
-            return container.appendingPathComponent("homeclaw.sock").path
-        }
-        return "/tmp/homeclaw.sock"
-    }()
+final class SocketServer: @unchecked Sendable {
+    static let shared = SocketServer()
 
     private var serverFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    private let queue = DispatchQueue(label: "com.shahine.homeclaw.helper.socket", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.shahine.homeclaw.socket", qos: .userInitiated)
 
     /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources).
     func start() {
-        let path = Self.socketPath
+        let path = AppConfig.socketPath
 
         // Remove stale socket
         unlink(path)
@@ -36,7 +22,7 @@ final class HelperSocketServer: @unchecked Sendable {
         // Create socket
         serverFD = socket(AF_UNIX, SOCK_STREAM, 0)
         guard serverFD >= 0 else {
-            HelperLogger.socket.error("Failed to create Unix socket")
+            AppLogger.socket.error("Failed to create Unix socket")
             return
         }
 
@@ -55,19 +41,19 @@ final class HelperSocketServer: @unchecked Sendable {
             }
         }
         guard bindResult == 0 else {
-            HelperLogger.socket.error("Failed to bind socket (errno: \(errno))")
+            AppLogger.socket.error("Failed to bind socket (errno: \(errno))")
             close(serverFD)
             return
         }
 
         // Listen
         guard listen(serverFD, 16) == 0 else {
-            HelperLogger.socket.error("Failed to listen on socket (errno: \(errno))")
+            AppLogger.socket.error("Failed to listen on socket (errno: \(errno))")
             close(serverFD)
             return
         }
 
-        // Make socket world-accessible so the CLI and main app can connect
+        // Make socket world-accessible so the CLI and MCP server can connect
         chmod(path, 0o666)
 
         // Increase socket buffers for large responses (192 accessories = ~300KB JSON)
@@ -88,12 +74,12 @@ final class HelperSocketServer: @unchecked Sendable {
             if let fd = self?.serverFD, fd >= 0 {
                 close(fd)
             }
-            unlink(Self.socketPath)
+            unlink(AppConfig.socketPath)
         }
         source.resume()
         acceptSource = source
 
-        HelperLogger.socket.info("Socket server listening at \(path)")
+        AppLogger.socket.info("Socket server listening at \(path)")
     }
 
     func stop() {
@@ -258,15 +244,15 @@ final class HelperSocketServer: @unchecked Sendable {
                 let homesList = await hk.listHomes()
                 let allCount = hk.totalAccessoryCount
                 let filteredCount: Int
-                if HelperConfig.shared.filterMode == "allowlist",
-                   let allowed = HelperConfig.shared.allowedIDs
+                if HomeClawConfig.shared.filterMode == "allowlist",
+                   let allowed = HomeClawConfig.shared.allowedIDs
                 {
                     filteredCount = allowed.count
                 } else {
                     filteredCount = allCount
                 }
                 result = [
-                    "config": HelperConfig.shared.toDict(),
+                    "config": HomeClawConfig.shared.toDict(),
                     "available_homes": homesList,
                     "total_accessories": allCount,
                     "filtered_accessories": filteredCount,
@@ -275,7 +261,7 @@ final class HelperSocketServer: @unchecked Sendable {
             case "set_config":
                 if let homeID = args["default_home_id"] as? String {
                     if homeID.isEmpty || homeID.lowercased() == "none" {
-                        HelperConfig.shared.defaultHomeID = nil
+                        HomeClawConfig.shared.defaultHomeID = nil
                     } else {
                         // Accept UUID or name — resolve name to UUID
                         let resolvedID: String
@@ -289,25 +275,25 @@ final class HelperSocketServer: @unchecked Sendable {
                         } else {
                             resolvedID = homeID
                         }
-                        HelperConfig.shared.defaultHomeID = resolvedID
+                        HomeClawConfig.shared.defaultHomeID = resolvedID
                     }
                 }
                 if let mode = args["accessory_filter_mode"] as? String {
-                    HelperConfig.shared.filterMode = mode
+                    HomeClawConfig.shared.filterMode = mode
                 }
                 if let ids = args["allowed_accessory_ids"] as? [String] {
-                    HelperConfig.shared.setAllowedAccessories(ids)
+                    HomeClawConfig.shared.setAllowedAccessories(ids)
                 }
                 if let unit = args["temperature_unit"] as? String {
-                    let oldUnit = HelperConfig.shared.temperatureUnit
-                    HelperConfig.shared.temperatureUnit = unit
+                    let oldUnit = HomeClawConfig.shared.temperatureUnit
+                    HomeClawConfig.shared.temperatureUnit = unit
                     // Invalidate cache when temperature unit changes so values get re-formatted
-                    if HelperConfig.shared.temperatureUnit != oldUnit {
+                    if HomeClawConfig.shared.temperatureUnit != oldUnit {
                         CharacteristicCache.shared.invalidateValues()
                         Task { let _ = await hk.refreshCache() }
                     }
                 }
-                result = HelperConfig.shared.toDict()
+                result = HomeClawConfig.shared.toDict()
 
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
@@ -358,7 +344,7 @@ private final class ResponseBox: @unchecked Sendable {
 
 // MARK: - Errors
 
-enum HelperError: Error, LocalizedError {
+enum SocketError: Error, LocalizedError {
     case socketCreationFailed
     case bindFailed(Int32)
     case listenFailed(Int32)

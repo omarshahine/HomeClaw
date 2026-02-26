@@ -5,7 +5,7 @@ import Foundation
 /// Dramatically reduces response times for bulk operations (list, search, rooms)
 /// by avoiding per-device `readValue()` network round-trips.
 ///
-/// Follows the `HelperConfig` singleton pattern. All access is expected via `@MainActor`.
+/// Follows the `HomeClawConfig` singleton pattern. All access is expected via `@MainActor`.
 final class CharacteristicCache: @unchecked Sendable {
     static let shared = CharacteristicCache()
 
@@ -29,7 +29,7 @@ final class CharacteristicCache: @unchecked Sendable {
     }
 
     private init() {
-        configDir = HelperConfig.configDirectory
+        configDir = HomeClawConfig.configDirectory
         cacheFile = configDir.appendingPathComponent("cache.json")
 
         if let fileData = try? Data(contentsOf: cacheFile),
@@ -103,7 +103,7 @@ final class CharacteristicCache: @unchecked Sendable {
             let encoded = try JSONEncoder.iso8601.encode(data)
             try encoded.write(to: cacheFile, options: .atomic)
         } catch {
-            HelperLogger.homekit.error("Failed to save cache: \(error.localizedDescription)")
+            AppLogger.homekit.error("Failed to save cache: \(error.localizedDescription)")
         }
     }
 

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct IntegrationsSettingsView: View {
     @State private var claudeDesktopStatus: DesktopStatus = .checking
@@ -67,16 +68,16 @@ struct IntegrationsSettingsView: View {
     }
 
     private static var claudeDesktopConfigPath: String {
-        FileManager.default.homeDirectoryForCurrentUser.path
+        AppConfig.realHomeDirectory
             + "/Library/Application Support/Claude/claude_desktop_config.json"
     }
 
     private static var claudeCodeSettingsPath: String {
-        FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/settings.json"
+        AppConfig.realHomeDirectory + "/.claude/settings.json"
     }
 
     private static var openClawConfigPath: String {
-        FileManager.default.homeDirectoryForCurrentUser.path + "/.openclaw/openclaw.json"
+        AppConfig.realHomeDirectory + "/.openclaw/openclaw.json"
     }
 
     /// Path to the bundled mcp-server.js inside the app's Resources.
@@ -95,7 +96,7 @@ struct IntegrationsSettingsView: View {
 
     /// Path to the installed OpenClaw plugin in the extensions directory.
     private static var openClawExtensionsPath: String {
-        FileManager.default.homeDirectoryForCurrentUser.path
+        AppConfig.realHomeDirectory
             + "/.openclaw/extensions/homeclaw"
     }
 
@@ -570,8 +571,7 @@ struct IntegrationsSettingsView: View {
             /plugin marketplace add \(Self.githubRepo)
             /plugin install homeclaw@homeclaw
             """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(commands, forType: .string)
+        UIPasteboard.general.string = commands
         showStatus("Install commands copied to clipboard", isError: false)
     }
 
@@ -596,8 +596,7 @@ struct IntegrationsSettingsView: View {
             ln -sf /path/to/homeclaw-cli /opt/homebrew/bin/homeclaw-cli
             openclaw gateway restart
             """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(instructions, forType: .string)
+        UIPasteboard.general.string = instructions
         showStatus("Setup instructions copied to clipboard", isError: false)
     }
 
@@ -728,46 +727,77 @@ struct IntegrationsSettingsView: View {
         return knownPaths.first(where: { FileManager.default.fileExists(atPath: $0) })
     }
 
-    /// Runs an AppleScript string. Returns true on success.
+    /// Runs an AppleScript string via osascript. Returns true on success.
     /// Used for privileged operations that show the macOS admin password prompt.
+    /// Uses osascript because NSAppleScript is unavailable on Mac Catalyst.
     @discardableResult
     private func runAppleScript(_ source: String) -> Bool {
-        guard let script = NSAppleScript(source: source) else { return false }
-        var error: NSDictionary?
-        script.executeAndReturnError(&error)
-        return error == nil
+        let result = runProcess("/usr/bin/osascript", arguments: ["-e", source])
+        return result.success
     }
 
-    /// Runs a process synchronously and returns the combined output.
+    /// Runs a process synchronously via posix_spawn and returns the combined output.
+    /// Uses posix_spawn because Process (NSTask) is unavailable on Mac Catalyst.
     /// Extends PATH with Homebrew bin directories so that scripts using
     /// `#!/usr/bin/env node` (like the openclaw CLI) can find Node.js.
     private func runProcess(_ path: String, arguments: [String]) -> (success: Bool, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-
-        // GUI apps get a minimal PATH. Extend it so child processes
-        // can find node, npm, and other Homebrew-installed tools.
+        // Build environment with extended PATH
         var env = ProcessInfo.processInfo.environment
         let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin"]
         let currentPath = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
-        process.environment = env
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        // Convert args and env to C string arrays
+        let cArgs = ([path] + arguments).map { $0.withCString { strdup($0)! } }
+        defer { cArgs.forEach { free($0) } }
+        var argvBuf = cArgs.map { Optional(UnsafeMutablePointer($0)) } + [nil]
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return (false, error.localizedDescription)
+        let cEnv = env.map { "\($0.key)=\($0.value)".withCString { strdup($0)! } }
+        defer { cEnv.forEach { free($0) } }
+        var envpBuf = cEnv.map { Optional(UnsafeMutablePointer($0)) } + [nil]
+
+        // Set up pipe for stdout+stderr capture
+        var pipeFDs: [Int32] = [0, 0]
+        guard pipe(&pipeFDs) == 0 else {
+            return (false, "Failed to create pipe")
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (process.terminationStatus == 0, output)
+        var fileActions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&fileActions)
+        defer { posix_spawn_file_actions_destroy(&fileActions) }
+        posix_spawn_file_actions_adddup2(&fileActions, pipeFDs[1], STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&fileActions, pipeFDs[1], STDERR_FILENO)
+        posix_spawn_file_actions_addclose(&fileActions, pipeFDs[0])
+        posix_spawn_file_actions_addclose(&fileActions, pipeFDs[1])
+
+        var pid: pid_t = 0
+        let spawnResult = posix_spawn(&pid, path, &fileActions, nil, &argvBuf, &envpBuf)
+        close(pipeFDs[1])  // Close write end in parent
+
+        guard spawnResult == 0 else {
+            close(pipeFDs[0])
+            return (false, "posix_spawn failed: \(spawnResult)")
+        }
+
+        // Read output
+        let readFD = pipeFDs[0]
+        var outputData = Data()
+        var buf = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let n = read(readFD, &buf, buf.count)
+            if n <= 0 { break }
+            outputData.append(contentsOf: buf[0..<n])
+        }
+        close(readFD)
+
+        // Wait for child — WIFEXITED/WEXITSTATUS are C macros, replicate manually
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        let exited = (status & 0x7f) == 0
+        let exitCode = exited ? (status >> 8) & 0xff : Int32(-1)
+
+        let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (exitCode == 0, output)
     }
 
     private func showStatus(_ text: String, isError: Bool) {

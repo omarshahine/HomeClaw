@@ -3,6 +3,18 @@ import Foundation
 enum AppConfig {
     static let bundleID = "com.shahine.homeclaw"
     static let appName = "HomeClaw"
+
+    /// Returns the real user home directory, bypassing the sandbox container.
+    /// In a sandboxed Mac Catalyst app, `NSHomeDirectory()` returns the container path
+    /// (~/Library/Containers/com.shahine.homeclaw/Data/). This function uses the POSIX
+    /// password database to get the actual home directory (/Users/<username>/).
+    /// Needed for accessing external app configs (Claude Desktop, Claude Code, OpenClaw).
+    static let realHomeDirectory: String = {
+        if let pw = getpwuid(getuid()) {
+            return String(cString: pw.pointee.pw_dir)
+        }
+        return NSHomeDirectory()
+    }()
     static let version: String = {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.1"
     }()
@@ -14,16 +26,14 @@ enum AppConfig {
     // App Group identifier shared between main app and helper for sandboxed IPC.
     static let appGroupID = "group.com.shahine.homeclaw"
 
-    // CLI Socket — uses App Group container when available (sandboxed builds),
-    // falls back to /tmp for Developer ID / direct builds.
+    // Socket path — uses App Group container for sandboxed Catalyst builds.
+    // The Catalyst sandbox prevents creating sockets in /tmp (EPERM),
+    // so we always prefer the app group container when available.
     static let socketPath: String = {
         if let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID
         ) {
-            let groupPath = container.appendingPathComponent("homeclaw.sock").path
-            if FileManager.default.fileExists(atPath: groupPath) {
-                return groupPath
-            }
+            return container.appendingPathComponent("homeclaw.sock").path
         }
         return "/tmp/homeclaw.sock"
     }()

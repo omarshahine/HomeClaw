@@ -2,7 +2,7 @@ name: HomeClaw
 options:
   bundleIdPrefix: com.shahine
   deploymentTarget:
-    macOS: "26.0"
+    iOS: "18.0"
   xcodeVersion: "26.0"
   generateEmptyDirectories: true
   groupSortPosition: top
@@ -12,6 +12,9 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     DEAD_CODE_STRIPPING: YES
+    DEVELOPMENT_TEAM: N9DRSTM2U6
+    SWIFT_EMIT_LOC_STRINGS: YES
+    CODE_SIGN_STYLE: Automatic
 
 packages:
   swift-argument-parser:
@@ -19,10 +22,10 @@ packages:
     from: "1.7.0"
 
 targets:
-  # ─── Main App (macOS menu bar) ─────────────────────────────
-  homeclaw:
+  # ─── Unified Catalyst App ─────────────────────────────────
+  HomeClaw:
     type: application
-    platform: macOS
+    platform: iOS
     sources:
       - path: Sources/homeclaw
         excludes:
@@ -35,43 +38,45 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
-        PRODUCT_NAME: homeclaw
+        PRODUCT_NAME: HomeClaw
+        TARGETED_DEVICE_FAMILY: "6"
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
         INFOPLIST_FILE: Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/HomeClaw.entitlements
-        CODE_SIGN_STYLE: Automatic
-        DEVELOPMENT_TEAM: ${HOMEKIT_TEAM_ID}
         ASSETCATALOG_COMPILER_APPICON_NAME: HomeClaw
         MACOSX_BUNDLE_ICON_FILE: HomeClaw
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         ENABLE_APP_SANDBOX: YES
-        ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
-        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
-        ENABLE_HARDENED_RUNTIME: YES
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+    entitlements:
+      path: Resources/HomeClaw.entitlements
+      properties:
+        com.apple.developer.homekit: true
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - group.com.shahine.homeclaw
+        com.apple.security.network.server: true
+        com.apple.security.network.client: true
     dependencies:
+      - target: macOSBridge
+        platformFilter: maccatalyst
       - target: homeclaw-cli
         embed: false
+      - sdk: HomeKit.framework
     preBuildScripts:
       - name: "Increment Build Number (Archive Only)"
         script: |
-          # Only bump the build number during archive (ACTION=install)
-          if [ "$ACTION" != "install" ]; then
+          # Only bump during Release builds (i.e. archive), not Debug
+          if [ "$CONFIGURATION" != "Release" ]; then
             exit 0
           fi
 
           BUILD_NUMBER_FILE="${PROJECT_DIR}/.build-number"
           PLIST="${PROJECT_DIR}/Resources/Info.plist"
-          CURRENT_PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "0")
 
           if [ -f "$BUILD_NUMBER_FILE" ]; then
-            FILE_VERSION=$(cat "$BUILD_NUMBER_FILE")
-            # If archive.sh already incremented and patched, .build-number
-            # and Info.plist will match — skip to avoid double-increment
-            if [ "$FILE_VERSION" = "$CURRENT_PLIST_VERSION" ] && [ "$FILE_VERSION" -gt 1 ] 2>/dev/null; then
-              echo "Build number already set to $FILE_VERSION by archive.sh"
-              exit 0
-            fi
-            BUILD_NUMBER=$(( FILE_VERSION + 1 ))
+            BUILD_NUMBER=$(( $(cat "$BUILD_NUMBER_FILE") + 1 ))
           else
             BUILD_NUMBER=$(git -C "${PROJECT_DIR}" rev-list --count HEAD 2>/dev/null || echo "1")
           fi
@@ -90,43 +95,17 @@ targets:
           fi
         basedOnDependencyAnalysis: false
     postBuildScripts:
-      - name: "Bundle Helper + CLI + Resources"
+      - name: "Bundle CLI + Resources"
         script: |
           APP="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/Contents"
 
-          # Copy HomeClawHelper.app into Contents/Helpers/
-          # Helper is built separately (Mac Catalyst) — check multiple locations
-          mkdir -p "${APP}/Helpers"
-          HELPER_FOUND=false
-          for DIR in \
-            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Release-maccatalyst/HomeClawHelper.app" \
-            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Debug-maccatalyst/HomeClawHelper.app" \
-            "${BUILT_PRODUCTS_DIR}/HomeClawHelper.app" \
-            "${BUILD_DIR}/Release-maccatalyst/HomeClawHelper.app" \
-            "${BUILD_DIR}/Debug-maccatalyst/HomeClawHelper.app"; do
-            if [ -d "${DIR}" ]; then
-              cp -R "${DIR}" "${APP}/Helpers/"
-              HELPER_FOUND=true
-              break
-            fi
-          done
-          if [ "$HELPER_FOUND" = false ]; then
-            echo "warning: HomeClawHelper.app not found — run scripts/build.sh first or build it separately"
-          fi
-
-          # Copy HomeClawHelper dSYM into BUILT_PRODUCTS_DIR so Xcode
-          # includes it in the archive's dSYMs folder automatically
-          for DSYM in \
-            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Release-maccatalyst/HomeClawHelper.app.dSYM" \
-            "${PROJECT_DIR}/.build/DerivedData/Build/Products/Debug-maccatalyst/HomeClawHelper.app.dSYM"; do
-            if [ -d "${DSYM}" ]; then
-              cp -R "${DSYM}" "${BUILT_PRODUCTS_DIR}/"
-              break
-            fi
-          done
-
           # Copy homeclaw-cli into Contents/MacOS/
-          if [ -f "${BUILT_PRODUCTS_DIR}/homeclaw-cli" ]; then
+          # CLI is a native macOS tool — look in the macOS build dir (Debug/),
+          # not the Catalyst dir (Debug-maccatalyst/)
+          CLI_PATH="${BUILD_DIR}/${CONFIGURATION}/homeclaw-cli"
+          if [ -f "${CLI_PATH}" ]; then
+            cp "${CLI_PATH}" "${APP}/MacOS/homeclaw-cli"
+          elif [ -f "${BUILT_PRODUCTS_DIR}/homeclaw-cli" ]; then
             cp "${BUILT_PRODUCTS_DIR}/homeclaw-cli" "${APP}/MacOS/homeclaw-cli"
           fi
 
@@ -148,6 +127,21 @@ targets:
           fi
         basedOnDependencyAnalysis: false
 
+  # ─── macOS Bridge Bundle (AppKit menu bar) ─────────────────
+  macOSBridge:
+    type: bundle
+    platform: macOS
+    sources:
+      - path: Sources/macOSBridge
+      - path: Sources/homeclaw/Bridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw.macOSBridge
+        PRODUCT_NAME: macOSBridge
+        INFOPLIST_FILE: Sources/macOSBridge/Info.plist
+        SKIP_INSTALL: YES
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+
   # ─── CLI Tool ──────────────────────────────────────────────
   homeclaw-cli:
     type: tool
@@ -164,7 +158,6 @@ targets:
         PRODUCT_NAME: homeclaw-cli
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Resources/homeclaw-cli.entitlements
-        DEVELOPMENT_TEAM: ${HOMEKIT_TEAM_ID}
         ENABLE_APP_SANDBOX: YES
         ENABLE_HARDENED_RUNTIME: YES
         SKIP_INSTALL: YES
@@ -173,11 +166,12 @@ schemes:
   HomeClaw:
     build:
       targets:
-        homeclaw: all
+        HomeClaw: all
+        macOSBridge: all
         homeclaw-cli: all
     run:
       config: Debug
-      executable: homeclaw
+      executable: HomeClaw
     archive:
       config: Release
     profile:
