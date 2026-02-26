@@ -48,16 +48,15 @@ targets:
         MACOSX_BUNDLE_ICON_FILE: HomeClaw
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         ENABLE_APP_SANDBOX: YES
+        ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         ENABLE_USER_SCRIPT_SANDBOXING: NO
     entitlements:
       path: Resources/HomeClaw.entitlements
       properties:
         com.apple.developer.homekit: true
-        com.apple.security.app-sandbox: true
         com.apple.security.application-groups:
           - group.com.shahine.homeclaw
-        com.apple.security.network.server: true
-        com.apple.security.network.client: true
     dependencies:
       - target: macOSBridge
         platformFilter: maccatalyst
@@ -159,6 +158,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: Resources/homeclaw-cli.entitlements
         ENABLE_APP_SANDBOX: YES
+        ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
         ENABLE_HARDENED_RUNTIME: YES
         SKIP_INSTALL: YES
 
