@@ -2,15 +2,28 @@ import Foundation
 
 /// Connects to the HomeClaw app via Unix domain socket.
 enum SocketClient {
-    /// Socket path — checks App Group container first (for sandboxed Catalyst builds),
-    /// then falls back to /tmp (unsandboxed builds).
-    /// Uses a hardcoded path instead of containerURL() so the CLI doesn't need
-    /// the app group entitlement — the directory is user-owned and accessible.
+    /// Socket path — uses the App Group container API (works in both sandboxed
+    /// and unsandboxed builds), then falls back to a hardcoded path and /tmp.
     static let socketPath: String = {
-        let groupPath = NSHomeDirectory() + "/Library/Group Containers/group.com.shahine.homeclaw/homeclaw.sock"
-        if FileManager.default.fileExists(atPath: groupPath) {
-            return groupPath
+        // Preferred: use the proper container API (works sandboxed and unsandboxed)
+        if let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.com.shahine.homeclaw"
+        ) {
+            let path = container.appendingPathComponent("homeclaw.sock").path
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
         }
+
+        // Fallback: hardcoded path for unsandboxed builds where containerURL returns nil
+        if let pw = getpwuid(getuid()) {
+            let home = String(cString: pw.pointee.pw_dir)
+            let path = home + "/Library/Group Containers/group.com.shahine.homeclaw/homeclaw.sock"
+            if FileManager.default.fileExists(atPath: path) {
+                return path
+            }
+        }
+
         return "/tmp/homeclaw.sock"
     }()
 
