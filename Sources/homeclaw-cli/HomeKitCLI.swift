@@ -15,6 +15,9 @@ struct HomeKitCLI: ParsableCommand {
             Status.self,
             Config.self,
             DeviceMapCmd.self,
+            ImportSceneCommand.self,
+            DeleteSceneCommand.self,
+            AssignRoomsCommand.self,
         ],
         defaultSubcommand: Status.self
     )

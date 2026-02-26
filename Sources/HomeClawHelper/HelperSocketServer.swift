@@ -118,14 +118,18 @@ final class HelperSocketServer: @unchecked Sendable {
         setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
 
         // Read request (up to 64KB)
-        var buffer = [UInt8](repeating: 0, count: 65536)
-        let bytesRead = recv(fd, &buffer, buffer.count, 0)
-        guard bytesRead > 0 else {
-            close(fd)
-            return
-        }
-
-        let requestData = Data(buffer[..<bytesRead])
+        var requestData = Data()
+                var buffer = [UInt8](repeating: 0, count: 65536)
+                while true {
+                    let bytesRead = recv(fd, &buffer, buffer.count, 0)
+                    if bytesRead <= 0 { break }
+                    requestData.append(contentsOf: buffer[..<bytesRead])
+                    if requestData.last == UInt8(ascii: "\n") { break }
+                }
+                guard !requestData.isEmpty else {
+                    close(fd)
+                    return
+                }
 
         // Find newline-delimited request
         let lineData: Data
@@ -295,6 +299,49 @@ final class HelperSocketServer: @unchecked Sendable {
                     }
                 }
                 result = HelperConfig.shared.toDict()
+
+            case "delete_scene":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                result = try await hk.deleteScene(
+                    name: name,
+                    homeName: args["home"] as? String
+                )
+
+            case "assign_rooms":
+                guard let homeName = args["home"] as? String,
+                      let assignments = args["assignments"] as? [[String: Any]]
+                else {
+                    return encodeResponse(
+                        success: false,
+                        error: "Missing required args: home, assignments"
+                    )
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? false
+                result = try await hk.assignRooms(
+                    homeName: homeName,
+                    assignments: assignments,
+                    dryRun: dryRun
+                )
+
+            case "import_scene":
+                guard let name = args["name"] as? String,
+                      let homeName = args["home"] as? String,
+                      let actions = args["actions"] as? [[String: Any]]
+                else {
+                    return encodeResponse(
+                        success: false,
+                        error: "Missing required args: name, home, actions"
+                    )
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? false
+                result = try await hk.importScene(
+                    name: name,
+                    homeName: homeName,
+                    actions: actions,
+                    dryRun: dryRun
+                )
 
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
