@@ -347,22 +347,42 @@ final class HomeKitManager: NSObject, Observable {
             ]
         }
 
-        let scenesList: [[String: Any]] = selectedHome.actionSets.map {
-            AccessoryModel.sceneSummary($0)
-        }
+        let scenesList: [[String: Any]] = selectedHome.actionSets
+            .map { AccessoryModel.sceneSummary($0) }
+            .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
+
+        // Category priority: controllable items first, then status-only
+        let categoryOrder: [String: Int] = [
+            "lightbulb": 0, "switch": 1, "outlet": 2, "fan": 3,
+            "air_purifier": 4, "valve": 5, "window_covering": 6,
+            "thermostat": 10, "lock": 11, "door": 12, "garage_door": 13,
+            "camera": 14, "doorbell": 15, "security_system": 16,
+            "sensor": 20, "programmable_switch": 21,
+        ]
 
         let roomsList: [[String: Any]] = selectedHome.rooms.compactMap { room in
             let filtered = filterAccessories(room.accessories)
             guard !filtered.isEmpty else { return nil }
-            let accessories: [[String: Any]] = filtered.map { accessory in
-                let id = accessory.uniqueIdentifier.uuidString
-                return AccessoryModel.accessorySummary(accessory, cachedState: cache.cachedState(for: id))
-            }
+            let accessories: [[String: Any]] = filtered
+                .map { accessory in
+                    let id = accessory.uniqueIdentifier.uuidString
+                    return AccessoryModel.accessorySummary(
+                        accessory, cachedState: cache.cachedState(for: id))
+                }
+                .sorted { a, b in
+                    let catA = a["category"] as? String ?? "other"
+                    let catB = b["category"] as? String ?? "other"
+                    let orderA = categoryOrder[catA] ?? 50
+                    let orderB = categoryOrder[catB] ?? 50
+                    if orderA != orderB { return orderA < orderB }
+                    return (a["name"] as? String ?? "") < (b["name"] as? String ?? "")
+                }
             return [
                 "name": room.name,
                 "accessories": accessories,
             ]
         }
+        .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
 
         return [
             "ready": true,

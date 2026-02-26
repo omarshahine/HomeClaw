@@ -183,12 +183,13 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        // Rooms with accessories
+        // Rooms with accessories, separated by room
         for room in rooms {
             let roomName = room["name"] as? String ?? "?"
             let accessories = room["accessories"] as? [[String: Any]] ?? []
             guard !accessories.isEmpty else { continue }
 
+            menu.addItem(.separator())
             addSectionHeader(roomName, to: menu)
             for accessory in accessories {
                 addAccessoryItem(accessory, to: menu)
@@ -375,10 +376,10 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
     private func symbolForCategory(_ category: String, isOn: Bool) -> String {
         switch category {
-        case "lightbulb": return isOn ? "lightbulb.fill" : "lightbulb"
-        case "fan": return isOn ? "fan.fill" : "fan"
+        case "lightbulb": return isOn ? "lightbulb.fill" : "lightbulb.slash"
+        case "fan": return isOn ? "fan.fill" : "fan.slash"
         case "outlet": return isOn ? "powerplug.fill" : "powerplug"
-        case "switch": return "switch.2"
+        case "switch": return isOn ? "lightswitch.on.fill" : "lightswitch.off"
         case "thermostat": return "thermometer.medium"
         case "lock": return "lock.fill"
         case "garage_door": return "door.garage.closed"
