@@ -18,14 +18,6 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
 
     // MARK: - Mac2iOS Protocol
 
-    @objc var isHomeKitReady: Bool {
-        HomeKitManager.shared.isReady
-    }
-
-    @objc var homeNames: [String] {
-        HomeKitManager.shared.homes.map(\.name)
-    }
-
     @objc var isLaunchAtLoginEnabled: Bool {
         #if canImport(ServiceManagement)
         SMAppService.mainApp.status == .enabled

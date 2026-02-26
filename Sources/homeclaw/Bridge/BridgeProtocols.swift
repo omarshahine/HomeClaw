@@ -4,8 +4,6 @@ import Foundation
 /// The macOSBridge bundle calls these methods via its `iOSBridge` reference.
 @MainActor
 @objc(Mac2iOS) public protocol Mac2iOS: NSObjectProtocol {
-    var isHomeKitReady: Bool { get }
-    var homeNames: [String] { get }
     var isLaunchAtLoginEnabled: Bool { get }
     func setLaunchAtLogin(_ enabled: Bool)
     func refreshData()
