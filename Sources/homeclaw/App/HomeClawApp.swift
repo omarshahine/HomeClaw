@@ -15,12 +15,11 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     // MARK: - Mac2iOS Protocol
 
     @objc var isHomeKitReady: Bool {
-        // MainActor access — safe because UIApplicationDelegate runs on main thread
-        false  // Will be updated via notification
+        HomeKitManager.shared.isReady
     }
 
     @objc var homeNames: [String] {
-        []
+        HomeKitManager.shared.homes.map(\.name)
     }
 
     @objc func refreshData() {
