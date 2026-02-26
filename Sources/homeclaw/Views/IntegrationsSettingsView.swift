@@ -47,7 +47,10 @@ struct IntegrationsSettingsView: View {
     // MARK: - Constants & Paths
 
     private static let serverName = "homeclaw"
+    /// Legacy server name from when the app was called "HomeKit Bridge".
+    private static let legacyServerName = "homekit-bridge"
     private static let pluginPrefix = "homeclaw@"
+    private static let legacyPluginPrefix = "homekit-bridge@"
     private static let githubRepo = "omarshahine/HomeClaw"
     private static let openClawPluginID = "homeclaw"
     /// Homebrew bin directory — `/opt/homebrew/bin` on Apple Silicon, `/usr/local/bin` on Intel.
@@ -130,6 +133,8 @@ struct IntegrationsSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .padding(.horizontal, -8)
         .onAppear {
             refreshStatuses()
         }
@@ -139,7 +144,7 @@ struct IntegrationsSettingsView: View {
 
     @ViewBuilder
     private var cliSection: some View {
-        Section("Command Line") {
+        Section {
             LabeledContent("Status") {
                 cliStatusLabel
             }
@@ -168,6 +173,8 @@ struct IntegrationsSettingsView: View {
             Text("Creates a symlink at \(Self.cliSymlinkPath) pointing to the bundled binary. Requires administrator privileges.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            Text("Command Line").font(.headline).foregroundStyle(.primary)
         }
     }
 
@@ -190,7 +197,7 @@ struct IntegrationsSettingsView: View {
 
     @ViewBuilder
     private var claudeDesktopSection: some View {
-        Section("Claude Desktop") {
+        Section {
             LabeledContent("Status") {
                 desktopStatusLabel
             }
@@ -231,6 +238,8 @@ struct IntegrationsSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        } header: {
+            Text("Claude Desktop").font(.headline).foregroundStyle(.primary)
         }
     }
 
@@ -238,7 +247,7 @@ struct IntegrationsSettingsView: View {
 
     @ViewBuilder
     private var claudeCodeSection: some View {
-        Section("Claude Code") {
+        Section {
             LabeledContent("Status") {
                 claudeCodeStatusLabel
             }
@@ -259,6 +268,8 @@ struct IntegrationsSettingsView: View {
             case .checking:
                 EmptyView()
             }
+        } header: {
+            Text("Claude Code").font(.headline).foregroundStyle(.primary)
         }
     }
 
@@ -283,7 +294,7 @@ struct IntegrationsSettingsView: View {
 
     @ViewBuilder
     private var openClawSection: some View {
-        Section("OpenClaw") {
+        Section {
             LabeledContent("Status") {
                 openClawStatusLabel
             }
@@ -340,6 +351,8 @@ struct IntegrationsSettingsView: View {
             case .checking:
                 EmptyView()
             }
+        } header: {
+            Text("OpenClaw").font(.headline).foregroundStyle(.primary)
         }
     }
 
@@ -429,7 +442,7 @@ struct IntegrationsSettingsView: View {
 
         guard let config = readConfig(at: Self.claudeDesktopConfigPath),
             let servers = config["mcpServers"] as? [String: Any],
-            servers[Self.serverName] != nil
+            servers[Self.serverName] != nil || servers[Self.legacyServerName] != nil
         else {
             return .notInstalled
         }
@@ -446,7 +459,7 @@ struct IntegrationsSettingsView: View {
         guard let config = readConfig(at: Self.claudeCodeSettingsPath),
             let enabled = config["enabledPlugins"] as? [String: Any]
         else { return false }
-        return enabled.keys.contains { $0.hasPrefix(Self.pluginPrefix) }
+        return enabled.keys.contains { $0.hasPrefix(Self.pluginPrefix) || $0.hasPrefix(Self.legacyPluginPrefix) }
     }
 
     private func checkOpenClawStatus() -> OpenClawStatus {
@@ -672,6 +685,7 @@ struct IntegrationsSettingsView: View {
         guard var servers = config["mcpServers"] as? [String: Any] else { return }
 
         servers.removeValue(forKey: Self.serverName)
+        servers.removeValue(forKey: Self.legacyServerName)
         config["mcpServers"] = servers
 
         do {
@@ -701,6 +715,8 @@ struct IntegrationsSettingsView: View {
     private func upsertMCPServer(entry: [String: Any], in configPath: String) throws {
         var config = readConfig(at: configPath) ?? [:]
         var servers = config["mcpServers"] as? [String: Any] ?? [:]
+        // Remove legacy entry if present
+        servers.removeValue(forKey: Self.legacyServerName)
         servers[Self.serverName] = entry
         config["mcpServers"] = servers
         try writeConfig(config, to: configPath)

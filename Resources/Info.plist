@@ -28,8 +28,13 @@
 	<true/>
 	<key>NSHomeKitUsageDescription</key>
 	<string>HomeClaw needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
-	<key>UIApplicationSupportsMultipleScenes</key>
-	<false/>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationLandscapeLeft</string>

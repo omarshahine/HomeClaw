@@ -6,6 +6,8 @@ import Foundation
 @objc(Mac2iOS) public protocol Mac2iOS: NSObjectProtocol {
     var isHomeKitReady: Bool { get }
     var homeNames: [String] { get }
+    var isLaunchAtLoginEnabled: Bool { get }
+    func setLaunchAtLogin(_ enabled: Bool)
     func refreshData()
     func openSettings()
     func quitApp()

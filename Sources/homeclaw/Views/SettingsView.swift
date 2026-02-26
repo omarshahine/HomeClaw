@@ -1,14 +1,8 @@
-#if canImport(ServiceManagement)
-import ServiceManagement
-#endif
 import SwiftUI
 
 struct SettingsView: View {
     var body: some View {
         TabView {
-            Tab("General", systemImage: "gear") {
-                GeneralSettingsView()
-            }
             Tab("HomeKit", systemImage: "house") {
                 HomeKitSettingsView()
             }
@@ -23,37 +17,6 @@ struct SettingsView: View {
                 #endif
             }
         }
-        .frame(width: 550, height: 550)
-    }
-}
-
-// MARK: - General
-
-private struct GeneralSettingsView: View {
-    @AppStorage(AppConfig.launchAtLoginKey) private var launchAtLogin = false
-
-    var body: some View {
-        Form {
-            #if canImport(ServiceManagement)
-            Toggle("Launch at Login", isOn: $launchAtLogin)
-                .onChange(of: launchAtLogin) { _, newValue in
-                    do {
-                        if newValue {
-                            try SMAppService.mainApp.register()
-                        } else {
-                            try SMAppService.mainApp.unregister()
-                        }
-                    } catch {
-                        AppLogger.app.error("Launch at login toggle failed: \(error.localizedDescription)")
-                    }
-                }
-            #endif
-
-            Text("HomeClaw v\(AppConfig.version) (\(AppConfig.build))")
-                .foregroundStyle(.secondary)
-                .font(.caption)
-        }
-        .formStyle(.grouped)
     }
 }
 
@@ -114,7 +77,7 @@ private struct HomeKitSettingsView: View {
                             HomeClawConfig.shared.defaultHomeID = newValue
                         }
 
-                        Text("All commands operate on the selected home. Use the CLI to switch homes.")
+                        Text("All commands operate on the selected home.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -127,6 +90,8 @@ private struct HomeKitSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .scrollDisabled(true)
         .task { await loadStatus() }
     }
 
@@ -179,12 +144,10 @@ private struct DeviceFilterSettingsView: View {
         var isAllowed: Bool
     }
 
-    /// All unique home names derived from loaded accessories.
     private var homeNames: [String] {
         Array(Set(allAccessories.map(\.homeName))).sorted()
     }
 
-    /// Accessories scoped to the selected home.
     private var accessories: [AccessoryItem] {
         allAccessories.filter { $0.homeName == selectedHome }
     }
@@ -204,7 +167,6 @@ private struct DeviceFilterSettingsView: View {
         return grouped.sorted { $0.key < $1.key }.map { (room: $0.key, items: $0.value) }
     }
 
-    /// Allowed count scoped to the selected home (for the footer display).
     private var allowedCountInHome: Int {
         accessories.filter(\.isAllowed).count
     }
@@ -226,9 +188,9 @@ private struct DeviceFilterSettingsView: View {
                 }
                 Spacer()
             }
-            .padding(.horizontal)
-            .padding(.top, 12)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 6)
 
             // Home selector
             if homeNames.count > 1 {
@@ -243,8 +205,8 @@ private struct DeviceFilterSettingsView: View {
                     .frame(maxWidth: 250)
                     Spacer()
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
             }
 
             if isLoading {
@@ -264,11 +226,11 @@ private struct DeviceFilterSettingsView: View {
                     TextField("Search by name, room, or category...", text: $searchText)
                         .textFieldStyle(.plain)
                 }
-                .padding(8)
+                .padding(6)
                 .background(.quaternary)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .padding(.horizontal)
-                .padding(.bottom, 8)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
 
                 // Accessory list grouped by room
                 List {
@@ -290,7 +252,7 @@ private struct DeviceFilterSettingsView: View {
                                     Text(group.room)
                                         .font(.headline)
                                 }
-                                .toggleStyle(.switch)
+                                .toggleStyle(.automatic)
                                 .foregroundStyle(someChecked && !allChecked ? .secondary : .primary)
                             }
                         }
@@ -311,8 +273,8 @@ private struct DeviceFilterSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
             }
         }
         .task { await loadAccessories() }
@@ -335,7 +297,7 @@ private struct DeviceFilterSettingsView: View {
                     .font(.caption)
             }
         }
-        .toggleStyle(.switch)
+        .toggleStyle(.automatic)
     }
 
     // MARK: - Actions
@@ -527,6 +489,7 @@ private struct AppStoreIntegrationsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
     }
 
     private func copyToClipboard(_ text: String, label: String) {

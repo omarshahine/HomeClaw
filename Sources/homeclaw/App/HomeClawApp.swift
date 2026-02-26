@@ -1,3 +1,7 @@
+#if canImport(ServiceManagement)
+import ServiceManagement
+#endif
+import SwiftUI
 import UIKit
 
 /// Unified Mac Catalyst app that provides HomeKit access, a socket server for
@@ -22,6 +26,29 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         HomeKitManager.shared.homes.map(\.name)
     }
 
+    @objc var isLaunchAtLoginEnabled: Bool {
+        #if canImport(ServiceManagement)
+        SMAppService.mainApp.status == .enabled
+        #else
+        false
+        #endif
+    }
+
+    @objc func setLaunchAtLogin(_ enabled: Bool) {
+        #if canImport(ServiceManagement)
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            AppLogger.app.info("Launch at login set to \(enabled)")
+        } catch {
+            AppLogger.app.error("Launch at login toggle failed: \(error.localizedDescription)")
+        }
+        #endif
+    }
+
     @objc func refreshData() {
         Task { @MainActor in
             _ = await HomeKitManager.shared.refreshCache()
@@ -29,9 +56,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func openSettings() {
-        // Request a new scene session for settings, or activate existing one
         let activity = NSUserActivity(activityType: "com.shahine.homeclaw.settings")
-        UIApplication.shared.requestSceneSessionActivation(nil, userActivity: activity, options: nil)
+        UIApplication.shared.requestSceneSessionActivation(
+            nil, userActivity: activity, options: nil)
     }
 
     @objc func quitApp() {
@@ -114,11 +141,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
-        // Check if this is a settings scene request
-        if let activity = options.userActivities.first,
-           activity.activityType == "com.shahine.homeclaw.settings"
-        {
-            let config = UISceneConfiguration(name: "Settings", sessionRole: connectingSceneSession.role)
+        // Settings window — triggered by openSettings() via macOSBridge menu
+        if options.userActivities.first?.activityType == "com.shahine.homeclaw.settings" {
+            let config = UISceneConfiguration(
+                name: "Settings", sessionRole: connectingSceneSession.role)
             config.delegateClass = SettingsSceneDelegate.self
             return config
         }
@@ -196,6 +222,125 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     #endif
 }
 
+// MARK: - Settings Scene Delegate
+
+/// Creates a window hosting the SwiftUI SettingsView when triggered by openSettings().
+class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    func scene(
+        _ scene: UIScene, willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = UIHostingController(rootView: SettingsView())
+        window.makeKeyAndVisible()
+        self.window = window
+
+        #if targetEnvironment(macCatalyst)
+        // Single space title suppresses the app name without showing text
+        windowScene.title = " "
+        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
+        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
+
+        // Bring the app to the foreground and center the window.
+        // Two-phase: activate immediately, then center after the window is laid out.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            Self.activateApp()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            Self.centerWindow()
+        }
+        #endif
+
+        AppLogger.app.info("Settings window opened")
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// Temporarily set activation policy to .regular so the settings window is visible,
+    /// then revert to .accessory when the scene disconnects.
+    private static func activateApp() {
+        guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
+              let metaclass = object_getClass(nsAppClass),
+              let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
+        else { return }
+        typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
+        let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
+            nsAppClass, NSSelectorFromString("sharedApplication"))
+
+        let setPolicySel = NSSelectorFromString("setActivationPolicy:")
+        guard sharedApp.responds(to: setPolicySel) else { return }
+        typealias SetPolicyFn = @convention(c) (NSObject, Selector, Int) -> Bool
+        let setPolicy = unsafeBitCast(sharedApp.method(for: setPolicySel), to: SetPolicyFn.self)
+        _ = setPolicy(sharedApp, setPolicySel, 0)  // 0 = regular
+
+        let activateSel = NSSelectorFromString("activateIgnoringOtherApps:")
+        if sharedApp.responds(to: activateSel) {
+            typealias ActivateFn = @convention(c) (NSObject, Selector, Bool) -> Void
+            let activate = unsafeBitCast(sharedApp.method(for: activateSel), to: ActivateFn.self)
+            activate(sharedApp, activateSel, true)
+        }
+    }
+
+    /// Centers the key NSWindow on screen via ObjC runtime.
+    private static func centerWindow() {
+        guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
+              let metaclass = object_getClass(nsAppClass),
+              let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
+        else { return }
+        typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
+        let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
+            nsAppClass, NSSelectorFromString("sharedApplication"))
+
+        // Prefer the key window; fall back to the last visible window
+        let keyWindowSel = NSSelectorFromString("keyWindow")
+        var targetWindow: NSObject?
+        if sharedApp.responds(to: keyWindowSel),
+           let kw = sharedApp.value(forKey: "keyWindow") as? NSObject {
+            targetWindow = kw
+        } else if let windows = sharedApp.value(forKey: "windows") as? [NSObject] {
+            // Find a visible window (isVisible == true)
+            let isVisibleSel = NSSelectorFromString("isVisible")
+            targetWindow = windows.last(where: {
+                $0.responds(to: isVisibleSel) && ($0.value(forKey: "visible") as? Bool == true)
+            }) ?? windows.last
+        }
+
+        if let window = targetWindow {
+            let centerSel = NSSelectorFromString("center")
+            if window.responds(to: centerSel) {
+                typealias CenterFn = @convention(c) (NSObject, Selector) -> Void
+                let center = unsafeBitCast(window.method(for: centerSel), to: CenterFn.self)
+                center(window, centerSel)
+            }
+        }
+    }
+    #endif
+
+    func sceneDidDisconnect(_ scene: UIScene) {
+        #if targetEnvironment(macCatalyst)
+        // Revert to accessory (no dock icon) when settings closes
+        guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
+              let metaclass = object_getClass(nsAppClass),
+              let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
+        else { return }
+        typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
+        let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
+            nsAppClass, NSSelectorFromString("sharedApplication"))
+
+        let setPolicySel = NSSelectorFromString("setActivationPolicy:")
+        guard sharedApp.responds(to: setPolicySel) else { return }
+        typealias SetPolicyFn = @convention(c) (NSObject, Selector, Int) -> Bool
+        let setPolicy = unsafeBitCast(sharedApp.method(for: setPolicySel), to: SetPolicyFn.self)
+        _ = setPolicy(sharedApp, setPolicySel, 1)  // 1 = accessory
+
+        AppLogger.app.info("Settings closed — reverted to accessory mode")
+        #endif
+    }
+}
+
 // MARK: - Headless Scene Delegate
 
 /// Keeps the default scene session alive without showing any window.
@@ -254,33 +399,3 @@ class HeadlessSceneDelegate: UIResponder, UIWindowSceneDelegate {
     #endif
 }
 
-// MARK: - Settings Scene Delegate
-
-/// Manages the settings window scene.
-import SwiftUI
-
-class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
-    var window: UIWindow?
-
-    func scene(
-        _ scene: UIScene, willConnectTo session: UISceneSession,
-        options connectionOptions: UIScene.ConnectionOptions
-    ) {
-        guard let windowScene = scene as? UIWindowScene else { return }
-
-        #if targetEnvironment(macCatalyst)
-        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 550, height: 550)
-        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 700, height: 700)
-        if let titlebar = windowScene.titlebar {
-            titlebar.titleVisibility = .visible
-        }
-        #endif
-
-        let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = UIHostingController(rootView: SettingsView())
-        self.window = window
-        window.makeKeyAndVisible()
-
-        AppLogger.app.info("Settings scene connected")
-    }
-}

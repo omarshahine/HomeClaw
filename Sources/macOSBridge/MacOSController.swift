@@ -69,10 +69,21 @@ public class MacOSController: NSObject, iOS2Mac {
 
         menu.addItem(.separator())
 
+        // Launch at Login
+        let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchItem.target = self
+        let isEnabled = iOSBridge?.isLaunchAtLoginEnabled ?? false
+        launchItem.image = NSImage(
+            systemSymbolName: isEnabled ? "checkmark.circle.fill" : "circle",
+            accessibilityDescription: isEnabled ? "Enabled" : "Disabled")
+        menu.addItem(launchItem)
+
         // Settings
-        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: "Settings\u{2026}", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
 
         // Quit
         let quitItem = NSMenuItem(title: "Quit HomeClaw", action: #selector(quitApp), keyEquivalent: "q")
@@ -81,6 +92,13 @@ public class MacOSController: NSObject, iOS2Mac {
     }
 
     // MARK: - Actions
+
+    @objc private func toggleLaunchAtLogin() {
+        guard let bridge = iOSBridge else { return }
+        let newValue = !bridge.isLaunchAtLoginEnabled
+        bridge.setLaunchAtLogin(newValue)
+        rebuildMenu()
+    }
 
     @objc private func openSettings() {
         iOSBridge?.openSettings()
