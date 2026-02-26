@@ -147,6 +147,9 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             menu.addItem(homeItem)
         }
 
+        // Settings and Launch at Login right below the home selector
+        addAppItems(to: menu)
+
         menu.addItem(.separator())
 
         // Scenes
@@ -204,6 +207,9 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
         // Skip infrastructure devices that aren't user-controllable
         guard !Self.hiddenCategories.contains(category) else { return }
+        let nameLower = name.lowercased()
+        guard !nameLower.contains("hub") && !nameLower.contains("bridge")
+                && !nameLower.contains("homebridge") else { return }
 
         let behavior = accessoryBehavior(category: category, state: state)
 
@@ -258,9 +264,7 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         }
     }
 
-    private func addStandardItems(to menu: NSMenu) {
-        menu.addItem(.separator())
-
+    private func addAppItems(to menu: NSMenu) {
         // Launch at Login
         let launchItem = NSMenuItem(
             title: "Launch at Login",
@@ -280,7 +284,9 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+    }
 
+    private func addStandardItems(to menu: NSMenu) {
         menu.addItem(.separator())
 
         // Quit

@@ -280,12 +280,10 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
         windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
 
-        // Bring the app to the foreground and center the window.
-        // Two-phase: activate immediately, then center after the window is laid out.
+        // Bring the app to the foreground and center the window in one pass
+        // so the window doesn't appear off-center then visibly jump.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             Self.activateApp()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             Self.centerWindow()
         }
         #endif
