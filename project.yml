@@ -49,6 +49,14 @@ targets:
         MACOSX_BUNDLE_ICON_FILE: HomeClaw
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+      configs:
+        Debug:
+          ENABLE_APP_SANDBOX: NO
+        Release:
+          ENABLE_APP_SANDBOX: YES
+          ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
+          ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APP_STORE"
     entitlements:
       path: Resources/HomeClaw.entitlements
       properties:
@@ -157,6 +165,12 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Resources/homeclaw-cli.entitlements
         ENABLE_HARDENED_RUNTIME: YES
         SKIP_INSTALL: YES
+      configs:
+        Debug:
+          ENABLE_APP_SANDBOX: NO
+        Release:
+          ENABLE_APP_SANDBOX: YES
+          ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
 
 schemes:
   HomeClaw:
