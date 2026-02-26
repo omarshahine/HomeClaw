@@ -9,6 +9,9 @@ import Foundation
     func refreshData()
     func openSettings()
     func quitApp()
+    func controlAccessory(id: String, characteristic: String, value: String)
+    func triggerScene(id: String)
+    func selectHome(id: String)
 }
 
 /// Protocol for the macOS bridge bundle (NSStatusItem menu bar) to receive updates.
@@ -18,5 +21,6 @@ import Foundation
     init()
     var iOSBridge: (any Mac2iOS)? { get set }
     func updateStatus(ready: Bool, homeNames: [String])
+    func updateMenuData(_ data: [String: Any])
     func showError(message: String)
 }

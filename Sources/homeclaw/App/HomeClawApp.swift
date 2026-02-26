@@ -15,6 +15,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
 
     private var macOSController: (any iOS2Mac)?
     private var homeKitObserver: NSObjectProtocol?
+    private var menuDataObserver: NSObjectProtocol?
 
     // MARK: - Mac2iOS Protocol
 
@@ -45,6 +46,33 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         Task { @MainActor in
             _ = await HomeKitManager.shared.refreshCache()
         }
+    }
+
+    @objc func controlAccessory(id: String, characteristic: String, value: String) {
+        Task { @MainActor in
+            do {
+                _ = try await HomeKitManager.shared.controlAccessory(
+                    id: id, characteristic: characteristic, value: value)
+            } catch {
+                AppLogger.app.error("Menu control failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    @objc func triggerScene(id: String) {
+        Task { @MainActor in
+            do {
+                _ = try await HomeKitManager.shared.triggerScene(id: id)
+            } catch {
+                AppLogger.app.error("Menu scene trigger failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    @objc func selectHome(id: String) {
+        HomeClawConfig.shared.defaultHomeID = id
+        HomeKitManager.shared.scheduleMenuDataPush()
+        refreshData()
     }
 
     @objc func openSettings() {
@@ -115,6 +143,18 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             }
         }
 
+        // Observe HomeKit menu data changes for the interactive menu
+        menuDataObserver = NotificationCenter.default.addObserver(
+            forName: .homeKitMenuDataDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                let data = HomeKitManager.shared.buildMenuData()
+                self?.macOSController?.updateMenuData(data)
+            }
+        }
+
         return true
     }
 
@@ -122,6 +162,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         AppLogger.app.info("HomeClaw shutting down...")
         SocketServer.shared.stop()
         if let observer = homeKitObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = menuDataObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
