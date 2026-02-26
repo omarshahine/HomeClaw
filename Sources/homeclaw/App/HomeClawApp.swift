@@ -55,6 +55,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
                     id: id, characteristic: characteristic, value: value)
             } catch {
                 AppLogger.app.error("Menu control failed: \(error.localizedDescription)")
+                macOSController?.flashError()
             }
         }
     }
@@ -65,6 +66,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
                 _ = try await HomeKitManager.shared.triggerScene(id: id)
             } catch {
                 AppLogger.app.error("Menu scene trigger failed: \(error.localizedDescription)")
+                macOSController?.flashError()
             }
         }
     }
@@ -352,9 +354,29 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
     #endif
 
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        #if targetEnvironment(macCatalyst)
+        // Revert to accessory (no dock icon) when settings window closes.
+        // In Catalyst, closing a window backgrounds the scene rather than
+        // disconnecting it, so sceneDidDisconnect is not called.
+        Self.revertToAccessoryPolicy()
+
+        // Destroy the scene session so it doesn't linger
+        if let session = (scene as? UIWindowScene)?.session {
+            UIApplication.shared.requestSceneSessionDestruction(
+                session, options: nil)
+        }
+        #endif
+    }
+
     func sceneDidDisconnect(_ scene: UIScene) {
         #if targetEnvironment(macCatalyst)
-        // Revert to accessory (no dock icon) when settings closes
+        Self.revertToAccessoryPolicy()
+        #endif
+    }
+
+    #if targetEnvironment(macCatalyst)
+    private static func revertToAccessoryPolicy() {
         guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
               let metaclass = object_getClass(nsAppClass),
               let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
@@ -370,8 +392,8 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         _ = setPolicy(sharedApp, setPolicySel, 1)  // 1 = accessory
 
         AppLogger.app.info("Settings closed — reverted to accessory mode")
-        #endif
     }
+    #endif
 }
 
 // MARK: - Headless Scene Delegate

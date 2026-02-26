@@ -52,6 +52,17 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         rebuildMenu()
     }
 
+    public func flashError() {
+        guard let button = statusItem?.button else { return }
+        let originalImage = button.image
+        button.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: "Error")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            button.image = originalImage
+        }
+    }
+
     // MARK: - NSMenuDelegate
 
     public func menuWillOpen(_ menu: NSMenu) {
@@ -207,9 +218,6 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
         // Skip infrastructure devices that aren't user-controllable
         guard !Self.hiddenCategories.contains(category) else { return }
-        let nameLower = name.lowercased()
-        guard !nameLower.contains("hub") && !nameLower.contains("bridge")
-                && !nameLower.contains("homebridge") else { return }
 
         let behavior = accessoryBehavior(category: category, state: state)
 

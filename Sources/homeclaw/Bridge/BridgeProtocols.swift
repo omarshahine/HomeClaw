@@ -23,4 +23,5 @@ import Foundation
     func updateStatus(ready: Bool, homeNames: [String])
     func updateMenuData(_ data: [String: Any])
     func showError(message: String)
+    func flashError()
 }
