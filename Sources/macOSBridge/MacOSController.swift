@@ -19,6 +19,8 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
     private var menuIsOpen = false
     private var pendingMenuData: [String: Any]?
+    private var originalStatusImage: NSImage?
+    private var errorRestoreWorkItem: DispatchWorkItem?
 
     public override required init() {
         super.init()
@@ -54,13 +56,24 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
     public func flashError() {
         guard let button = statusItem?.button else { return }
-        let originalImage = button.image
+
+        // Only capture the original icon if not already flashing
+        if originalStatusImage == nil {
+            originalStatusImage = button.image
+        }
+
         button.image = NSImage(
             systemSymbolName: "exclamationmark.triangle.fill",
             accessibilityDescription: "Error")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            button.image = originalImage
+
+        // Cancel any pending restoration and schedule a new one
+        errorRestoreWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self, weak button] in
+            button?.image = self?.originalStatusImage
+            self?.originalStatusImage = nil
         }
+        errorRestoreWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: workItem)
     }
 
     // MARK: - NSMenuDelegate
