@@ -198,11 +198,14 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
         // Rooms with accessories, separated by room.
         // Room headers with light sources are toggleable — click to turn all lights on/off.
+        // Rooms where all accessories are hidden (cameras-only, etc.) are skipped entirely.
         let lightCategories: Set<String> = ["lightbulb", "switch"]
         for room in rooms {
             let roomName = room["name"] as? String ?? "?"
             let accessories = room["accessories"] as? [[String: Any]] ?? []
-            guard !accessories.isEmpty else { continue }
+
+            // Skip rooms where no accessory will actually be displayed
+            guard accessories.contains(where: { isAccessoryVisible($0) }) else { continue }
 
             menu.addItem(.separator())
 
@@ -252,6 +255,17 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     private static let hiddenCategories: Set<String> = [
         "bridge", "range_extender",
     ]
+
+    /// Whether an accessory will produce a visible menu item.
+    /// Mirrors the filtering logic in `addAccessoryItem`.
+    private func isAccessoryVisible(_ accessory: [String: Any]) -> Bool {
+        let category = accessory["category"] as? String ?? "other"
+        guard !Self.hiddenCategories.contains(category) else { return false }
+        let state = accessory["state"] as? [String: String] ?? [:]
+        let behavior = accessoryBehavior(category: category, state: state)
+        if case .statusOnly(let text) = behavior, text.isEmpty { return false }
+        return true
+    }
 
     private func addAccessoryItem(_ accessory: [String: Any], to menu: NSMenu) {
         let name = accessory["name"] as? String ?? "?"
