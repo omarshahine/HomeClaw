@@ -196,14 +196,29 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        // Rooms with accessories, separated by room
+        // Rooms with accessories, separated by room.
+        // Room headers with light sources are toggleable — click to turn all lights on/off.
+        let lightCategories: Set<String> = ["lightbulb", "switch"]
         for room in rooms {
             let roomName = room["name"] as? String ?? "?"
             let accessories = room["accessories"] as? [[String: Any]] ?? []
             guard !accessories.isEmpty else { continue }
 
             menu.addItem(.separator())
-            addSectionHeader(roomName, to: menu)
+
+            let lights = accessories.filter { acc in
+                lightCategories.contains(acc["category"] as? String ?? "")
+            }
+            if lights.isEmpty {
+                addSectionHeader(roomName, to: menu)
+            } else {
+                let lightIDs = lights.compactMap { $0["id"] as? String }
+                let anyOn = lights.contains { acc in
+                    (acc["state"] as? [String: String] ?? [:])["power"] == "true"
+                }
+                addRoomToggleHeader(roomName, lightIDs: lightIDs, anyOn: anyOn, to: menu)
+            }
+
             for accessory in accessories {
                 addAccessoryItem(accessory, to: menu)
             }
@@ -215,6 +230,21 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         item.attributedTitle = NSAttributedString(
             string: title,
             attributes: [.font: NSFont.boldSystemFont(ofSize: 0)])
+        menu.addItem(item)
+    }
+
+    private func addRoomToggleHeader(
+        _ title: String, lightIDs: [String], anyOn: Bool, to menu: NSMenu
+    ) {
+        let symbol = anyOn ? "lightbulb.fill" : "lightbulb.slash"
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(toggleRoomLights(_:)),
+            keyEquivalent: "")
+        item.target = self
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Toggle lights")
+        item.representedObject = ["ids": lightIDs, "turnOff": anyOn]
+        if anyOn { item.state = .on }
         menu.addItem(item)
     }
 
@@ -234,6 +264,13 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         guard !Self.hiddenCategories.contains(category) else { return }
 
         let behavior = accessoryBehavior(category: category, state: state)
+
+        // Skip accessories that have no toggle action and no informational status.
+        // This hides cameras, doorbells, speakers, TVs, network devices, and sensors
+        // with no readable values — they just take up menu space without providing value.
+        if case .statusOnly(let text) = behavior, text.isEmpty {
+            return
+        }
 
         switch behavior {
         case .toggle(let isOn):
@@ -447,6 +484,76 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         }
 
         iOSBridge?.controlAccessory(id: id, characteristic: characteristic, value: newValue)
+
+        // Optimistically update menuData so the next menu open reflects the toggle
+        optimisticallyUpdateState(id: id, characteristic: characteristic, value: newValue)
+    }
+
+    @objc private func toggleRoomLights(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? [String: Any],
+              let ids = info["ids"] as? [String],
+              let turnOff = info["turnOff"] as? Bool
+        else { return }
+
+        let newValue = turnOff ? "false" : "true"
+        for id in ids {
+            iOSBridge?.controlAccessory(id: id, characteristic: "power", value: newValue)
+        }
+
+        // Optimistically update menuData so the next menu open reflects the toggle
+        // immediately, before the HomeKit state-change callback arrives.
+        optimisticallyUpdatePower(ids: ids, newValue: newValue)
+    }
+
+    // MARK: - Optimistic State Updates
+
+    /// Patch a single accessory's state in `menuData` so the next menu rebuild
+    /// reflects the change before the HomeKit callback arrives.
+    private func optimisticallyUpdateState(id: String, characteristic: String, value: String) {
+        guard var data = menuData,
+              var rooms = data["rooms"] as? [[String: Any]]
+        else { return }
+        for i in rooms.indices {
+            guard var accessories = rooms[i]["accessories"] as? [[String: Any]] else { continue }
+            for j in accessories.indices where accessories[j]["id"] as? String == id {
+                var state = accessories[j]["state"] as? [String: String] ?? [:]
+                state[characteristic] = value
+                accessories[j]["state"] = state
+                rooms[i]["accessories"] = accessories
+                data["rooms"] = rooms
+                menuData = data
+                // Discard any pending (stale) data so menuDidClose doesn't revert our patch.
+                // The next menuWillOpen will fetch fresh state from HomeKit.
+                pendingMenuData = nil
+                return
+            }
+        }
+    }
+
+    /// Batch-patch power state for multiple accessories (room light toggle).
+    private func optimisticallyUpdatePower(ids: [String], newValue: String) {
+        guard var data = menuData,
+              var rooms = data["rooms"] as? [[String: Any]]
+        else { return }
+        let idSet = Set(ids)
+        var remaining = idSet.count
+        for i in rooms.indices where remaining > 0 {
+            guard var accessories = rooms[i]["accessories"] as? [[String: Any]] else { continue }
+            var modified = false
+            for j in accessories.indices {
+                if let accId = accessories[j]["id"] as? String, idSet.contains(accId) {
+                    var state = accessories[j]["state"] as? [String: String] ?? [:]
+                    state["power"] = newValue
+                    accessories[j]["state"] = state
+                    modified = true
+                    remaining -= 1
+                }
+            }
+            if modified { rooms[i]["accessories"] = accessories }
+        }
+        data["rooms"] = rooms
+        menuData = data
+        pendingMenuData = nil
     }
 
     @objc private func setBrightness(_ sender: NSMenuItem) {
