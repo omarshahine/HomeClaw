@@ -21,6 +21,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     /// settings requests from UIKit scene session restoration on launch.
     static var settingsRequested = false
 
+    /// Set to true only by openOnboarding() — same gating pattern as settingsRequested.
+    static var onboardingRequested = false
+
     // MARK: - Mac2iOS Protocol
 
     @objc var isLaunchAtLoginEnabled: Bool {
@@ -88,6 +91,13 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             nil, userActivity: activity, options: nil)
     }
 
+    func openOnboarding() {
+        Self.onboardingRequested = true
+        let activity = NSUserActivity(activityType: "com.shahine.homeclaw.onboarding")
+        UIApplication.shared.requestSceneSessionActivation(
+            nil, userActivity: activity, options: nil)
+    }
+
     @objc func quitApp() {
         // Clean up socket before exit
         SocketServer.shared.stop()
@@ -122,9 +132,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         #if targetEnvironment(macCatalyst)
         setAccessoryActivationPolicy()
 
-        // Destroy any restored Settings scene sessions before UIKit connects
-        // them — prevents the Settings window from flashing on launch.
-        for session in application.openSessions where session.configuration.name == "Settings" {
+        // Destroy any restored Settings/Onboarding scene sessions before UIKit
+        // connects them — prevents windows from flashing on launch.
+        for session in application.openSessions
+        where session.configuration.name == "Settings" || session.configuration.name == "Onboarding" {
             application.requestSceneSessionDestruction(session, options: nil)
         }
         #endif
@@ -168,6 +179,15 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             }
         }
 
+        // Show onboarding on first launch — delay slightly to let HomeKit initialize
+        #if targetEnvironment(macCatalyst)
+        if !UserDefaults.standard.bool(forKey: "isOnboardingCompleted") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.openOnboarding()
+            }
+        }
+        #endif
+
         return true
     }
 
@@ -194,6 +214,14 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             let config = UISceneConfiguration(
                 name: "Settings", sessionRole: connectingSceneSession.role)
             config.delegateClass = SettingsSceneDelegate.self
+            return config
+        }
+
+        // Onboarding window — triggered by openOnboarding() on first launch
+        if options.userActivities.first?.activityType == "com.shahine.homeclaw.onboarding" {
+            let config = UISceneConfiguration(
+                name: "Onboarding", sessionRole: connectingSceneSession.role)
+            config.delegateClass = OnboardingSceneDelegate.self
             return config
         }
 
@@ -389,6 +417,136 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
                 session, options: nil)
         }
         AppLogger.app.info("Settings window closed")
+        #endif
+    }
+}
+
+// MARK: - Onboarding Scene Delegate
+
+/// Creates a window hosting the OnboardingView on first launch.
+class OnboardingSceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+    private var completionObserver: NSObjectProtocol?
+
+    func scene(
+        _ scene: UIScene, willConnectTo session: UISceneSession,
+        options connectionOptions: UIScene.ConnectionOptions
+    ) {
+        guard HomeClawApp.onboardingRequested else {
+            AppLogger.app.info("Onboarding scene restored on launch — discarding")
+            UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+            return
+        }
+        HomeClawApp.onboardingRequested = false
+
+        guard let windowScene = scene as? UIWindowScene else { return }
+
+        // Observe completion notification from the SwiftUI view.
+        // This decouples the view from UIKit scene lifecycle — the delegate
+        // owns the session and handles destruction directly.
+        completionObserver = NotificationCenter.default.addObserver(
+            forName: .onboardingDidComplete, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                UserDefaults.standard.set(true, forKey: "isOnboardingCompleted")
+                AppLogger.app.info("Onboarding completed — closing window")
+                // Close the backing NSWindow directly via ObjC runtime.
+                // requestSceneSessionDestruction is async and does not reliably
+                // dismiss the Catalyst window. Closing the NSWindow triggers
+                // sceneDidEnterBackground which handles session cleanup.
+                Self.closeNSKeyWindow()
+                self?.completionObserver = nil
+            }
+        }
+
+        let onboardingView = OnboardingFlowView {
+            NotificationCenter.default.post(name: .onboardingDidComplete, object: nil)
+        }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = UIHostingController(rootView: onboardingView)
+        window.makeKeyAndVisible()
+        self.window = window
+
+        #if targetEnvironment(macCatalyst)
+        windowScene.title = "Welcome to HomeClaw"
+        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 700, height: 600)
+        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 700, height: 600)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            Self.activateAndCenter()
+        }
+        #endif
+
+        AppLogger.app.info("Onboarding window opened")
+    }
+
+    #if targetEnvironment(macCatalyst)
+    /// Closes the current key NSWindow via the ObjC runtime.
+    /// In Catalyst, `requestSceneSessionDestruction` doesn't reliably close
+    /// the backing AppKit window. Calling `close` on the NSWindow does,
+    /// and triggers `sceneDidEnterBackground` for session cleanup.
+    private static func closeNSKeyWindow() {
+        guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
+              let metaclass = object_getClass(nsAppClass),
+              let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
+        else { return }
+        typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
+        let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
+            nsAppClass, NSSelectorFromString("sharedApplication"))
+
+        if let window = sharedApp.value(forKey: "keyWindow") as? NSObject {
+            let closeSel = NSSelectorFromString("close")
+            if window.responds(to: closeSel) {
+                typealias CloseFn = @convention(c) (NSObject, Selector) -> Void
+                let close = unsafeBitCast(window.method(for: closeSel), to: CloseFn.self)
+                close(window, closeSel)
+            }
+        }
+    }
+
+    private static func activateAndCenter() {
+        guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
+              let metaclass = object_getClass(nsAppClass),
+              let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
+        else { return }
+        typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
+        let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
+            nsAppClass, NSSelectorFromString("sharedApplication"))
+
+        // Activate
+        let activateSel = NSSelectorFromString("activateIgnoringOtherApps:")
+        if sharedApp.responds(to: activateSel) {
+            typealias ActivateFn = @convention(c) (NSObject, Selector, Bool) -> Void
+            let activate = unsafeBitCast(sharedApp.method(for: activateSel), to: ActivateFn.self)
+            activate(sharedApp, activateSel, true)
+        }
+
+        // Center the key window
+        if let window = sharedApp.value(forKey: "keyWindow") as? NSObject {
+            let centerSel = NSSelectorFromString("center")
+            if window.responds(to: centerSel) {
+                typealias CenterFn = @convention(c) (NSObject, Selector) -> Void
+                let center = unsafeBitCast(window.method(for: centerSel), to: CenterFn.self)
+                center(window, centerSel)
+            }
+
+            let orderFrontSel = NSSelectorFromString("orderFrontRegardless")
+            if window.responds(to: orderFrontSel) {
+                typealias OrderFrontFn = @convention(c) (NSObject, Selector) -> Void
+                let orderFront = unsafeBitCast(window.method(for: orderFrontSel), to: OrderFrontFn.self)
+                orderFront(window, orderFrontSel)
+            }
+        }
+    }
+    #endif
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        #if targetEnvironment(macCatalyst)
+        if let session = (scene as? UIWindowScene)?.session {
+            UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+        }
+        AppLogger.app.info("Onboarding window closed")
         #endif
     }
 }
