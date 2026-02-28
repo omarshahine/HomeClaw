@@ -638,6 +638,11 @@ struct IntegrationsSettingsView: View {
             return
         }
 
+        // Step 2.5: Add to plugins.load.paths so the Control UI settings page shows HomeClaw.
+        // `openclaw plugins install` tracks in plugins.installs but doesn't add to load.paths,
+        // which is what the Control UI settings page scans for plugin config forms.
+        addToLoadPaths(Self.openClawExtensionsPath)
+
         // Step 3: Symlink homeclaw-cli into PATH so the skill can find it.
         // The skill references `homeclaw-cli` by name, so it must be in PATH.
         let symlinkScript = """
@@ -670,6 +675,7 @@ struct IntegrationsSettingsView: View {
 
         let result = runProcess(cliPath, arguments: ["plugins", "disable", Self.openClawPluginID])
         if result.success {
+            removeFromLoadPaths(Self.openClawExtensionsPath)
             openClawStatus = .notInstalled
             showStatus("HomeClaw plugin removed from OpenClaw", isError: false)
             AppLogger.app.info("Removed OpenClaw plugin")
@@ -710,6 +716,51 @@ struct IntegrationsSettingsView: View {
         let data = try JSONSerialization.data(
             withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: URL(fileURLWithPath: path))
+    }
+
+    /// Adds a path to `plugins.load.paths` in `openclaw.json` so the Control UI settings page
+    /// shows the plugin's config form. No-op if the path is already present.
+    private func addToLoadPaths(_ pluginPath: String) {
+        let configPath = Self.openClawConfigPath
+        var config = readConfig(at: configPath) ?? [:]
+        var plugins = config["plugins"] as? [String: Any] ?? [:]
+        var load = plugins["load"] as? [String: Any] ?? [:]
+        var paths = load["paths"] as? [String] ?? []
+
+        guard !paths.contains(pluginPath) else { return }
+        paths.append(pluginPath)
+        load["paths"] = paths
+        plugins["load"] = load
+        config["plugins"] = plugins
+
+        do {
+            try writeConfig(config, to: configPath)
+            AppLogger.app.info("Added \(pluginPath) to plugins.load.paths")
+        } catch {
+            AppLogger.app.warning("Failed to update load.paths: \(error.localizedDescription)")
+        }
+    }
+
+    /// Removes a path from `plugins.load.paths` in `openclaw.json`.
+    private func removeFromLoadPaths(_ pluginPath: String) {
+        let configPath = Self.openClawConfigPath
+        guard var config = readConfig(at: configPath),
+              var plugins = config["plugins"] as? [String: Any],
+              var load = plugins["load"] as? [String: Any],
+              var paths = load["paths"] as? [String]
+        else { return }
+
+        paths.removeAll { $0 == pluginPath }
+        load["paths"] = paths
+        plugins["load"] = load
+        config["plugins"] = plugins
+
+        do {
+            try writeConfig(config, to: configPath)
+            AppLogger.app.info("Removed \(pluginPath) from plugins.load.paths")
+        } catch {
+            AppLogger.app.warning("Failed to update load.paths: \(error.localizedDescription)")
+        }
     }
 
     private func upsertMCPServer(entry: [String: Any], in configPath: String) throws {
