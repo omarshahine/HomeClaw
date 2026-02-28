@@ -20800,6 +20800,28 @@ var tools = [
         }
       }
     }
+  },
+  {
+    name: "homekit_events",
+    description: "Get recent HomeKit events \u2014 characteristic changes, scene triggers, and accessory control actions. Use to understand what happened recently in the home.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: {
+          type: "number",
+          description: "Maximum number of events to return (default: 50)"
+        },
+        since: {
+          type: "string",
+          description: "ISO 8601 timestamp \u2014 only return events after this time"
+        },
+        type: {
+          type: "string",
+          enum: ["characteristic_change", "homes_updated", "scene_triggered", "accessory_controlled"],
+          description: "Filter by event type"
+        }
+      }
+    }
   }
 ];
 
@@ -20929,6 +20951,13 @@ async function handleDeviceMap(args) {
   if (args.home_id) socketArgs.home_id = args.home_id;
   return sendCommand("device_map", socketArgs);
 }
+async function handleEvents(args) {
+  const socketArgs = {};
+  if (args.limit) socketArgs.limit = String(args.limit);
+  if (args.since) socketArgs.since = args.since;
+  if (args.type) socketArgs.type = args.type;
+  return sendCommand("events", socketArgs);
+}
 async function handleConfig(args) {
   const action = args.action || "get";
   switch (action) {
@@ -20984,6 +21013,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "homekit_config":
         result = await handleConfig(args);
+        break;
+      case "homekit_events":
+        result = await handleEvents(args);
         break;
       default:
         return {

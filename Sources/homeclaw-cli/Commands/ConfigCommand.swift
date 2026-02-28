@@ -18,6 +18,15 @@ struct Config: ParsableCommand {
     @Option(name: .long, help: "Set allowed accessory IDs (comma-separated UUIDs)")
     var allowAccessories: String?
 
+    @Option(name: .long, help: "Set webhook URL (e.g. http://127.0.0.1:18789/hooks/wake)")
+    var webhookURL: String?
+
+    @Option(name: .long, help: "Set webhook bearer token")
+    var webhookToken: String?
+
+    @Option(name: .long, help: "Enable or disable webhook (true/false)")
+    var webhookEnabled: String?
+
     @Flag(name: .long, help: "Show all accessories with their allowed status")
     var listDevices = false
 
@@ -56,6 +65,37 @@ struct Config: ParsableCommand {
                 printJSON(response.data?.value)
             } else {
                 print("Active home reset to primary home.")
+            }
+            return
+        }
+
+        // Apply webhook settings
+        if webhookURL != nil || webhookToken != nil || webhookEnabled != nil {
+            var args: [String: String] = [:]
+            if let url = webhookURL { args["url"] = url }
+            if let token = webhookToken { args["token"] = token }
+            if let enabled = webhookEnabled {
+                guard enabled == "true" || enabled == "false" else {
+                    throw ValidationError("--webhook-enabled must be 'true' or 'false'")
+                }
+                args["enabled"] = enabled
+            }
+            let response = try SocketClient.send(command: "set_webhook", args: args)
+            guard response.success else {
+                throw ValidationError(response.error ?? "Unknown error")
+            }
+            if json {
+                printJSON(response.data?.value)
+            } else {
+                print("Webhook configuration updated.")
+                if let data = response.data?.value as? [String: Any],
+                   let wh = data["webhook"] as? [String: Any]
+                {
+                    let enabled = wh["enabled"] as? Bool ?? false
+                    let url = wh["url"] as? String ?? ""
+                    print("  Enabled: \(enabled)")
+                    print("  URL:     \(url)")
+                }
             }
             return
         }
@@ -130,6 +170,13 @@ struct Config: ParsableCommand {
         }
         print("  Filter mode:   \(mode)")
         print("  Accessories:   \(filteredCount) of \(totalCount) exposed")
+
+        // Webhook status
+        if let webhook = config["webhook"] as? [String: Any] {
+            let whEnabled = webhook["enabled"] as? Bool ?? false
+            let whURL = webhook["url"] as? String ?? ""
+            print("  Webhook:       \(whEnabled ? "enabled" : "disabled")\(whEnabled && !whURL.isEmpty ? " (\(whURL))" : "")")
+        }
 
         if !homes.isEmpty {
             print("\nAvailable homes:")

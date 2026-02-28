@@ -12,6 +12,7 @@ final class HomeEventLogger {
     private let eventsFile: URL
     private let fileManager = FileManager.default
     private let logger = AppLogger.homekit
+    private static let isoFormatter = ISO8601DateFormatter()
 
     /// Webhook state
     private var webhookFailureCount = 0
@@ -65,7 +66,7 @@ final class HomeEventLogger {
         previousValue: String?
     ) {
         var event: [String: Any] = [
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.characteristicChange.rawValue,
             "accessory": [
                 "id": accessoryID,
@@ -85,7 +86,7 @@ final class HomeEventLogger {
     /// Logs a homes updated event from the HMHomeManagerDelegate callback.
     func logHomesUpdated(homeCount: Int, accessoryCount: Int) {
         let event: [String: Any] = [
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.homesUpdated.rawValue,
             "homes": homeCount,
             "accessories": accessoryCount,
@@ -96,7 +97,7 @@ final class HomeEventLogger {
     /// Logs a scene trigger event.
     func logSceneTriggered(sceneID: String, sceneName: String, homeName: String?) {
         var event: [String: Any] = [
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.sceneTriggered.rawValue,
             "scene": [
                 "id": sceneID,
@@ -117,7 +118,7 @@ final class HomeEventLogger {
         value: String
     ) {
         let event: [String: Any] = [
-            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.accessoryControlled.rawValue,
             "accessory": [
                 "id": accessoryID,
@@ -161,7 +162,7 @@ final class HomeEventLogger {
             if let since, let ts = event["timestamp"] as? String,
                let eventDate = formatter.date(from: ts), eventDate < since
             {
-                break // Events are chronological, so once we're past `since`, stop
+                break // Iterating newest-first; all remaining events are older, so stop
             }
 
             events.append(event)
@@ -275,7 +276,7 @@ final class HomeEventLogger {
             try? fileManager.removeItem(at: eventsFile)
         }
 
-        logger.info("Event log rotated (max \(maxFileSize / 1_048_576) MB, \(backups) backups)")
+        logger.info("Event log rotated (max \(self.maxFileSize / 1_048_576) MB, \(backups) backups)")
     }
 
     // MARK: - Triggers
@@ -437,7 +438,7 @@ final class HomeEventLogger {
         if webhookFailureCount >= webhookCircuitThreshold {
             webhookCircuitOpen = true
             webhookCircuitOpenedAt = Date()
-            logger.warning("Webhook circuit breaker opened after \(webhookCircuitThreshold) failures")
+            logger.warning("Webhook circuit breaker opened after \(self.webhookCircuitThreshold) failures")
         }
     }
 

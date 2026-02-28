@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {
     "swift-lsp@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true
+    "typescript-lsp@claude-plugins-official": true,
+    "greptile@claude-plugins-official": true
   }
 }

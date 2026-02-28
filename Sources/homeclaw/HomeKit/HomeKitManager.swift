@@ -199,7 +199,11 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
         let targetHomes = filteredHomes(homeID: homeID)
         return targetHomes.flatMap { home in
-            home.actionSets.map { AccessoryModel.sceneSummary($0) }
+            home.actionSets.map { actionSet in
+                var dict = AccessoryModel.sceneSummary(actionSet)
+                dict["home_name"] = home.name
+                return dict
+            }
         }
     }
 

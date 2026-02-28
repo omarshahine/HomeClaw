@@ -101,6 +101,18 @@ Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`,
 
 Use events to answer questions like "what changed recently?", "when was the front door last unlocked?", or "what scenes were triggered today?".
 
+## Webhook Setup
+
+HomeClaw can push events to OpenClaw via the `/hooks/wake` endpoint. Configure once:
+
+```bash
+homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake" \
+                    --webhook-token "shared-secret" \
+                    --webhook-enabled true
+```
+
+Once enabled, all HomeKit events (characteristic changes, scene triggers, control actions) are POSTed as `{"text": "...", "mode": "now"}`. Use the Webhook tab in HomeClaw Settings to select which scenes and accessories trigger webhooks.
+
 ## Important Notes
 
 - Temperature values come back formatted: `"71F"`. Set with plain numbers.
