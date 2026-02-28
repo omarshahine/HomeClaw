@@ -13,11 +13,19 @@ final class HomeClawConfig: @unchecked Sendable {
     private let configFile: URL
     private var config: ConfigData
 
+    struct WebhookConfig: Codable, Sendable {
+        var enabled: Bool
+        var url: String
+        var token: String
+        var events: [String]?  // nil = all events; or subset of event type strings
+    }
+
     struct ConfigData: Codable {
         var defaultHomeID: String?
         var accessoryFilterMode: String?    // "all" (default) or "allowlist"
         var allowedAccessoryIDs: [String]?  // UUIDs of allowed accessories
         var temperatureUnit: String?        // "F" or "C" (nil = auto-detect from locale)
+        var webhook: WebhookConfig?
     }
 
     /// Sandbox-safe config directory under Application Support.
@@ -90,6 +98,15 @@ final class HomeClawConfig: @unchecked Sendable {
     /// Whether temperatures should display in Fahrenheit.
     var useFahrenheit: Bool { temperatureUnit == "F" }
 
+    /// Webhook configuration for pushing events to OpenClaw or other services.
+    var webhookConfig: WebhookConfig? {
+        get { config.webhook }
+        set {
+            config.webhook = newValue
+            save()
+        }
+    }
+
     /// Converts Celsius to the configured display unit and formats with unit suffix.
     func formatTemperature(_ celsius: Double) -> String {
         if useFahrenheit {
@@ -110,6 +127,16 @@ final class HomeClawConfig: @unchecked Sendable {
             dict["allowed_accessory_ids"] = ids
         }
         dict["temperature_unit"] = temperatureUnit
+        if let webhook = config.webhook {
+            var whDict: [String: Any] = [
+                "enabled": webhook.enabled,
+                "url": webhook.url,
+            ]
+            if let events = webhook.events, !events.isEmpty {
+                whDict["events"] = events
+            }
+            dict["webhook"] = whDict
+        }
         return dict
     }
 

@@ -1,10 +1,11 @@
 ---
 description: |
-  Control HomeKit smart home accessories via homeclaw-cli.
+  Control HomeKit smart home accessories and view home events via homeclaw-cli.
   Use when the user asks to control lights, locks, thermostats, fans, blinds,
-  scenes, or check device/sensor status.
+  scenes, check device/sensor status, or view recent home activity/events.
   Examples: "turn off the stairs lights", "lock the front door", "what's the temperature",
-  "run the movie scene", "close the blinds", "is the garage door open"
+  "run the movie scene", "close the blinds", "is the garage door open",
+  "what happened at home today", "when was the front door last unlocked"
 ---
 
 # HomeKit Control
@@ -77,6 +78,28 @@ The `type` field in the compact map tells you what a device IS. The `controls` a
 | `security` | Cameras, water shutoff | Varies: `active`, `power` |
 
 **Critical**: A device named "Closet Light" or "Under Cabinet" with `type: power` is a relay switch. Sending `brightness 50` will fail. Always check `controls` first.
+
+## Event Log
+
+HomeClaw logs all HomeKit events (characteristic changes, scene triggers, control actions) to disk. Query the event log to understand what happened recently:
+
+```bash
+# Recent events (default: last 50)
+homeclaw-cli events --json
+
+# Events from the last hour
+homeclaw-cli events --since 1h --json
+
+# Only characteristic changes (e.g. lights turning on/off)
+homeclaw-cli events --type characteristic_change --json
+
+# Last 200 events
+homeclaw-cli events --limit 200 --json
+```
+
+Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated`
+
+Use events to answer questions like "what changed recently?", "when was the front door last unlocked?", or "what scenes were triggered today?".
 
 ## Important Notes
 

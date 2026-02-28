@@ -295,6 +295,31 @@ final class SocketServer: @unchecked Sendable {
                 }
                 result = HomeClawConfig.shared.toDict()
 
+            case "events":
+                let limit = (args["limit"] as? Int) ?? (args["limit"] as? String).flatMap(Int.init) ?? 100
+                let typeFilter: HomeEventLogger.EventType? = (args["type"] as? String).flatMap {
+                    HomeEventLogger.EventType(rawValue: $0)
+                }
+                var since: Date?
+                if let sinceStr = args["since"] as? String {
+                    since = ISO8601DateFormatter().date(from: sinceStr)
+                }
+                result = [
+                    "events": HomeEventLogger.shared.readEvents(since: since, limit: limit, type: typeFilter),
+                ] as [String: Any]
+
+            case "set_webhook":
+                let enabled = (args["enabled"] as? Bool)
+                    ?? (args["enabled"] as? String).map { $0 == "true" }
+                    ?? false
+                let url = args["url"] as? String ?? ""
+                let token = args["token"] as? String ?? ""
+                let events = args["events"] as? [String]
+                HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
+                    enabled: enabled, url: url, token: token, events: events
+                )
+                result = HomeClawConfig.shared.toDict()
+
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
             }

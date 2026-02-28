@@ -12,6 +12,7 @@ import {
   handleScenes,
   handleDeviceMap,
   handleConfig,
+  handleEvents,
 } from '../lib/handlers/homekit.js';
 
 const server = new Server(
@@ -47,6 +48,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'homekit_config':
         result = await handleConfig(args);
+        break;
+      case 'homekit_events':
+        result = await handleEvents(args);
         break;
       default:
         return {

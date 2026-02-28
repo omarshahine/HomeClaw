@@ -177,6 +177,12 @@ final class HomeKitManager: NSObject, Observable {
         do {
             try await hmCharacteristic.writeValue(parsedValue)
             AppLogger.homekit.info("Set \(accessory.name).\(characteristic) = \(value)")
+            HomeEventLogger.shared.logAccessoryControlled(
+                accessoryID: accessory.uniqueIdentifier.uuidString,
+                accessoryName: accessory.name,
+                characteristic: characteristic,
+                value: value
+            )
         } catch {
             throw ControlError.writeFailed("\(error.localizedDescription)")
         }
@@ -205,6 +211,11 @@ final class HomeKitManager: NSObject, Observable {
             if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
                 try await home.executeActionSet(actionSet)
                 AppLogger.homekit.info("Triggered scene: \(actionSet.name)")
+                HomeEventLogger.shared.logSceneTriggered(
+                    sceneID: actionSet.uniqueIdentifier.uuidString,
+                    sceneName: actionSet.name,
+                    homeName: home.name
+                )
                 return AccessoryModel.sceneSummary(actionSet)
             }
         }
@@ -216,6 +227,11 @@ final class HomeKitManager: NSObject, Observable {
             }) {
                 try await home.executeActionSet(actionSet)
                 AppLogger.homekit.info("Triggered scene: \(actionSet.name)")
+                HomeEventLogger.shared.logSceneTriggered(
+                    sceneID: actionSet.uniqueIdentifier.uuidString,
+                    sceneName: actionSet.name,
+                    homeName: home.name
+                )
                 return AccessoryModel.sceneSummary(actionSet)
             }
         }
@@ -635,6 +651,12 @@ extension HomeKitManager: HMHomeManagerDelegate {
             // Warm cache after initial load and device set changes
             Task { await self.warmCache() }
 
+            // Log the homes update event
+            HomeEventLogger.shared.logHomesUpdated(
+                homeCount: manager.homes.count,
+                accessoryCount: self.totalAccessoryCount
+            )
+
             // Notify macOSBridge (menu bar) of updated state
             let names = manager.homes.map(\.name)
             NotificationCenter.default.post(
@@ -671,11 +693,25 @@ extension HomeKitManager: HMAccessoryDelegate {
                 characteristic.value, for: characteristic.characteristicType
             )
 
+            // Capture previous value before updating the cache
+            let previousValue = cache.cachedState(for: accessoryID)?[name]
+
             // Update the single value in the cache
             var state = cache.cachedState(for: accessoryID) ?? [:]
             state[name] = value
             cache.setValues(for: accessoryID, state: state)
             cache.save()
+
+            // Log the event
+            HomeEventLogger.shared.logCharacteristicChange(
+                accessoryID: accessoryID,
+                accessoryName: accessory.name,
+                room: accessory.room?.name,
+                service: service.name,
+                characteristic: name,
+                value: value,
+                previousValue: previousValue
+            )
 
             AppLogger.homekit.debug(
                 "Live update: \(accessory.name).\(name) = \(value)"
