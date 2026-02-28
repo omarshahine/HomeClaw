@@ -471,13 +471,11 @@ private struct EventLogSettingsView: View {
                     .onChange(of: webhookEnabled) { _, _ in debouncedSaveWebhook() }
 
                 TextField("URL", text: $webhookURL, prompt: Text("http://127.0.0.1:18789/hooks/wake"))
-                    .textFieldStyle(.roundedBorder)
                     .textContentType(.URL)
                     .autocorrectionDisabled()
                     .onChange(of: webhookURL) { _, _ in debouncedSaveWebhook() }
 
                 TextField("Bearer Token", text: $webhookToken, prompt: Text("shared-secret"))
-                    .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                     .onChange(of: webhookToken) { _, _ in debouncedSaveWebhook() }
 
@@ -642,10 +640,13 @@ private struct EventLogSettingsView: View {
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
+            // Preserve existing events filter (only configurable via CLI)
+            let existingEvents = HomeClawConfig.shared.webhookConfig?.events
             HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
                 enabled: webhookEnabled,
                 url: webhookURL,
-                token: webhookToken
+                token: webhookToken,
+                events: existingEvents
             )
         }
     }

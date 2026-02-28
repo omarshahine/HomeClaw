@@ -24,11 +24,10 @@ final class HomeClawConfig: @unchecked Sendable {
     ///
     /// Match types:
     /// - `accessory`: matches a specific accessory by UUID
-    /// - `type`: matches any accessory of a semantic type (e.g. "door_lock", "lighting")
     /// - `scene`: matches when a specific scene is triggered (by name or UUID)
     /// - `characteristic`: matches any accessory with a characteristic reaching a value
     ///
-    /// When `characteristic` and `value` are set alongside `accessoryID` or `accessoryType`,
+    /// When `characteristic` and `value` are set alongside `accessoryID`,
     /// both conditions must match (AND logic).
     struct WebhookTrigger: Codable, Sendable, Identifiable {
         var id: String                 // Unique trigger ID (UUID string)

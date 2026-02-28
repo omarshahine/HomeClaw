@@ -385,7 +385,13 @@ final class HomeEventLogger {
             return
         }
 
-        // Circuit breaker
+        let text = formatEventText(event)
+        let payload: [String: Any] = ["text": text, "mode": "now"]
+        sendWebhookPayload(payload, to: url, token: webhook.token)
+    }
+
+    private func sendWebhookPayload(_ payload: [String: Any], to url: URL, token: String) {
+        // Circuit breaker (shared across general webhook and triggers)
         if webhookCircuitOpen {
             if let openedAt = webhookCircuitOpenedAt,
                Date().timeIntervalSince(openedAt) > webhookCircuitResetInterval
@@ -398,12 +404,6 @@ final class HomeEventLogger {
             }
         }
 
-        let text = formatEventText(event)
-        let payload: [String: Any] = ["text": text, "mode": "now"]
-        sendWebhookPayload(payload, to: url, token: webhook.token)
-    }
-
-    private func sendWebhookPayload(_ payload: [String: Any], to url: URL, token: String) {
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
 
         var request = URLRequest(url: url)
