@@ -126,8 +126,11 @@ final class SocketServer: @unchecked Sendable {
         while requestData.count < maxRequestSize {
             let bytesRead = recv(fd, &buffer, buffer.count, 0)
             if bytesRead <= 0 { break }
+            // Check the fresh chunk for the newline delimiter before appending,
+            // avoiding an O(n²) rescan of the full accumulated buffer.
+            let hasNewline = buffer[..<bytesRead].contains(UInt8(ascii: "\n"))
             requestData.append(contentsOf: buffer[..<bytesRead])
-            if requestData.contains(UInt8(ascii: "\n")) { break }
+            if hasNewline { break }
         }
 
         guard !requestData.isEmpty else {
