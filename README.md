@@ -103,6 +103,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_rooms` | List rooms and their accessories |
 | `homekit_scenes` | List or trigger scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
+| `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_config` | View or update configuration (set active home, filtering) |
 
 ### Connecting an MCP Client
@@ -155,6 +156,17 @@ homeclaw-cli status
 homeclaw-cli config --default-home "Main House"
 homeclaw-cli config --filter-mode allowlist
 homeclaw-cli config --list-devices
+
+# Event log
+homeclaw-cli events                         # Recent events (last 50)
+homeclaw-cli events --since 1h              # Events from the last hour
+homeclaw-cli events --since 2d --json       # Last 2 days, JSON output
+homeclaw-cli events --type scene_triggered  # Filter by event type
+
+# Webhook configuration
+homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake"
+homeclaw-cli config --webhook-token "your-secret-token"
+homeclaw-cli config --webhook-enabled true
 ```
 
 ## Using with Claude Code
@@ -279,12 +291,14 @@ The menu bar provides at-a-glance status and quick actions:
 
 ## Settings
 
-Three configuration tabs accessible from the menu bar:
+Five configuration tabs accessible from the menu bar:
 
 | Tab | Features |
 |-----|----------|
 | **HomeKit** | Connection status, home list with accessory and room counts, active home selector |
 | **Devices** | Filter mode (all/allowlist), per-device toggles grouped by room, search, bulk select/deselect |
+| **Event Log** | Enable/disable event logging, configure file rotation (size limit + backup count), view storage stats, purge logs, reveal in Finder |
+| **Webhook** | Configure webhook endpoint (URL + bearer token), select which scenes and accessories trigger webhooks using checkboxes grouped by room |
 | **Integrations** | One-click install for Claude Desktop, Claude Code plugin detection, OpenClaw gateway setup |
 
 ### HomeKit
@@ -308,6 +322,64 @@ Install and manage connections to AI assistants. The app detects existing config
 - **OpenClaw** -- detects plugin configuration on the remote gateway and provides setup instructions
 
 <p align="center"><img src="docs/images/settings-integrations.png" width="500" alt="Integrations settings tab"></p>
+
+## Event Log
+
+HomeClaw records all HomeKit events to a JSONL file in `~/Library/Application Support/HomeClaw/events.jsonl`. Events include characteristic changes (a light turned on), scene triggers, and control actions from the CLI or MCP.
+
+### Configuration
+
+Open **Settings > Event Log** to configure:
+
+- **Enable/disable** event logging
+- **Max file size** (10-500 MB) -- when the log reaches this size, it's rotated
+- **Rotated backups** (0-10) -- how many old log files to keep before deleting the oldest
+- **Purge** -- delete all event log files
+- **Show in Finder** -- reveal the log directory
+
+Or configure via CLI:
+
+```bash
+homeclaw-cli events                         # Show recent events
+homeclaw-cli events --since 1h              # Last hour
+homeclaw-cli events --type characteristic_change  # Filter by type
+homeclaw-cli events --limit 200 --json      # JSON output
+```
+
+Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated`
+
+The `--since` flag accepts ISO 8601 timestamps or duration shorthand: `1h`, `30m`, `2d`.
+
+## Webhook
+
+HomeClaw can push events to an HTTP endpoint (designed for [OpenClaw](https://openclaw.ai)'s `/hooks/wake` format). When a webhook is configured and specific scenes or accessories are selected, HomeClaw POSTs a JSON payload on each matching event.
+
+### Setup
+
+1. Open **Settings > Webhook**
+2. Toggle **Enable Webhook**
+3. Enter the webhook URL (e.g. `http://127.0.0.1:18789/hooks/wake`)
+4. Click **Generate** to create a secure bearer token (or enter your own)
+5. Check the scenes and accessories you want to trigger webhooks
+
+Or configure via CLI (useful for automated setup from OpenClaw):
+
+```bash
+homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake" \
+                    --webhook-token "your-secret-token" \
+                    --webhook-enabled true
+```
+
+### Payload Format
+
+```json
+{
+  "text": "HomeKit: Kitchen Light power set to true",
+  "mode": "now"
+}
+```
+
+Authentication uses `Authorization: Bearer <token>`. The webhook includes a circuit breaker -- after 5 consecutive failures, delivery pauses for 60 seconds before retrying.
 
 ## Device Filtering
 
@@ -396,14 +468,15 @@ Sources/
     App/                   UIApplicationDelegate entry point, scene delegates
     Bridge/                BridgeProtocols.swift (Mac2iOS, iOS2Mac)
     HomeKit/               HomeKitManager, SocketServer, CharacteristicMapper,
-                           AccessoryModel, DeviceMap, CharacteristicCache
+                           AccessoryModel, DeviceMap, CharacteristicCache,
+                           HomeEventLogger
     Views/                 SettingsView, IntegrationsSettingsView
     Shared/                AppConfig, AppLogger, HomeClawConfig
   macOSBridge/             AppKit bundle (NSStatusItem menu bar)
     MacOSController.swift  NSStatusItem + NSMenu via iOS2Mac protocol
     Info.plist             NSPrincipalClass: MacOSController
   homeclaw-cli/            CLI tool (SPM executable + Xcode target)
-    Commands/              list, get, set, search, scenes, status, config, device-map
+    Commands/              list, get, set, search, scenes, status, config, device-map, events
     SocketClient.swift     Direct socket communication
 Resources/                 Info.plist, entitlements, app icons
 scripts/
