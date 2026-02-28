@@ -505,21 +505,33 @@ private struct EventLogSettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            HomeClawConfig.shared.removeWebhookTrigger(id: trigger.id)
-                            triggers = HomeClawConfig.shared.webhookTriggers
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+
                         Button {
                             editingTrigger = trigger
                             showTriggerEditor = true
                         } label: {
-                            Label("Edit", systemImage: "pencil")
+                            Image(systemName: "pencil")
                         }
-                        .tint(.blue)
+                        .buttonStyle(.borderless)
+
+                        Button(role: .destructive) {
+                            HomeClawConfig.shared.removeWebhookTrigger(id: trigger.id)
+                            triggers = HomeClawConfig.shared.webhookTriggers
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    .contextMenu {
+                        Button("Edit\u{2026}") {
+                            editingTrigger = trigger
+                            showTriggerEditor = true
+                        }
+                        Divider()
+                        Button("Delete", role: .destructive) {
+                            HomeClawConfig.shared.removeWebhookTrigger(id: trigger.id)
+                            triggers = HomeClawConfig.shared.webhookTriggers
+                        }
                     }
                 }
 
