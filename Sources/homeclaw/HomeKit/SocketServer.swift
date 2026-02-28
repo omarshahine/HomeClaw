@@ -116,15 +116,24 @@ final class SocketServer: @unchecked Sendable {
         var bufSize: Int32 = 1_048_576
         setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &bufSize, socklen_t(MemoryLayout<Int32>.size))
 
-        // Read request (up to 64KB)
+        // Read request — loop until newline delimiter or 1MB cap.
+        // A single recv() may not return the full payload for large requests
+        // (e.g., import-scene with many actions).
+        let maxRequestSize = 1_048_576 // 1 MB safety cap
+        var requestData = Data()
         var buffer = [UInt8](repeating: 0, count: 65536)
-        let bytesRead = recv(fd, &buffer, buffer.count, 0)
-        guard bytesRead > 0 else {
+
+        while requestData.count < maxRequestSize {
+            let bytesRead = recv(fd, &buffer, buffer.count, 0)
+            if bytesRead <= 0 { break }
+            requestData.append(contentsOf: buffer[..<bytesRead])
+            if requestData.contains(UInt8(ascii: "\n")) { break }
+        }
+
+        guard !requestData.isEmpty else {
             close(fd)
             return
         }
-
-        let requestData = Data(buffer[..<bytesRead])
 
         // Find newline-delimited request
         let lineData: Data
@@ -370,6 +379,42 @@ final class SocketServer: @unchecked Sendable {
                 HomeClawConfig.shared.removeWebhookTrigger(id: id)
                 let triggers = HomeClawConfig.shared.webhookTriggers
                 result = ["triggers": triggers.map { triggerToDict($0) }] as [String: Any]
+
+            case "delete_scene":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                result = try await hk.deleteScene(name: name, homeName: args["home"] as? String)
+
+            case "assign_rooms":
+                guard let assignments = args["assignments"] as? [[String: String]] else {
+                    return encodeResponse(success: false, error: "Missing 'assignments' array")
+                }
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
+                result = try await hk.assignRooms(
+                    homeName: args["home"] as? String,
+                    assignments: assignments,
+                    dryRun: dryRun
+                )
+
+            case "import_scene":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                guard let actions = args["actions"] as? [[String: String]] else {
+                    return encodeResponse(success: false, error: "Missing 'actions' array")
+                }
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
+                result = try await hk.importScene(
+                    name: name,
+                    homeName: args["home"] as? String,
+                    actions: actions,
+                    dryRun: dryRun
+                )
 
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")

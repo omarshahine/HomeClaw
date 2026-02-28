@@ -243,6 +243,304 @@ final class HomeKitManager: NSObject, Observable {
         throw ControlError.accessoryNotFound("Scene not found: \(id)")
     }
 
+    // MARK: - Scene Management
+
+    func deleteScene(name: String, homeName: String? = nil) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeName)
+
+        for home in targetHomes {
+            if let actionSet = home.actionSets.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+            }) {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeActionSet(actionSet) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+                AppLogger.homekit.info("Deleted scene: \(name)")
+                return [
+                    "deleted": true,
+                    "name": actionSet.name,
+                    "home": home.name,
+                ]
+            }
+        }
+
+        throw ControlError.accessoryNotFound("Scene not found: \(name)")
+    }
+
+    func assignRooms(
+        homeName: String? = nil,
+        assignments: [[String: String]],
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeName)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        var assigned = 0
+        var skipped = 0
+        var notFound: [String] = []
+        var details: [[String: String]] = []
+
+        for entry in assignments {
+            guard let accessoryName = entry["accessory"],
+                  let targetRoomName = entry["room"]
+            else {
+                skipped += 1
+                continue
+            }
+
+            guard let accessory = home.accessories.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
+            }) else {
+                notFound.append(accessoryName)
+                continue
+            }
+
+            // Already in the correct room?
+            if let currentRoom = accessory.room,
+               currentRoom.name.localizedCaseInsensitiveCompare(targetRoomName) == .orderedSame
+            {
+                skipped += 1
+                details.append([
+                    "accessory": accessory.name,
+                    "room": currentRoom.name,
+                    "status": "already_assigned",
+                ])
+                continue
+            }
+
+            if dryRun {
+                assigned += 1
+                details.append([
+                    "accessory": accessory.name,
+                    "room": targetRoomName,
+                    "status": "would_assign",
+                ])
+                continue
+            }
+
+            // Find or create target room
+            let room: HMRoom
+            if let existing = home.rooms.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(targetRoomName) == .orderedSame
+            }) {
+                room = existing
+            } else {
+                room = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMRoom, Error>) in
+                    home.addRoom(withName: targetRoomName) { newRoom, error in
+                        if let error { continuation.resume(throwing: error) }
+                        else if let newRoom { continuation.resume(returning: newRoom) }
+                        else { continuation.resume(throwing: ControlError.writeFailed("Failed to create room: \(targetRoomName)")) }
+                    }
+                }
+            }
+
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                home.assignAccessory(accessory, to: room) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+
+            assigned += 1
+            details.append([
+                "accessory": accessory.name,
+                "room": room.name,
+                "status": "assigned",
+            ])
+        }
+
+        return [
+            "home": home.name,
+            "dry_run": dryRun,
+            "assigned": assigned,
+            "skipped": skipped,
+            "not_found": notFound,
+            "details": details,
+        ] as [String: Any]
+    }
+
+    func importScene(
+        name: String,
+        homeName: String? = nil,
+        actions: [[String: String]],
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeName)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        // Resolve each action to an accessory + characteristic + value
+        var resolvedActions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
+        var warnings: [String] = []
+
+        for action in actions {
+            guard let accessoryName = action["accessory"],
+                  let property = action["property"],
+                  let valueStr = action["value"]
+            else {
+                warnings.append("Skipping action with missing fields: \(action)")
+                continue
+            }
+
+            let roomName = action["room"]
+            guard let accessory = findAccessoryByName(accessoryName, room: roomName, in: home) else {
+                warnings.append("Accessory not found: \(accessoryName)" + (roomName.map { " in \($0)" } ?? ""))
+                continue
+            }
+
+            guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
+                warnings.append("Characteristic '\(property)' not found on \(accessory.name)")
+                continue
+            }
+
+            guard let parsedValue = parseActionValue(valueStr, property: property) else {
+                warnings.append("Cannot parse value '\(valueStr)' for \(property) on \(accessory.name)")
+                continue
+            }
+
+            resolvedActions.append((accessory, characteristic, parsedValue))
+        }
+
+        if dryRun {
+            return [
+                "dry_run": true,
+                "name": name,
+                "home": home.name,
+                "resolved_actions": resolvedActions.count,
+                "warnings": warnings,
+                "actions": resolvedActions.map { action in
+                    [
+                        "accessory": action.accessory.name,
+                        "room": action.accessory.room?.name ?? "Default Room",
+                        "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
+                        "value": "\(action.value)",
+                    ] as [String: String]
+                },
+            ] as [String: Any]
+        }
+
+        // Create the action set
+        let actionSet = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMActionSet, Error>) in
+            home.addActionSet(withName: name) { actionSet, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let actionSet { continuation.resume(returning: actionSet) }
+                else { continuation.resume(throwing: ControlError.writeFailed("Failed to create scene: \(name)")) }
+            }
+        }
+
+        // Add each action
+        var addedCount = 0
+        for resolved in resolvedActions {
+            let writeAction = HMCharacteristicWriteAction(
+                characteristic: resolved.characteristic,
+                targetValue: resolved.value as! NSCopying & NSObjectProtocol
+            )
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                actionSet.addAction(writeAction) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+            addedCount += 1
+        }
+
+        AppLogger.homekit.info("Imported scene '\(name)' with \(addedCount) action(s)")
+
+        return [
+            "created": true,
+            "name": actionSet.name,
+            "home": home.name,
+            "action_count": addedCount,
+            "warnings": warnings,
+        ] as [String: Any]
+    }
+
+    // MARK: - Scene Management Helpers
+
+    /// Find an accessory by name and optional room within a specific home.
+    private func findAccessoryByName(_ name: String, room roomName: String?, in home: HMHome) -> HMAccessory? {
+        for accessory in home.accessories {
+            guard accessory.name.localizedCaseInsensitiveCompare(name) == .orderedSame else { continue }
+            if let roomName {
+                guard let room = accessory.room,
+                      room.name.localizedCaseInsensitiveCompare(roomName) == .orderedSame
+                else { continue }
+            }
+            return accessory
+        }
+        return nil
+    }
+
+    /// Find a characteristic on an accessory by its manufacturer description (human-readable name).
+    private func findCharacteristicByDescription(on accessory: HMAccessory, property: String) -> HMCharacteristic? {
+        for service in accessory.services {
+            for characteristic in service.characteristics {
+                let humanName = CharacteristicMapper.name(for: characteristic.characteristicType)
+                if humanName.localizedCaseInsensitiveCompare(property) == .orderedSame {
+                    return characteristic
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Parse a human-readable action value back to an NSCopying-conforming type.
+    /// Handles: ON/OFF, percentages (85%), temperatures (45.5deg), mireds (400mireds),
+    /// lock states (Locked/Unlocked), and bare numbers.
+    private func parseActionValue(_ raw: String, property: String) -> (NSCopying & NSObjectProtocol)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+
+        // Boolean ON/OFF
+        switch trimmed.uppercased() {
+        case "ON", "TRUE", "1": return NSNumber(value: true)
+        case "OFF", "FALSE", "0": return NSNumber(value: false)
+        default: break
+        }
+
+        // Lock states
+        switch trimmed.lowercased() {
+        case "locked": return NSNumber(value: 1)
+        case "unlocked": return NSNumber(value: 0)
+        default: break
+        }
+
+        // Percentage: "85%"
+        if trimmed.hasSuffix("%"), let n = Double(trimmed.dropLast()) {
+            return NSNumber(value: n)
+        }
+
+        // Temperature: "45.5deg"
+        if trimmed.lowercased().hasSuffix("deg"), let n = Double(trimmed.dropLast(3)) {
+            return NSNumber(value: n)
+        }
+
+        // Color temperature in mireds: "400mireds"
+        if trimmed.lowercased().hasSuffix("mireds"), let n = Double(trimmed.dropLast(6)) {
+            return NSNumber(value: n)
+        }
+
+        // Bare integer
+        if let n = Int(trimmed) {
+            return NSNumber(value: n)
+        }
+
+        // Bare double
+        if let n = Double(trimmed) {
+            return NSNumber(value: n)
+        }
+
+        return nil
+    }
+
     // MARK: - Search
 
     func searchAccessories(query: String, category: String? = nil, homeID: String? = nil) async -> [[String: Any]] {
