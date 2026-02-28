@@ -101,7 +101,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_status` | Check bridge connectivity and accessory count |
 | `homekit_accessories` | List, get details, search, or control accessories |
 | `homekit_rooms` | List rooms and their accessories |
-| `homekit_scenes` | List or trigger scenes |
+| `homekit_scenes` | List, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_config` | View or update configuration (set active home, filtering) |
@@ -147,6 +147,13 @@ homeclaw-cli search "bedroom" --category lightbulb
 # Scenes
 homeclaw-cli scenes
 homeclaw-cli trigger "Good Night"
+
+# Scene management
+homeclaw-cli delete-scene "Old Scene"
+homeclaw-cli import-scene scene.json --dry-run   # Preview before creating
+homeclaw-cli import-scene scene.json              # Create scene from JSON
+homeclaw-cli assign-rooms rooms.json --dry-run    # Preview room assignments
+homeclaw-cli assign-rooms rooms.json              # Bulk-assign accessories to rooms
 
 # LLM-optimized device map
 homeclaw-cli device-map
@@ -279,7 +286,35 @@ HomeClaw supports the full range of HomeKit accessory categories:
 | **Window Coverings** | target position (0-100%) |
 | **Switches & Outlets** | power on/off |
 | **Sensors** | motion, contact, temperature, humidity, light level, battery (all read-only) |
-| **Scenes** | trigger by name or UUID |
+| **Scenes** | trigger by name or UUID, import from JSON, delete by name |
+
+### Scene Import Format
+
+The `import-scene` command accepts a JSON file defining a scene and its actions:
+
+```json
+{
+  "name": "Movie Night",
+  "actions": [
+    {"accessory": "Living Room Light", "room": "Living Room", "property": "brightness", "value": "30%"},
+    {"accessory": "TV Backlight", "room": "Living Room", "property": "power_state", "value": "ON"},
+    {"accessory": "Overhead", "room": "Living Room", "property": "power_state", "value": "OFF"}
+  ]
+}
+```
+
+The `assign-rooms` command accepts a JSON file mapping accessories to rooms:
+
+```json
+{
+  "assignments": [
+    {"accessory": "Kitchen Light", "room": "Kitchen"},
+    {"accessory": "Desk Lamp", "room": "Office"}
+  ]
+}
+```
+
+Both commands support `--dry-run` to preview changes without modifying HomeKit.
 
 ## Menu Bar App
 
@@ -476,7 +511,8 @@ Sources/
     MacOSController.swift  NSStatusItem + NSMenu via iOS2Mac protocol
     Info.plist             NSPrincipalClass: MacOSController
   homeclaw-cli/            CLI tool (SPM executable + Xcode target)
-    Commands/              list, get, set, search, scenes, status, config, device-map, events
+    Commands/              list, get, set, search, scenes, status, config, device-map, events,
+                           delete-scene, import-scene, assign-rooms
     SocketClient.swift     Direct socket communication
 Resources/                 Info.plist, entitlements, app icons
 scripts/
