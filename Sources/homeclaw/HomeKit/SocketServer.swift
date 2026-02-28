@@ -320,6 +320,57 @@ final class SocketServer: @unchecked Sendable {
                 )
                 result = HomeClawConfig.shared.toDict()
 
+            case "event_log_stats":
+                result = HomeEventLogger.shared.logStats()
+
+            case "set_event_log":
+                if let enabled = (args["enabled"] as? Bool)
+                    ?? (args["enabled"] as? String).map({ $0 == "true" })
+                {
+                    HomeClawConfig.shared.eventLogEnabled = enabled
+                }
+                if let maxSizeMB = (args["max_size_mb"] as? Int)
+                    ?? (args["max_size_mb"] as? String).flatMap(Int.init)
+                {
+                    HomeClawConfig.shared.eventLogMaxSizeMB = maxSizeMB
+                }
+                if let maxBackups = (args["max_backups"] as? Int)
+                    ?? (args["max_backups"] as? String).flatMap(Int.init)
+                {
+                    HomeClawConfig.shared.eventLogMaxBackups = maxBackups
+                }
+                result = HomeEventLogger.shared.logStats()
+
+            case "purge_events":
+                HomeEventLogger.shared.purge()
+                result = HomeEventLogger.shared.logStats()
+
+            case "list_triggers":
+                let triggers = HomeClawConfig.shared.webhookTriggers
+                result = ["triggers": triggers.map { triggerToDict($0) }] as [String: Any]
+
+            case "add_trigger":
+                guard let label = args["label"] as? String, !label.isEmpty else {
+                    return encodeResponse(success: false, error: "Missing 'label' argument")
+                }
+                var trigger = HomeClawConfig.WebhookTrigger.create(label: label)
+                trigger.accessoryID = args["accessory_id"] as? String
+                trigger.sceneName = args["scene_name"] as? String
+                trigger.sceneID = args["scene_id"] as? String
+                trigger.characteristic = args["characteristic"] as? String
+                trigger.value = args["value"] as? String
+                trigger.message = args["message"] as? String
+                HomeClawConfig.shared.addWebhookTrigger(trigger)
+                result = triggerToDict(trigger)
+
+            case "remove_trigger":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                HomeClawConfig.shared.removeWebhookTrigger(id: id)
+                let triggers = HomeClawConfig.shared.webhookTriggers
+                result = ["triggers": triggers.map { triggerToDict($0) }] as [String: Any]
+
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
             }
@@ -328,6 +379,24 @@ final class SocketServer: @unchecked Sendable {
         } catch {
             return encodeResponse(success: false, error: error.localizedDescription)
         }
+    }
+
+    // MARK: - Trigger Serialization
+
+    private func triggerToDict(_ t: HomeClawConfig.WebhookTrigger) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": t.id,
+            "label": t.label,
+            "enabled": t.enabled,
+        ]
+        if let v = t.accessoryID { dict["accessory_id"] = v }
+        if let v = t.accessoryType { dict["accessory_type"] = v }
+        if let v = t.sceneName { dict["scene_name"] = v }
+        if let v = t.sceneID { dict["scene_id"] = v }
+        if let v = t.characteristic { dict["characteristic"] = v }
+        if let v = t.value { dict["value"] = v }
+        if let v = t.message { dict["message"] = v }
+        return dict
     }
 
     // MARK: - Response Encoding

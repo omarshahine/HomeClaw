@@ -20,12 +20,55 @@ final class HomeClawConfig: @unchecked Sendable {
         var events: [String]?  // nil = all events; or subset of event type strings
     }
 
+    /// A webhook trigger rule. When an event matches the conditions, a webhook is fired.
+    ///
+    /// Match types:
+    /// - `accessory`: matches a specific accessory by UUID
+    /// - `type`: matches any accessory of a semantic type (e.g. "door_lock", "lighting")
+    /// - `scene`: matches when a specific scene is triggered (by name or UUID)
+    /// - `characteristic`: matches any accessory with a characteristic reaching a value
+    ///
+    /// When `characteristic` and `value` are set alongside `accessoryID` or `accessoryType`,
+    /// both conditions must match (AND logic).
+    struct WebhookTrigger: Codable, Sendable, Identifiable {
+        var id: String                 // Unique trigger ID (UUID string)
+        var label: String              // Human-readable label, e.g. "Front door unlocked"
+        var enabled: Bool
+
+        // Match conditions (at least one of these must be set)
+        var accessoryID: String?       // Match specific accessory UUID
+        var accessoryType: String?     // Match semantic type: lighting, door_lock, etc.
+        var sceneName: String?         // Match scene trigger by name
+        var sceneID: String?           // Match scene trigger by UUID
+        var characteristic: String?    // Match characteristic name, e.g. "lock_target_state"
+        var value: String?             // Match characteristic value, e.g. "unlocked"
+
+        // Optional custom webhook message (falls back to auto-generated)
+        var message: String?
+
+        /// Creates a new trigger with a generated ID.
+        static func create(label: String) -> WebhookTrigger {
+            WebhookTrigger(id: UUID().uuidString, label: label, enabled: true)
+        }
+    }
+
+    struct EventLogConfig: Codable, Sendable {
+        var enabled: Bool?           // nil = true (default on)
+        var maxSizeMB: Int?          // nil = 50 MB default
+        var maxBackups: Int?         // nil = 3 backups default
+
+        static let defaultMaxSizeMB = 50
+        static let defaultMaxBackups = 3
+    }
+
     struct ConfigData: Codable {
         var defaultHomeID: String?
         var accessoryFilterMode: String?    // "all" (default) or "allowlist"
         var allowedAccessoryIDs: [String]?  // UUIDs of allowed accessories
         var temperatureUnit: String?        // "F" or "C" (nil = auto-detect from locale)
         var webhook: WebhookConfig?
+        var eventLog: EventLogConfig?
+        var webhookTriggers: [WebhookTrigger]?
     }
 
     /// Sandbox-safe config directory under Application Support.
@@ -107,6 +150,72 @@ final class HomeClawConfig: @unchecked Sendable {
         }
     }
 
+    /// Event log configuration (size limits, backup count).
+    var eventLogConfig: EventLogConfig {
+        get { config.eventLog ?? EventLogConfig() }
+        set {
+            config.eventLog = newValue
+            save()
+        }
+    }
+
+    /// Whether event logging is enabled.
+    var eventLogEnabled: Bool {
+        get { eventLogConfig.enabled ?? true }
+        set {
+            var cfg = eventLogConfig
+            cfg.enabled = newValue
+            eventLogConfig = cfg
+        }
+    }
+
+    /// Maximum event log file size in megabytes.
+    var eventLogMaxSizeMB: Int {
+        get { eventLogConfig.maxSizeMB ?? EventLogConfig.defaultMaxSizeMB }
+        set {
+            var cfg = eventLogConfig
+            cfg.maxSizeMB = max(1, newValue)
+            eventLogConfig = cfg
+        }
+    }
+
+    /// Number of rotated backup files to keep.
+    var eventLogMaxBackups: Int {
+        get { eventLogConfig.maxBackups ?? EventLogConfig.defaultMaxBackups }
+        set {
+            var cfg = eventLogConfig
+            cfg.maxBackups = max(0, min(10, newValue))
+            eventLogConfig = cfg
+        }
+    }
+
+    /// Webhook triggers — rules that fire webhooks on matching events.
+    var webhookTriggers: [WebhookTrigger] {
+        get { config.webhookTriggers ?? [] }
+        set {
+            config.webhookTriggers = newValue.isEmpty ? nil : newValue
+            save()
+        }
+    }
+
+    func addWebhookTrigger(_ trigger: WebhookTrigger) {
+        var triggers = webhookTriggers
+        triggers.append(trigger)
+        webhookTriggers = triggers
+    }
+
+    func removeWebhookTrigger(id: String) {
+        webhookTriggers = webhookTriggers.filter { $0.id != id }
+    }
+
+    func updateWebhookTrigger(_ trigger: WebhookTrigger) {
+        var triggers = webhookTriggers
+        if let idx = triggers.firstIndex(where: { $0.id == trigger.id }) {
+            triggers[idx] = trigger
+            webhookTriggers = triggers
+        }
+    }
+
     /// Converts Celsius to the configured display unit and formats with unit suffix.
     func formatTemperature(_ celsius: Double) -> String {
         if useFahrenheit {
@@ -137,6 +246,11 @@ final class HomeClawConfig: @unchecked Sendable {
             }
             dict["webhook"] = whDict
         }
+        dict["event_log"] = [
+            "enabled": eventLogEnabled,
+            "max_size_mb": eventLogMaxSizeMB,
+            "max_backups": eventLogMaxBackups,
+        ] as [String: Any]
         return dict
     }
 

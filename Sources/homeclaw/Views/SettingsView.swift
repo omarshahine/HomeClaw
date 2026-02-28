@@ -9,6 +9,9 @@ struct SettingsView: View {
             Tab("Devices", systemImage: "list.bullet.rectangle") {
                 DeviceFilterSettingsView()
             }
+            Tab("Event Log", systemImage: "clock.arrow.circlepath") {
+                EventLogSettingsView()
+            }
             Tab("Integrations", systemImage: "puzzlepiece") {
                 #if APP_STORE
                 AppStoreIntegrationsView()
@@ -370,6 +373,426 @@ private struct DeviceFilterSettingsView: View {
         if selectedHome.isEmpty, let firstName = homeNames.first {
             selectedHome = firstName
         }
+    }
+}
+
+// MARK: - Event Log Settings
+
+private struct EventLogSettingsView: View {
+    @State private var isEnabled = true
+    @State private var maxSizeMB = 50
+    @State private var maxBackups = 3
+    @State private var stats: EventLogStats?
+    @State private var showPurgeConfirm = false
+    @State private var webhookEnabled = false
+    @State private var webhookURL = ""
+    @State private var webhookToken = ""
+    @State private var triggers: [HomeClawConfig.WebhookTrigger] = []
+    @State private var editingTrigger: HomeClawConfig.WebhookTrigger?
+    @State private var showTriggerEditor = false
+    @State private var scenes: [SceneInfo] = []
+    @State private var accessories: [AccessoryInfo] = []
+    @State private var saveTask: Task<Void, Never>?
+
+    struct EventLogStats {
+        let fileCount: Int
+        let totalSizeMB: String
+        let path: String
+    }
+
+    struct SceneInfo: Identifiable {
+        let id: String
+        let name: String
+    }
+
+    struct AccessoryInfo: Identifiable {
+        let id: String
+        let name: String
+        let room: String
+        let category: String
+    }
+
+    private let sizeOptions = [10, 25, 50, 100, 250, 500]
+
+    var body: some View {
+        Form {
+            Section("Event Logging") {
+                Toggle("Enable Event Logging", isOn: $isEnabled)
+                    .onChange(of: isEnabled) { _, _ in debouncedSave() }
+
+                Picker("Max File Size", selection: $maxSizeMB) {
+                    ForEach(sizeOptions, id: \.self) { size in
+                        Text("\(size) MB").tag(size)
+                    }
+                }
+                .onChange(of: maxSizeMB) { _, _ in debouncedSave() }
+
+                Stepper("Rotated Backups: \(maxBackups)", value: $maxBackups, in: 0...10)
+                    .onChange(of: maxBackups) { _, _ in debouncedSave() }
+
+                Text("Events are logged as JSONL. When the file reaches the size limit, it's rotated. Older backups beyond the count are deleted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let stats {
+                Section("Storage") {
+                    LabeledContent("Log Files") {
+                        Text("\(stats.fileCount)")
+                    }
+                    LabeledContent("Total Size") {
+                        Text("\(stats.totalSizeMB) MB")
+                    }
+                    LabeledContent("Location") {
+                        Text(stats.path)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+
+                    Button("Purge All Events", role: .destructive) {
+                        showPurgeConfirm = true
+                    }
+                    .confirmationDialog("Delete all event logs?", isPresented: $showPurgeConfirm) {
+                        Button("Delete All Events", role: .destructive) {
+                            Task { @MainActor in
+                                HomeEventLogger.shared.purge()
+                                await refreshStats()
+                            }
+                        }
+                    } message: {
+                        Text("This will permanently delete all recorded HomeKit events. This cannot be undone.")
+                    }
+                }
+            }
+
+            Section("Webhook") {
+                Toggle("Enable Webhook", isOn: $webhookEnabled)
+                    .onChange(of: webhookEnabled) { _, _ in debouncedSaveWebhook() }
+
+                TextField("URL", text: $webhookURL, prompt: Text("http://127.0.0.1:18789/hooks/wake"))
+                    .textFieldStyle(.roundedBorder)
+                    .textContentType(.URL)
+                    .autocorrectionDisabled()
+                    .onChange(of: webhookURL) { _, _ in debouncedSaveWebhook() }
+
+                TextField("Bearer Token", text: $webhookToken, prompt: Text("shared-secret"))
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .onChange(of: webhookToken) { _, _ in debouncedSaveWebhook() }
+
+                Text("When enabled, all events are POSTed to the URL using the OpenClaw /hooks/wake format.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                ForEach(triggers) { trigger in
+                    HStack {
+                        Toggle(isOn: Binding(
+                            get: { trigger.enabled },
+                            set: { newValue in
+                                var updated = trigger
+                                updated.enabled = newValue
+                                HomeClawConfig.shared.updateWebhookTrigger(updated)
+                                triggers = HomeClawConfig.shared.webhookTriggers
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(trigger.label)
+                                Text(triggerDescription(trigger))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            HomeClawConfig.shared.removeWebhookTrigger(id: trigger.id)
+                            triggers = HomeClawConfig.shared.webhookTriggers
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        Button {
+                            editingTrigger = trigger
+                            showTriggerEditor = true
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
+                }
+
+                Button("Add Trigger") {
+                    editingTrigger = nil
+                    showTriggerEditor = true
+                }
+            } header: {
+                Text("Webhook Triggers")
+            } footer: {
+                Text("Triggers fire a webhook when a specific event occurs. Use HomeKit scenes to group devices (e.g. \"All Lights Off\"), or target individual accessories.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .task { await loadSettings() }
+        .sheet(isPresented: $showTriggerEditor) {
+            TriggerEditorSheet(
+                trigger: editingTrigger,
+                scenes: scenes,
+                accessories: accessories
+            ) { saved in
+                if editingTrigger != nil {
+                    HomeClawConfig.shared.updateWebhookTrigger(saved)
+                } else {
+                    HomeClawConfig.shared.addWebhookTrigger(saved)
+                }
+                triggers = HomeClawConfig.shared.webhookTriggers
+            }
+        }
+    }
+
+    private func triggerDescription(_ trigger: HomeClawConfig.WebhookTrigger) -> String {
+        if let name = trigger.sceneName, !name.isEmpty {
+            return "Scene: \(name)"
+        }
+        var parts: [String] = []
+        if let id = trigger.accessoryID, !id.isEmpty {
+            let name = accessories.first(where: { $0.id == id })?.name ?? id.prefix(8) + "..."
+            parts.append("Device: \(name)")
+        }
+        if let char = trigger.characteristic, !char.isEmpty {
+            let val = trigger.value ?? "any"
+            parts.append("\(char) = \(val)")
+        }
+        return parts.isEmpty ? "No conditions" : parts.joined(separator: ", ")
+    }
+
+    @MainActor
+    private func loadSettings() async {
+        let config = HomeClawConfig.shared
+        isEnabled = config.eventLogEnabled
+        maxSizeMB = config.eventLogMaxSizeMB
+        maxBackups = config.eventLogMaxBackups
+        triggers = config.webhookTriggers
+
+        if let webhook = config.webhookConfig {
+            webhookEnabled = webhook.enabled
+            webhookURL = webhook.url
+            webhookToken = webhook.token
+        }
+
+        // Load scenes and accessories for the trigger editor
+        let hk = HomeKitManager.shared
+        let sceneList = await hk.listScenes()
+        scenes = sceneList.map { SceneInfo(
+            id: $0["id"] as? String ?? UUID().uuidString,
+            name: $0["name"] as? String ?? "Unknown"
+        )}
+
+        let accList = await hk.listAllAccessories()
+        accessories = accList.map { AccessoryInfo(
+            id: $0["id"] as? String ?? UUID().uuidString,
+            name: $0["name"] as? String ?? "Unknown",
+            room: $0["room"] as? String ?? "",
+            category: $0["category"] as? String ?? ""
+        )}
+
+        await refreshStats()
+    }
+
+    @MainActor
+    private func refreshStats() async {
+        let raw = HomeEventLogger.shared.logStats()
+        stats = EventLogStats(
+            fileCount: raw["file_count"] as? Int ?? 0,
+            totalSizeMB: raw["total_size_mb"] as? String ?? "0.0",
+            path: raw["path"] as? String ?? ""
+        )
+    }
+
+    private func debouncedSave() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            let config = HomeClawConfig.shared
+            config.eventLogEnabled = isEnabled
+            config.eventLogMaxSizeMB = maxSizeMB
+            config.eventLogMaxBackups = maxBackups
+        }
+    }
+
+    private func debouncedSaveWebhook() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
+                enabled: webhookEnabled,
+                url: webhookURL,
+                token: webhookToken
+            )
+        }
+    }
+}
+
+// MARK: - Trigger Editor
+
+private struct TriggerEditorSheet: View {
+    let trigger: HomeClawConfig.WebhookTrigger?
+    let scenes: [EventLogSettingsView.SceneInfo]
+    let accessories: [EventLogSettingsView.AccessoryInfo]
+    let onSave: (HomeClawConfig.WebhookTrigger) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    enum TriggerKind: String, CaseIterable {
+        case scene = "Scene"
+        case accessory = "Accessory"
+    }
+
+    @State private var label = ""
+    @State private var kind: TriggerKind = .scene
+    @State private var selectedSceneID = ""
+    @State private var selectedAccessoryID = ""
+    @State private var characteristic = ""
+    @State private var value = ""
+    @State private var customMessage = ""
+
+    private let commonCharacteristics = [
+        ("power_state", "Power (on/off)"),
+        ("lock_target_state", "Lock (locked/unlocked)"),
+        ("current_door_state", "Door (open/closed)"),
+        ("target_position", "Position (0-100)"),
+        ("active", "Active (on/off)"),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Trigger") {
+                    TextField("Label", text: $label, prompt: Text("e.g. Front door unlocked"))
+
+                    Picker("Type", selection: $kind) {
+                        ForEach(TriggerKind.allCases, id: \.self) { k in
+                            Text(k.rawValue).tag(k)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                if kind == .scene {
+                    Section("Scene") {
+                        Picker("Scene", selection: $selectedSceneID) {
+                            Text("Select a scene...").tag("")
+                            ForEach(scenes) { scene in
+                                Text(scene.name).tag(scene.id)
+                            }
+                        }
+                    }
+                } else {
+                    Section("Accessory") {
+                        Picker("Device", selection: $selectedAccessoryID) {
+                            Text("Any device").tag("")
+                            ForEach(accessories) { acc in
+                                let display = acc.room.isEmpty ? acc.name : "\(acc.name) (\(acc.room))"
+                                Text(display).tag(acc.id)
+                            }
+                        }
+                    }
+
+                    Section("Condition") {
+                        Picker("Characteristic", selection: $characteristic) {
+                            Text("Any").tag("")
+                            ForEach(commonCharacteristics, id: \.0) { char, desc in
+                                Text(desc).tag(char)
+                            }
+                        }
+
+                        if !characteristic.isEmpty {
+                            TextField("Value", text: $value, prompt: Text("e.g. unlocked, off, 0"))
+                                .autocorrectionDisabled()
+                        }
+                    }
+                }
+
+                Section("Custom Message (Optional)") {
+                    TextField("Message", text: $customMessage, prompt: Text("Auto-generated if empty"))
+                        .autocorrectionDisabled()
+                }
+            }
+            .navigationTitle(trigger == nil ? "New Trigger" : "Edit Trigger")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(label.isEmpty || !isValid)
+                }
+            }
+        }
+        .frame(minWidth: 400, minHeight: 350)
+        .onAppear { loadTrigger() }
+    }
+
+    private var isValid: Bool {
+        switch kind {
+        case .scene: return !selectedSceneID.isEmpty
+        case .accessory: return !selectedAccessoryID.isEmpty || !characteristic.isEmpty
+        }
+    }
+
+    private func loadTrigger() {
+        guard let t = trigger else { return }
+        label = t.label
+        customMessage = t.message ?? ""
+
+        if t.sceneName != nil || t.sceneID != nil {
+            kind = .scene
+            selectedSceneID = t.sceneID ?? ""
+            // If matched by name, find the ID
+            if selectedSceneID.isEmpty, let name = t.sceneName {
+                selectedSceneID = scenes.first(where: {
+                    $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+                })?.id ?? ""
+            }
+        } else {
+            kind = .accessory
+            selectedAccessoryID = t.accessoryID ?? ""
+            characteristic = t.characteristic ?? ""
+            value = t.value ?? ""
+        }
+    }
+
+    private func save() {
+        var t = trigger ?? HomeClawConfig.WebhookTrigger.create(label: label)
+        t.label = label
+        t.message = customMessage.isEmpty ? nil : customMessage
+
+        // Clear all match fields first
+        t.sceneName = nil
+        t.sceneID = nil
+        t.accessoryID = nil
+        t.accessoryType = nil
+        t.characteristic = nil
+        t.value = nil
+
+        switch kind {
+        case .scene:
+            t.sceneID = selectedSceneID
+            t.sceneName = scenes.first(where: { $0.id == selectedSceneID })?.name
+        case .accessory:
+            t.accessoryID = selectedAccessoryID.isEmpty ? nil : selectedAccessoryID
+            t.characteristic = characteristic.isEmpty ? nil : characteristic
+            t.value = value.isEmpty ? nil : value
+        }
+
+        onSave(t)
+        dismiss()
     }
 }
 

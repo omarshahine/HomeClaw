@@ -1,16 +1,15 @@
 import Foundation
 import os
 
-/// Logs HomeKit events to a JSONL file in the App Group container.
+/// Logs HomeKit events to a JSONL file in Application Support.
 /// Events are appended as newline-delimited JSON for efficient streaming reads.
-/// Includes log rotation (max 1MB, 1 rotated backup) and optional webhook delivery.
+/// Includes configurable log rotation and optional webhook delivery.
 @MainActor
 final class HomeEventLogger {
     static let shared = HomeEventLogger()
 
+    private let eventsDir: URL
     private let eventsFile: URL
-    private let rotatedFile: URL
-    private let maxFileSize: UInt64 = 1_048_576 // 1 MB
     private let fileManager = FileManager.default
     private let logger = AppLogger.homekit
 
@@ -21,13 +20,27 @@ final class HomeEventLogger {
     private let webhookCircuitThreshold = 5
     private let webhookCircuitResetInterval: TimeInterval = 60
 
+    /// Configurable max file size in bytes (read from config on each rotation check).
+    private var maxFileSize: UInt64 {
+        UInt64(HomeClawConfig.shared.eventLogMaxSizeMB) * 1_048_576
+    }
+
+    /// Configurable number of rotated backup files to keep.
+    private var maxBackups: Int {
+        HomeClawConfig.shared.eventLogMaxBackups
+    }
+
+    /// Whether event logging is enabled.
+    private var isEnabled: Bool {
+        HomeClawConfig.shared.eventLogEnabled
+    }
+
     private init() {
-        let dir = HomeClawConfig.configDirectory
-        eventsFile = dir.appendingPathComponent("events.jsonl")
-        rotatedFile = dir.appendingPathComponent("events.jsonl.1")
+        eventsDir = HomeClawConfig.configDirectory
+        eventsFile = eventsDir.appendingPathComponent("events.jsonl")
 
         // Ensure directory exists
-        try? fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: eventsDir, withIntermediateDirectories: true)
     }
 
     // MARK: - Event Types
@@ -158,9 +171,58 @@ final class HomeEventLogger {
         return events
     }
 
+    // MARK: - Stats & Management
+
+    /// Returns statistics about the event log files.
+    func logStats() -> [String: Any] {
+        var totalSize: UInt64 = 0
+        var fileCount = 0
+
+        // Main log file
+        if let attrs = try? fileManager.attributesOfItem(atPath: eventsFile.path),
+           let size = attrs[.size] as? UInt64
+        {
+            totalSize += size
+            fileCount += 1
+        }
+
+        // Rotated backup files
+        for i in 1...max(1, maxBackups) {
+            let backup = eventsDir.appendingPathComponent("events.jsonl.\(i)")
+            if let attrs = try? fileManager.attributesOfItem(atPath: backup.path),
+               let size = attrs[.size] as? UInt64
+            {
+                totalSize += size
+                fileCount += 1
+            }
+        }
+
+        return [
+            "enabled": isEnabled,
+            "file_count": fileCount,
+            "total_size_bytes": totalSize,
+            "total_size_mb": String(format: "%.1f", Double(totalSize) / 1_048_576),
+            "max_size_mb": HomeClawConfig.shared.eventLogMaxSizeMB,
+            "max_backups": maxBackups,
+            "path": eventsFile.path,
+        ]
+    }
+
+    /// Deletes all event log files.
+    func purge() {
+        try? fileManager.removeItem(at: eventsFile)
+        for i in 1...10 {
+            let backup = eventsDir.appendingPathComponent("events.jsonl.\(i)")
+            try? fileManager.removeItem(at: backup)
+        }
+        logger.info("Event log purged")
+    }
+
     // MARK: - Private
 
     private func writeEvent(_ event: [String: Any]) {
+        guard isEnabled else { return }
+
         guard let jsonData = try? JSONSerialization.data(withJSONObject: event, options: [.sortedKeys]),
               var line = String(data: jsonData, encoding: .utf8)
         else { return }
@@ -178,8 +240,9 @@ final class HomeEventLogger {
             try? line.data(using: .utf8)?.write(to: eventsFile, options: .atomic)
         }
 
-        // Fire webhook asynchronously
+        // Fire general webhook and check triggers
         deliverWebhook(event)
+        evaluateTriggers(event)
     }
 
     private func rotateIfNeeded() {
@@ -188,10 +251,119 @@ final class HomeEventLogger {
               size >= maxFileSize
         else { return }
 
-        // Remove old rotated file, move current to .1
-        try? fileManager.removeItem(at: rotatedFile)
-        try? fileManager.moveItem(at: eventsFile, to: rotatedFile)
-        logger.info("Event log rotated")
+        let backups = maxBackups
+
+        // Shift existing backups: .N → .N+1, removing the oldest if over limit
+        for i in stride(from: backups, through: 1, by: -1) {
+            let src = eventsDir.appendingPathComponent("events.jsonl.\(i)")
+            if i >= backups {
+                try? fileManager.removeItem(at: src)
+            } else {
+                let dst = eventsDir.appendingPathComponent("events.jsonl.\(i + 1)")
+                try? fileManager.removeItem(at: dst)
+                try? fileManager.moveItem(at: src, to: dst)
+            }
+        }
+
+        // Rotate current → .1
+        if backups > 0 {
+            let dst = eventsDir.appendingPathComponent("events.jsonl.1")
+            try? fileManager.removeItem(at: dst)
+            try? fileManager.moveItem(at: eventsFile, to: dst)
+        } else {
+            // No backups — just truncate
+            try? fileManager.removeItem(at: eventsFile)
+        }
+
+        logger.info("Event log rotated (max \(maxFileSize / 1_048_576) MB, \(backups) backups)")
+    }
+
+    // MARK: - Triggers
+
+    /// Evaluates all enabled webhook triggers against an event.
+    /// Matching triggers fire the global webhook with a custom or auto-generated message.
+    private func evaluateTriggers(_ event: [String: Any]) {
+        let config = HomeClawConfig.shared
+        guard let webhook = config.webhookConfig,
+              webhook.enabled,
+              let url = URL(string: webhook.url),
+              !webhook.url.isEmpty
+        else { return }
+
+        let triggers = config.webhookTriggers
+        guard !triggers.isEmpty else { return }
+
+        let eventType = event["type"] as? String ?? ""
+        let accessory = event["accessory"] as? [String: Any]
+        let accessoryID = accessory?["id"] as? String
+        let characteristic = event["characteristic"] as? String
+        let value = event["value"] as? String
+        let scene = event["scene"] as? [String: Any]
+        let sceneID = scene?["id"] as? String
+        let sceneName = scene?["name"] as? String
+
+        for trigger in triggers where trigger.enabled {
+            guard matchesTrigger(
+                trigger,
+                eventType: eventType,
+                accessoryID: accessoryID,
+                characteristic: characteristic,
+                value: value,
+                sceneID: sceneID,
+                sceneName: sceneName
+            ) else { continue }
+
+            let text = trigger.message ?? formatEventText(event)
+            let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": "now"]
+            sendWebhookPayload(payload, to: url, token: webhook.token)
+        }
+    }
+
+    private func matchesTrigger(
+        _ trigger: HomeClawConfig.WebhookTrigger,
+        eventType: String,
+        accessoryID: String?,
+        characteristic: String?,
+        value: String?,
+        sceneID: String?,
+        sceneName: String?
+    ) -> Bool {
+        // Scene trigger match
+        if let triggerSceneID = trigger.sceneID, !triggerSceneID.isEmpty {
+            return eventType == "scene_triggered" && sceneID == triggerSceneID
+        }
+        if let triggerSceneName = trigger.sceneName, !triggerSceneName.isEmpty {
+            return eventType == "scene_triggered"
+                && sceneName?.localizedCaseInsensitiveCompare(triggerSceneName) == .orderedSame
+        }
+
+        // Accessory-based triggers (characteristic_change or accessory_controlled)
+        guard eventType == "characteristic_change" || eventType == "accessory_controlled" else {
+            return false
+        }
+
+        // Match by specific accessory ID
+        if let triggerAccessoryID = trigger.accessoryID, !triggerAccessoryID.isEmpty {
+            guard accessoryID == triggerAccessoryID else { return false }
+        }
+
+        // Match characteristic + value (if specified)
+        if let triggerChar = trigger.characteristic, !triggerChar.isEmpty {
+            guard characteristic?.localizedCaseInsensitiveCompare(triggerChar) == .orderedSame else {
+                return false
+            }
+        }
+        if let triggerValue = trigger.value, !triggerValue.isEmpty {
+            guard value?.localizedCaseInsensitiveCompare(triggerValue) == .orderedSame else {
+                return false
+            }
+        }
+
+        // Must have at least one match condition
+        let hasCondition = (trigger.accessoryID != nil && !trigger.accessoryID!.isEmpty)
+            || (trigger.characteristic != nil && !trigger.characteristic!.isEmpty)
+            || (trigger.value != nil && !trigger.value!.isEmpty)
+        return hasCondition
     }
 
     // MARK: - Webhook
@@ -226,25 +398,23 @@ final class HomeEventLogger {
             }
         }
 
-        // Build the webhook payload to match OpenClaw /hooks/wake format
         let text = formatEventText(event)
-        let payload: [String: Any] = [
-            "text": text,
-            "mode": "now",
-        ]
+        let payload: [String: Any] = ["text": text, "mode": "now"]
+        sendWebhookPayload(payload, to: url, token: webhook.token)
+    }
 
+    private func sendWebhookPayload(_ payload: [String: Any], to url: URL, token: String) {
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if !webhook.token.isEmpty {
-            request.setValue("Bearer \(webhook.token)", forHTTPHeaderField: "Authorization")
+        if !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = body
         request.timeoutInterval = 10
 
-        // Fire and forget — capture self weakly to avoid retain cycles
         let logger = self.logger
         Task.detached { [weak self] in
             do {
