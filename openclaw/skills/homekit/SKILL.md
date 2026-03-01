@@ -103,15 +103,73 @@ Use events to answer questions like "what changed recently?", "when was the fron
 
 ## Webhook Setup
 
-HomeClaw can push events to OpenClaw via the `/hooks/wake` endpoint. Configure once:
+HomeClaw can push events to OpenClaw via two endpoints:
+
+- **`/hooks/wake`** — Lightweight text notification to the active session. The session sees "something happened" and can decide whether to act. Best for ambient events (scene triggers, temperature changes).
+- **`/hooks/agent`** — Runs an isolated AI agent turn that processes the event and can take action. Best for security events (door unlocked, garage opened) where you want the AI to analyze and potentially alert you.
+
+### Basic Setup (Wake Events)
+
+Configure the webhook with a **base URL** (no endpoint path — HomeClaw appends `/hooks/wake` or `/hooks/agent` automatically):
 
 ```bash
-homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake" \
+homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
                     --webhook-token "shared-secret" \
                     --webhook-enabled true
 ```
 
-Once enabled, all HomeKit events (characteristic changes, scene triggers, control actions) are POSTed as `{"text": "...", "mode": "now"}`. Use the Webhook tab in HomeClaw Settings to select which scenes and accessories trigger webhooks.
+Once enabled, all HomeKit events are POSTed to `/hooks/wake` as `{"text": "...", "mode": "now"}`. Use the Webhook tab in HomeClaw Settings to select which scenes and accessories trigger webhooks.
+
+### Per-Trigger Agent Routing
+
+Individual triggers can be promoted to agent routing via the socket `update_trigger` command. The UI creates triggers with default wake behavior; upgrade specific triggers to agent mode for smarter handling:
+
+```json
+{"command": "update_trigger", "args": {
+  "id": "<trigger-uuid>",
+  "action": "agent",
+  "agent_prompt": "The front door was just unlocked. Check recent door activity and alert me if this is unexpected.",
+  "agent_name": "HomeClaw Security",
+  "agent_deliver": true
+}}
+```
+
+Or create an agent trigger directly:
+
+```json
+{"command": "add_trigger", "args": {
+  "label": "Front door unlocked",
+  "accessory_id": "<lock-uuid>",
+  "characteristic": "lock_target_state",
+  "value": "unlocked",
+  "action": "agent",
+  "agent_prompt": "The front door was unlocked. Analyze recent activity and determine if this is expected.",
+  "agent_name": "HomeClaw Security",
+  "agent_deliver": true
+}}
+```
+
+### Common Trigger Patterns
+
+| Scenario | Action | Wake Mode | Why |
+|----------|--------|-----------|-----|
+| Door unlocked | `agent` | `now` | Security — AI should analyze context |
+| Garage door opened | `agent` | `now` | Security — AI should analyze context |
+| Leak sensor triggered | `agent` + `deliver` | `now` | Critical — AI should alert immediately |
+| Scene "Good Night" | `wake` | `now` | Informational — just notify the session |
+| Temperature changed | `wake` | `next-heartbeat` | Ambient — batch with other events |
+| Motion detected | `wake` | `now` | Awareness — don't need AI analysis |
+
+### Trigger Fields Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `action` | string | `"wake"` | `"wake"` or `"agent"` — which endpoint receives the event |
+| `wake_mode` | string | `"now"` | `"now"` or `"next-heartbeat"` — delivery timing |
+| `agent_prompt` | string | event text | Custom prompt for the agent (falls back to formatted event text) |
+| `agent_id` | string | — | Route to a specific OpenClaw agent by ID |
+| `agent_name` | string | `"HomeClaw"` | Human label shown in agent responses |
+| `agent_deliver` | bool | — | Send the agent's response to a messaging channel |
 
 ## Important Notes
 

@@ -18,7 +18,7 @@ struct Config: ParsableCommand {
     @Option(name: .long, help: "Set allowed accessory IDs (comma-separated UUIDs)")
     var allowAccessories: String?
 
-    @Option(name: .long, help: "Set webhook URL (e.g. http://127.0.0.1:18789/hooks/wake)")
+    @Option(name: .long, help: "Set webhook base URL (e.g. http://127.0.0.1:18789)")
     var webhookURL: String?
 
     @Option(name: .long, help: "Set webhook bearer token")
@@ -175,7 +175,14 @@ struct Config: ParsableCommand {
         if let webhook = config["webhook"] as? [String: Any] {
             let whEnabled = webhook["enabled"] as? Bool ?? false
             let whURL = webhook["url"] as? String ?? ""
-            print("  Webhook:       \(whEnabled ? "enabled" : "disabled")\(whEnabled && !whURL.isEmpty ? " (\(whURL))" : "")")
+            if whEnabled && !whURL.isEmpty {
+                print("  Webhook:       enabled")
+                print("    URL:         \(whURL)")
+                print("    Wake:        \(whURL)/hooks/wake")
+                print("    Agent:       \(whURL)/hooks/agent")
+            } else {
+                print("  Webhook:       \(whEnabled ? "enabled" : "disabled")")
+            }
         }
 
         if !homes.isEmpty {

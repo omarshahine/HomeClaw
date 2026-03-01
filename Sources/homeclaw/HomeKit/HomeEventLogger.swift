@@ -282,18 +282,18 @@ final class HomeEventLogger {
     // MARK: - Triggers
 
     /// Evaluates all enabled webhook triggers against an event.
-    /// Matching triggers fire the global webhook with a custom or auto-generated message.
+    /// Matching triggers fire webhooks routed by action type (wake or agent).
     private func evaluateTriggers(_ event: [String: Any]) {
         let config = HomeClawConfig.shared
         guard let webhook = config.webhookConfig,
               webhook.enabled,
-              let url = URL(string: webhook.url),
               !webhook.url.isEmpty
         else { return }
 
         let triggers = config.webhookTriggers
         guard !triggers.isEmpty else { return }
 
+        let baseURL = webhook.url
         let eventType = event["type"] as? String ?? ""
         let accessory = event["accessory"] as? [String: Any]
         let accessoryID = accessory?["id"] as? String
@@ -314,10 +314,38 @@ final class HomeEventLogger {
                 sceneName: sceneName
             ) else { continue }
 
+            let action = trigger.action ?? "wake"
             let text = trigger.message ?? formatEventText(event)
-            let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": "now"]
-            sendWebhookPayload(payload, to: url, token: webhook.token)
+
+            if action == "agent" {
+                guard let url = URL(string: baseURL + "/hooks/agent") else { continue }
+                let payload = buildAgentPayload(trigger: trigger, eventText: text)
+                sendWebhookPayload(payload, to: url, token: webhook.token, timeout: 30)
+            } else {
+                guard let url = URL(string: baseURL + "/hooks/wake") else { continue }
+                let mode = trigger.wakeMode ?? "now"
+                let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": mode]
+                sendWebhookPayload(payload, to: url, token: webhook.token)
+            }
         }
+    }
+
+    /// Builds the JSON payload for an agent webhook call.
+    private func buildAgentPayload(trigger: HomeClawConfig.WebhookTrigger, eventText: String) -> [String: Any] {
+        var payload: [String: Any] = [
+            "message": trigger.agentPrompt ?? "[\(trigger.label)] \(eventText)",
+            "name": trigger.agentName ?? "HomeClaw",
+        ]
+        if let agentId = trigger.agentId, !agentId.isEmpty {
+            payload["agentId"] = agentId
+        }
+        if let wakeMode = trigger.wakeMode {
+            payload["wakeMode"] = wakeMode
+        }
+        if let deliver = trigger.agentDeliver {
+            payload["deliver"] = deliver
+        }
+        return payload
     }
 
     private func matchesTrigger(
@@ -373,8 +401,8 @@ final class HomeEventLogger {
         let config = HomeClawConfig.shared
         guard let webhook = config.webhookConfig,
               webhook.enabled,
-              let url = URL(string: webhook.url),
-              !webhook.url.isEmpty
+              !webhook.url.isEmpty,
+              let url = URL(string: webhook.url + "/hooks/wake")
         else { return }
 
         // Check event type filter
@@ -391,7 +419,7 @@ final class HomeEventLogger {
         sendWebhookPayload(payload, to: url, token: webhook.token)
     }
 
-    private func sendWebhookPayload(_ payload: [String: Any], to url: URL, token: String) {
+    private func sendWebhookPayload(_ payload: [String: Any], to url: URL, token: String, timeout: TimeInterval = 10) {
         // Circuit breaker (shared across general webhook and triggers)
         if webhookCircuitOpen {
             if let openedAt = webhookCircuitOpenedAt,
@@ -414,7 +442,7 @@ final class HomeEventLogger {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = body
-        request.timeoutInterval = 10
+        request.timeoutInterval = timeout
 
         let logger = self.logger
         Task.detached { [weak self] in

@@ -45,6 +45,16 @@ final class HomeClawConfig: @unchecked Sendable {
         // Optional custom webhook message (falls back to auto-generated)
         var message: String?
 
+        // Routing — controls which OpenClaw endpoint receives the event
+        var action: String?            // "wake" (default) or "agent"
+        var wakeMode: String?          // "now" (default) or "next-heartbeat"
+
+        // Agent-specific fields (only used when action == "agent")
+        var agentPrompt: String?       // Prompt for the agent (falls back to event text)
+        var agentId: String?           // Route to specific OpenClaw agent
+        var agentName: String?         // Human label (default: "HomeClaw")
+        var agentDeliver: Bool?        // Send agent response to messaging channel
+
         /// Creates a new trigger with a generated ID.
         static func create(label: String) -> WebhookTrigger {
             WebhookTrigger(id: UUID().uuidString, label: label, enabled: true)
@@ -61,6 +71,7 @@ final class HomeClawConfig: @unchecked Sendable {
     }
 
     struct ConfigData: Codable {
+        var configVersion: Int?             // nil = v1 (legacy full URL); 2 = base URL
         var defaultHomeID: String?
         var accessoryFilterMode: String?    // "all" (default) or "allowlist"
         var allowedAccessoryIDs: [String]?  // UUIDs of allowed accessories
@@ -91,6 +102,22 @@ final class HomeClawConfig: @unchecked Sendable {
             config = decoded
         } else {
             config = ConfigData()
+        }
+
+        // Migrate v1 → v2: strip /hooks/wake or /hooks/agent suffix from webhook URL
+        // so the stored URL is a base URL and endpoint paths are constructed in code.
+        if (config.configVersion ?? 1) < 2, var webhook = config.webhook, !webhook.url.isEmpty {
+            let suffixes = ["/hooks/wake", "/hooks/agent"]
+            for suffix in suffixes where webhook.url.hasSuffix(suffix) {
+                webhook.url = String(webhook.url.dropLast(suffix.count))
+                break
+            }
+            config.webhook = webhook
+            config.configVersion = 2
+            save()
+        } else if config.configVersion == nil {
+            config.configVersion = 2
+            save()
         }
     }
 

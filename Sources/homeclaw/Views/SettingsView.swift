@@ -579,7 +579,7 @@ private struct WebhookSettingsView: View {
             .padding(.bottom, 4)
 
             HStack(spacing: 8) {
-                TextField("Webhook URL", text: $webhookURL, prompt: Text("http://127.0.0.1:18789/hooks/wake"))
+                TextField("Base URL", text: $webhookURL, prompt: Text("http://127.0.0.1:18789"))
                     .textContentType(.none)
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
@@ -606,7 +606,13 @@ private struct WebhookSettingsView: View {
                 .buttonStyle(.bordered)
             }
             .padding(.horizontal, 12)
-            .padding(.bottom, 8)
+            .padding(.bottom, 4)
+
+            Text("Events sent to /hooks/wake by default. Configure agent routing per-trigger via CLI.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
 
             Divider()
 
