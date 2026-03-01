@@ -171,7 +171,7 @@ homeclaw-cli events --since 2d --json       # Last 2 days, JSON output
 homeclaw-cli events --type scene_triggered  # Filter by event type
 
 # Webhook configuration
-homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake"
+homeclaw-cli config --webhook-url "http://127.0.0.1:18789"
 homeclaw-cli config --webhook-token "your-secret-token"
 homeclaw-cli config --webhook-enabled true
 ```
@@ -333,7 +333,7 @@ Five configuration tabs accessible from the menu bar:
 | **HomeKit** | Connection status, home list with accessory and room counts, active home selector |
 | **Devices** | Filter mode (all/allowlist), per-device toggles grouped by room, search, bulk select/deselect |
 | **Event Log** | Enable/disable event logging, configure file rotation (size limit + backup count), view storage stats, purge logs, reveal in Finder |
-| **Webhook** | Configure webhook endpoint (URL + bearer token), select which scenes and accessories trigger webhooks using checkboxes grouped by room |
+| **Webhook** | Configure webhook base URL + bearer token, select which scenes and accessories trigger webhooks using checkboxes grouped by room. Per-trigger agent routing available via CLI. |
 | **Integrations** | One-click install for Claude Desktop, Claude Code plugin detection, OpenClaw gateway setup |
 
 ### HomeKit
@@ -387,25 +387,30 @@ The `--since` flag accepts ISO 8601 timestamps or duration shorthand: `1h`, `30m
 
 ## Webhook
 
-HomeClaw can push events to an HTTP endpoint (designed for [OpenClaw](https://openclaw.ai)'s `/hooks/wake` format). When a webhook is configured and specific scenes or accessories are selected, HomeClaw POSTs a JSON payload on each matching event.
+HomeClaw can push HomeKit events to [OpenClaw](https://openclaw.ai) via two endpoints:
+
+- **`/hooks/wake`** -- lightweight text notification to the active session (default)
+- **`/hooks/agent`** -- runs an isolated AI agent turn that can analyze the event and take action
 
 ### Setup
 
 1. Open **Settings > Webhook**
 2. Toggle **Enable Webhook**
-3. Enter the webhook URL (e.g. `http://127.0.0.1:18789/hooks/wake`)
+3. Enter the **base URL** (e.g. `http://127.0.0.1:18789`) -- HomeClaw appends the endpoint path automatically
 4. Click **Generate** to create a secure bearer token (or enter your own)
 5. Check the scenes and accessories you want to trigger webhooks
 
 Or configure via CLI (useful for automated setup from OpenClaw):
 
 ```bash
-homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake" \
+homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
                     --webhook-token "your-secret-token" \
                     --webhook-enabled true
 ```
 
-### Payload Format
+### Wake Payload (Default)
+
+All events and triggers send to `/hooks/wake` by default:
 
 ```json
 {
@@ -414,7 +419,30 @@ homeclaw-cli config --webhook-url "http://127.0.0.1:18789/hooks/wake" \
 }
 ```
 
-Authentication uses `Authorization: Bearer <token>`. The webhook includes a circuit breaker -- after 5 consecutive failures, delivery pauses for 60 seconds before retrying.
+### Agent Routing
+
+Individual triggers can be promoted to agent routing for security-critical events like door unlocks or leak sensors. Agent triggers POST to `/hooks/agent` with a richer payload:
+
+```json
+{
+  "message": "The front door was unlocked. Analyze recent activity.",
+  "name": "HomeClaw Security",
+  "deliver": true
+}
+```
+
+Configure agent routing per-trigger via the Unix socket:
+
+```bash
+# Upgrade an existing trigger to agent mode
+echo '{"command":"update_trigger","args":{"id":"<trigger-id>","action":"agent","agent_prompt":"Front door unlocked. Check if this is expected.","agent_deliver":true}}' | nc -U /tmp/homeclaw.sock
+```
+
+See [SKILL.md](openclaw/skills/homekit/SKILL.md) for the full trigger fields reference and common automation patterns.
+
+### Reliability
+
+Authentication uses `Authorization: Bearer <token>`. The webhook includes a circuit breaker -- after 5 consecutive failures, delivery pauses for 60 seconds before retrying. Agent calls use a 30-second timeout (vs 10 seconds for wake) to accommodate LLM inference time.
 
 ## Device Filtering
 
