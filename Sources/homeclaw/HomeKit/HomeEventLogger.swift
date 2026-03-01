@@ -293,7 +293,7 @@ final class HomeEventLogger {
         let triggers = config.webhookTriggers
         guard !triggers.isEmpty else { return }
 
-        let baseURL = webhook.url
+        let baseURL = webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let eventType = event["type"] as? String ?? ""
         let accessory = event["accessory"] as? [String: Any]
         let accessoryID = accessory?["id"] as? String
@@ -402,7 +402,7 @@ final class HomeEventLogger {
         guard let webhook = config.webhookConfig,
               webhook.enabled,
               !webhook.url.isEmpty,
-              let url = URL(string: webhook.url + "/hooks/wake")
+              let url = URL(string: webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/hooks/wake")
         else { return }
 
         // Check event type filter
