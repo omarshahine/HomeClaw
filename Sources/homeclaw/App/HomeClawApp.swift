@@ -82,10 +82,14 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func openSettings() {
+        // Reuse an existing Settings session instead of creating a new one each time
+        let existingSession = UIApplication.shared.openSessions.first {
+            $0.configuration.name == "Settings"
+        }
         Self.settingsRequested = true
         let activity = NSUserActivity(activityType: "com.shahine.homeclaw.settings")
         UIApplication.shared.requestSceneSessionActivation(
-            nil, userActivity: activity, options: nil)
+            existingSession, userActivity: activity, options: nil)
     }
 
     @objc func quitApp() {
