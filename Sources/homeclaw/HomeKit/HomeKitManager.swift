@@ -176,12 +176,15 @@ final class HomeKitManager: NSObject, Observable {
         // Write
         do {
             try await hmCharacteristic.writeValue(parsedValue)
-            AppLogger.homekit.info("Set \(accessory.name).\(characteristic) = \(value)")
+            let home = findHome(for: accessory)
+            AppLogger.homekit.info("[\(home?.name ?? "?")] Set \(accessory.name).\(characteristic) = \(value)")
             HomeEventLogger.shared.logAccessoryControlled(
                 accessoryID: accessory.uniqueIdentifier.uuidString,
                 accessoryName: accessory.name,
                 characteristic: characteristic,
-                value: value
+                value: value,
+                homeName: home?.name,
+                homeID: home?.uniqueIdentifier.uuidString
             )
         } catch {
             throw ControlError.writeFailed("\(error.localizedDescription)")
@@ -214,11 +217,12 @@ final class HomeKitManager: NSObject, Observable {
         for home in targetHomes {
             if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
                 try await home.executeActionSet(actionSet)
-                AppLogger.homekit.info("Triggered scene: \(actionSet.name)")
+                AppLogger.homekit.info("[\(home.name)] Triggered scene: \(actionSet.name)")
                 HomeEventLogger.shared.logSceneTriggered(
                     sceneID: actionSet.uniqueIdentifier.uuidString,
                     sceneName: actionSet.name,
-                    homeName: home.name
+                    homeName: home.name,
+                    homeID: home.uniqueIdentifier.uuidString
                 )
                 return AccessoryModel.sceneSummary(actionSet)
             }
@@ -230,11 +234,12 @@ final class HomeKitManager: NSObject, Observable {
                 $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
             }) {
                 try await home.executeActionSet(actionSet)
-                AppLogger.homekit.info("Triggered scene: \(actionSet.name)")
+                AppLogger.homekit.info("[\(home.name)] Triggered scene: \(actionSet.name)")
                 HomeEventLogger.shared.logSceneTriggered(
                     sceneID: actionSet.uniqueIdentifier.uuidString,
                     sceneName: actionSet.name,
-                    homeName: home.name
+                    homeName: home.name,
+                    homeID: home.uniqueIdentifier.uuidString
                 )
                 return AccessoryModel.sceneSummary(actionSet)
             }
@@ -259,7 +264,7 @@ final class HomeKitManager: NSObject, Observable {
                         else { continuation.resume() }
                     }
                 }
-                AppLogger.homekit.info("Deleted scene: \(name)")
+                AppLogger.homekit.info("[\(home.name)] Deleted scene: \(name)")
                 return [
                     "deleted": true,
                     "name": actionSet.name,
@@ -453,7 +458,7 @@ final class HomeKitManager: NSObject, Observable {
             addedCount += 1
         }
 
-        AppLogger.homekit.info("Imported scene '\(name)' with \(addedCount) action(s)")
+        AppLogger.homekit.info("[\(home.name)] Imported scene '\(name)' with \(addedCount) action(s)")
 
         return [
             "created": true,
@@ -888,6 +893,11 @@ final class HomeKitManager: NSObject, Observable {
         return [homes[0]]
     }
 
+    /// Returns the home that contains the given accessory, or nil if not found.
+    private func findHome(for accessory: HMAccessory) -> HMHome? {
+        homes.first { $0.accessories.contains(where: { $0.uniqueIdentifier == accessory.uniqueIdentifier }) }
+    }
+
     private func findAccessory(id: String, homeID: String? = nil) -> HMAccessory? {
         let targetHomes = filteredHomes(homeID: homeID)
 
@@ -931,8 +941,9 @@ extension HomeKitManager: HMHomeManagerDelegate {
     nonisolated func homeManagerDidUpdateHomes(_ manager: HMHomeManager) {
         Task { @MainActor in
             homes = manager.homes
+            let homeNames = manager.homes.map(\.name)
             AppLogger.homekit.info(
-                "HomeKit updated: \(manager.homes.count) home(s), \(self.totalAccessoryCount) accessory(ies)"
+                "HomeKit updated: \(manager.homes.count) home(s) [\(homeNames.joined(separator: ", "))], \(self.totalAccessoryCount) accessory(ies)"
             )
 
             // Register as delegate for every accessory so we receive real-time value changes
@@ -956,15 +967,15 @@ extension HomeKitManager: HMHomeManagerDelegate {
             // Log the homes update event
             HomeEventLogger.shared.logHomesUpdated(
                 homeCount: manager.homes.count,
-                accessoryCount: self.totalAccessoryCount
+                accessoryCount: self.totalAccessoryCount,
+                homeNames: homeNames
             )
 
             // Notify macOSBridge (menu bar) of updated state
-            let names = manager.homes.map(\.name)
             NotificationCenter.default.post(
                 name: .homeKitStatusDidChange,
                 object: nil,
-                userInfo: ["ready": self.homesReady, "homeNames": names]
+                userInfo: ["ready": self.homesReady, "homeNames": homeNames]
             )
             scheduleMenuDataPush()
         }
@@ -1004,6 +1015,9 @@ extension HomeKitManager: HMAccessoryDelegate {
             cache.setValues(for: accessoryID, state: state)
             cache.save()
 
+            // Look up which home this accessory belongs to
+            let home = findHome(for: accessory)
+
             // Log the event
             HomeEventLogger.shared.logCharacteristicChange(
                 accessoryID: accessoryID,
@@ -1012,11 +1026,13 @@ extension HomeKitManager: HMAccessoryDelegate {
                 service: service.name,
                 characteristic: name,
                 value: value,
-                previousValue: previousValue
+                previousValue: previousValue,
+                homeName: home?.name,
+                homeID: home?.uniqueIdentifier.uuidString
             )
 
             AppLogger.homekit.debug(
-                "Live update: \(accessory.name).\(name) = \(value)"
+                "[\(home?.name ?? "?")] Live update: \(accessory.name).\(name) = \(value)"
             )
             scheduleMenuDataPush()
         }

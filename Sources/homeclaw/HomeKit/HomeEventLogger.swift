@@ -63,7 +63,9 @@ final class HomeEventLogger {
         service: String,
         characteristic: String,
         value: String,
-        previousValue: String?
+        previousValue: String?,
+        homeName: String? = nil,
+        homeID: String? = nil
     ) {
         var event: [String: Any] = [
             "timestamp": Self.isoFormatter.string(from: Date()),
@@ -80,22 +82,30 @@ final class HomeEventLogger {
         if let previousValue {
             event["previous_value"] = previousValue
         }
+        if let homeName {
+            var homeDict: [String: Any] = ["name": homeName]
+            if let homeID { homeDict["id"] = homeID }
+            event["home"] = homeDict
+        }
         writeEvent(event)
     }
 
     /// Logs a homes updated event from the HMHomeManagerDelegate callback.
-    func logHomesUpdated(homeCount: Int, accessoryCount: Int) {
-        let event: [String: Any] = [
+    func logHomesUpdated(homeCount: Int, accessoryCount: Int, homeNames: [String] = []) {
+        var event: [String: Any] = [
             "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.homesUpdated.rawValue,
             "homes": homeCount,
             "accessories": accessoryCount,
         ]
+        if !homeNames.isEmpty {
+            event["home_names"] = homeNames
+        }
         writeEvent(event)
     }
 
     /// Logs a scene trigger event.
-    func logSceneTriggered(sceneID: String, sceneName: String, homeName: String?) {
+    func logSceneTriggered(sceneID: String, sceneName: String, homeName: String?, homeID: String? = nil) {
         var event: [String: Any] = [
             "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.sceneTriggered.rawValue,
@@ -105,7 +115,9 @@ final class HomeEventLogger {
             ] as [String: Any],
         ]
         if let homeName {
-            event["home"] = homeName
+            var homeDict: [String: Any] = ["name": homeName]
+            if let homeID { homeDict["id"] = homeID }
+            event["home"] = homeDict
         }
         writeEvent(event)
     }
@@ -115,9 +127,11 @@ final class HomeEventLogger {
         accessoryID: String,
         accessoryName: String,
         characteristic: String,
-        value: String
+        value: String,
+        homeName: String? = nil,
+        homeID: String? = nil
     ) {
-        let event: [String: Any] = [
+        var event: [String: Any] = [
             "timestamp": Self.isoFormatter.string(from: Date()),
             "type": EventType.accessoryControlled.rawValue,
             "accessory": [
@@ -127,6 +141,11 @@ final class HomeEventLogger {
             "characteristic": characteristic,
             "value": value,
         ]
+        if let homeName {
+            var homeDict: [String: Any] = ["name": homeName]
+            if let homeID { homeDict["id"] = homeID }
+            event["home"] = homeDict
+        }
         writeEvent(event)
     }
 
@@ -474,8 +493,19 @@ final class HomeEventLogger {
         webhookFailureCount = 0
     }
 
+    /// Extracts the home name from an event's `home` field.
+    /// Handles both the new dict format `{"name": "...", "id": "..."}` and legacy string format.
+    private func homeLabel(from event: [String: Any]) -> String? {
+        if let homeDict = event["home"] as? [String: Any] {
+            return homeDict["name"] as? String
+        }
+        return event["home"] as? String
+    }
+
     private func formatEventText(_ event: [String: Any]) -> String {
         let type = event["type"] as? String ?? "unknown"
+        let homePrefix = homeLabel(from: event).map { "[\($0)] " } ?? ""
+
         switch type {
         case "characteristic_change":
             let accessory = event["accessory"] as? [String: Any]
@@ -484,23 +514,25 @@ final class HomeEventLogger {
             let char = event["characteristic"] as? String ?? ""
             let value = event["value"] as? String ?? ""
             let location = room.map { " in \($0)" } ?? ""
-            return "HomeKit: \(name)\(location) \(char) changed to \(value)"
+            return "\(homePrefix)HomeKit: \(name)\(location) \(char) changed to \(value)"
         case "scene_triggered":
             let scene = event["scene"] as? [String: Any]
             let name = scene?["name"] as? String ?? "Unknown"
-            return "HomeKit: Scene '\(name)' triggered"
+            return "\(homePrefix)HomeKit: Scene '\(name)' triggered"
         case "accessory_controlled":
             let accessory = event["accessory"] as? [String: Any]
             let name = accessory?["name"] as? String ?? "Unknown"
             let char = event["characteristic"] as? String ?? ""
             let value = event["value"] as? String ?? ""
-            return "HomeKit: \(name) \(char) set to \(value)"
+            return "\(homePrefix)HomeKit: \(name) \(char) set to \(value)"
         case "homes_updated":
             let homes = event["homes"] as? Int ?? 0
             let accessories = event["accessories"] as? Int ?? 0
-            return "HomeKit: Homes updated (\(homes) homes, \(accessories) accessories)"
+            let homeNames = event["home_names"] as? [String]
+            let namesSuffix = homeNames.map { ": \($0.joined(separator: ", "))" } ?? ""
+            return "HomeKit: Homes updated (\(homes) homes, \(accessories) accessories)\(namesSuffix)"
         default:
-            return "HomeKit event: \(type)"
+            return "\(homePrefix)HomeKit event: \(type)"
         }
     }
 }
