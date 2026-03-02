@@ -773,6 +773,12 @@ final class HomeKitManager: NSObject, Observable {
                         state[name] = CharacteristicMapper.formatValue(
                             characteristic.value, for: characteristic.characteristicType
                         )
+                        // Subscribe to push notifications so the delegate callback fires
+                        // when the value changes externally (e.g. Home app, physical switch).
+                        // Without this, only security accessories (locks, doors) push updates.
+                        if !characteristic.isNotificationEnabled {
+                            try? await characteristic.enableNotification(true)
+                        }
                     }
                 }
             }

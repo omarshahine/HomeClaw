@@ -103,127 +103,180 @@ Use events to answer questions like "what changed recently?", "when was the fron
 
 ## Webhook Setup
 
-HomeClaw can push HomeKit events to [OpenClaw](https://docs.openclaw.ai/automation/webhook) via webhooks, enabling your AI assistant to react to real-world events — a door unlocking, a leak sensor triggering, or a scene activating.
+HomeClaw pushes HomeKit events to [OpenClaw](https://docs.openclaw.ai/automation/webhook) via webhooks, enabling your AI assistant to react to real-world events — a door unlocking, a leak sensor triggering, or a scene activating.
 
-### How It Works
+### Two Endpoints: Wake vs Agent
 
-HomeClaw sends HTTP POST requests to two OpenClaw webhook endpoints:
+| | `/hooks/wake` | `/hooks/agent` |
+|---|---|---|
+| **Purpose** | Notify the active session | Run an isolated AI agent turn |
+| **Payload** | `{"text": "...", "mode": "now"}` | `{"message": "...", "name": "...", "deliver": true}` |
+| **Session** | Injected as a `System:` line | Separate `hook:<uuid>` session |
+| **Persistence** | Ephemeral — not saved to JSONL | Persisted in its own session |
+| **Timeout** | 10 seconds | 30 seconds (for LLM inference) |
+| **Use for** | Lights, scenes, temperature | Door unlocks, leak sensors, security |
 
-- **`/hooks/wake`** — Lightweight text notification to the active session. The session sees "something happened" and can decide whether to act. Best for ambient events (scene triggers, temperature changes).
-- **`/hooks/agent`** — Runs an isolated AI agent turn that processes the event and can take action. Best for security events (door unlocked, garage opened) where you want the AI to analyze and potentially alert you.
+**Default is wake.** Upgrade individual triggers to agent for events that need AI analysis.
 
-**Security model:** Bearer token authentication + network isolation. HomeClaw sends a shared secret token in the `Authorization` header. OpenClaw validates the token and rejects unauthorized requests. For local setups, both services run on `127.0.0.1` (loopback) or within a Tailnet, so the webhook traffic never leaves the machine/network. HMAC signatures are not needed.
+**Security model:** Bearer token + network isolation. Both services on `127.0.0.1` (loopback) or within a Tailnet. Each request includes `X-Request-ID` (UUID) and `X-Event-Timestamp` (ISO8601) for idempotency.
 
-Each request also includes `X-Request-ID` (UUID) and `X-Event-Timestamp` (ISO8601) headers for idempotency and staleness detection.
+### How Events Flow
+
+```
+Home app / physical switch / Siri / manufacturer app
+        │
+        ▼
+HomeKit (HMAccessoryDelegate push notification)
+        │
+        ▼
+HomeClaw event logger (writes to events.jsonl)
+        │
+        ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent (trigger label prefix)
+        │
+        └── No trigger ──► POST /hooks/wake (general catch-all)
+        │
+        ▼
+OpenClaw gateway validates Bearer token
+        │
+        ├── /hooks/wake ──► System: line → heartbeat agent run
+        └── /hooks/agent ──► Isolated agent turn with tool access
+```
+
+HomeClaw subscribes to HomeKit push notifications for all interesting characteristics. Events fire for changes from **any source** — Home app, physical switches, Siri, manufacturer apps, and the CLI.
 
 ### End-to-End Setup
 
 #### Step 1: Configure OpenClaw
 
-In your `openclaw.config.ts`, enable the hooks section with a secure token and allow HomeClaw's agent:
+Add the `hooks` block to `~/.openclaw/openclaw.json`:
 
-```typescript
-hooks: {
-  enabled: true,
-  token: "your-secure-random-token",   // Generate with: openssl rand -hex 32
-  allowedAgentIds: ["homeclaw"],        // Optional: restrict which agents can be invoked
+```json
+"hooks": {
+  "enabled": true,
+  "token": "${HOMECLAW_WEBHOOK_TOKEN}",
+  "internal": {
+    "enabled": true,
+    "entries": {
+      "audit-logger": { "enabled": true }
+    }
+  }
 }
 ```
 
-See the [OpenClaw webhook docs](https://docs.openclaw.ai/automation/webhook) for the full configuration reference.
+Generate a token and add it to `~/.openclaw/.env`:
+
+```bash
+# Generate
+openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
+
+# Add to .env
+echo 'HOMECLAW_WEBHOOK_TOKEN=<generated-token>' >> ~/.openclaw/.env
+```
+
+The gateway hot-reloads `hooks.enabled` and `hooks.token`. Restart with `openclaw gateway restart` if `.env` wasn't loaded at process start.
 
 #### Step 2: Configure HomeClaw
 
-Point HomeClaw at your OpenClaw instance with a **base URL** (no endpoint path — HomeClaw appends `/hooks/wake` or `/hooks/agent` automatically):
-
 ```bash
 homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
-                    --webhook-token "your-secure-random-token" \
+                    --webhook-token "<same-token>" \
                     --webhook-enabled true
 ```
 
-The token must match what you set in `openclaw.config.ts`.
+Or use HomeClaw Settings > Webhook (the Generate button creates a token — copy it to OpenClaw's `.env`).
 
 #### Step 3: Create Triggers
 
-Use the Webhook tab in HomeClaw Settings to select which scenes and accessories trigger webhooks. All triggers default to wake mode. Once enabled, matching HomeKit events are POSTed to `/hooks/wake` as `{"text": "...", "mode": "now"}`.
+Open HomeClaw Settings > Webhook. Check the scenes and accessories you want to fire webhooks. Start with security accessories (locks, garage doors) and a few lights to verify.
 
-### Testing Your Webhook
-
-Verify the connection is working end-to-end:
+Triggers can also be managed via the socket:
 
 ```bash
-# 1. Confirm HomeClaw is running and connected to HomeKit
-echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
+# List current triggers
+echo '{"command":"list_triggers"}' | nc -U ~/Library/Group\ Containers/group.com.shahine.homeclaw/homeclaw.sock
 
-# 2. Check webhook config
-homeclaw-cli config --json | python3 -c "import sys,json; c=json.load(sys.stdin); print(json.dumps(c.get('webhook',{}), indent=2))"
-
-# 3. Trigger a test event (toggle a light or run a scene)
-homeclaw-cli trigger "Good Night"
-
-# 4. Check OpenClaw logs for the incoming webhook
-# Look for: POST /hooks/wake with X-Request-ID header
+# Add a trigger
+echo '{"command":"add_trigger","args":{"label":"Garage Door","accessory_id":"<uuid>"}}' | nc -U ~/Library/Group\ Containers/group.com.shahine.homeclaw/homeclaw.sock
 ```
 
-If the webhook isn't arriving, check:
-- HomeClaw webhook is enabled (`webhook.enabled: true` in config)
-- Token matches between HomeClaw and OpenClaw
-- OpenClaw is listening on the configured port (default: 18789)
-- No firewall blocking loopback connections
+#### Step 4: Verify
 
-### Quick Setup via Claude Code
+```bash
+# Check webhook health
+homeclaw-cli status
 
-Paste this into a Claude Code session to configure webhooks end-to-end:
+# Toggle a light from the Home app, then check
+homeclaw-cli events --since 5m
 
-```
-Set up HomeClaw webhooks to OpenClaw:
-1. Verify HomeClaw is running and connected to HomeKit
-2. Configure my OpenClaw hooks section with a secure token
-3. Point HomeClaw webhooks at my OpenClaw instance
-4. Create a trigger for my front door lock (agent mode, deliver alerts)
-5. Test the connection
+# Check delivery logs
+log show --predicate 'process == "HomeClaw" AND category == "webhook"' --last 5m --style compact
 ```
 
-### Per-Trigger Agent Routing
+Look for a `System:` line in the OpenClaw TUI.
 
-Individual triggers can be promoted to agent routing via the socket `update_trigger` command. The UI creates triggers with default wake behavior; upgrade specific triggers to agent mode for smarter handling:
+### Upgrading Triggers to Agent Mode
 
-```json
-{"command": "update_trigger", "args": {
-  "id": "<trigger-uuid>",
-  "action": "agent",
-  "agent_prompt": "The front door was just unlocked. Check recent door activity and alert me if this is unexpected.",
-  "agent_name": "HomeClaw Security",
-  "agent_deliver": true
-}}
+The Settings UI creates triggers with **wake** behavior. Upgrade specific triggers to **agent** mode via the socket for smarter event handling:
+
+```bash
+# Upgrade an existing trigger to agent mode
+echo '{"command":"update_trigger","args":{
+  "id":"<trigger-uuid>",
+  "action":"agent",
+  "agent_prompt":"The front door was unlocked. Check recent activity and alert me if unexpected.",
+  "agent_name":"HomeClaw Security",
+  "agent_deliver":true
+}}' | nc -U ~/Library/Group\ Containers/group.com.shahine.homeclaw/homeclaw.sock
 ```
 
 Or create an agent trigger directly:
 
-```json
-{"command": "add_trigger", "args": {
-  "label": "Front door unlocked",
-  "accessory_id": "<lock-uuid>",
-  "characteristic": "lock_target_state",
-  "value": "unlocked",
-  "action": "agent",
-  "agent_prompt": "The front door was unlocked. Analyze recent activity and determine if this is expected.",
-  "agent_name": "HomeClaw Security",
-  "agent_deliver": true
-}}
+```bash
+echo '{"command":"add_trigger","args":{
+  "label":"Front door unlocked",
+  "accessory_id":"<lock-uuid>",
+  "characteristic":"lock_target_state",
+  "value":"unlocked",
+  "action":"agent",
+  "agent_prompt":"The front door was unlocked. Analyze recent activity and determine if this is expected.",
+  "agent_name":"HomeClaw Security",
+  "agent_deliver":true
+}}' | nc -U ~/Library/Group\ Containers/group.com.shahine.homeclaw/homeclaw.sock
 ```
+
+**Tip:** Set `agent_deliver: true` on security triggers. This marks them as **critical** — they bypass the circuit breaker and always attempt delivery, even when the circuit is tripped from other failures.
 
 ### Common Trigger Patterns
 
-| Scenario | Action | Wake Mode | Why |
-|----------|--------|-----------|-----|
-| Door unlocked | `agent` | `now` | Security — AI should analyze context |
-| Garage door opened | `agent` | `now` | Security — AI should analyze context |
-| Leak sensor triggered | `agent` + `deliver` | `now` | Critical — AI should alert immediately |
-| Scene "Good Night" | `wake` | `now` | Informational — just notify the session |
-| Temperature changed | `wake` | `next-heartbeat` | Ambient — batch with other events |
-| Motion detected | `wake` | `now` | Awareness — don't need AI analysis |
+| Scenario | Action | agent_deliver | Why |
+|----------|--------|---------------|-----|
+| Door unlocked | `agent` | `true` | Security — AI analyzes context, bypasses circuit breaker |
+| Garage door opened | `agent` | `true` | Security — AI analyzes context, bypasses circuit breaker |
+| Leak sensor triggered | `agent` | `true` | Critical — AI should alert immediately |
+| Scene "Good Night" | `wake` | — | Informational — just notify the session |
+| Light toggled | `wake` | — | Ambient — session awareness |
+| Temperature changed | `wake` | — | Ambient — session awareness |
+| Motion detected | `wake` | — | Awareness — don't need AI analysis |
+
+### Tips
+
+- **Start with wake, promote to agent.** Get wake working first, then selectively upgrade security triggers. Agent calls are heavier (30s timeout, separate session, LLM inference cost).
+- **Use `agent_deliver: true` sparingly.** It marks triggers as circuit-breaker-critical. Reserve it for events that must never be silently dropped (door unlocks, leaks). Overusing it defeats the circuit breaker's protection.
+- **Triggers are additive.** Multiple triggers can match the same event (e.g., an accessory trigger + a characteristic trigger). Each matched trigger fires its own webhook.
+- **General webhook is the catch-all.** If no trigger matches an event, the general webhook fires to `/hooks/wake`. If any trigger matches, the general webhook is skipped (no duplicates).
+- **Scene triggers match by name or UUID.** Use scene UUID for precision, scene name for convenience (case-insensitive).
+- **Characteristic + value filtering.** A trigger with `characteristic: "lock_current_state"` and `value: "unlocked"` only fires on unlock, not on lock. Omit `value` to fire on any state change.
+- **Check `homeclaw-cli status --json`** for webhook health: `circuit_state`, `last_success`, `last_failure`, `total_dropped`.
+
+### Circuit Breaker
+
+| State | After | Behavior | Recovery |
+|-------|-------|----------|----------|
+| Normal | — | All webhooks delivered | — |
+| Soft Open | 5 failures | Non-critical paused 5 min | Auto-resumes |
+| Hard Open | 3 soft trips | All non-critical stopped | Toggle webhook off→on in Settings |
+
+Critical triggers (`agent_deliver: true`) always bypass.
 
 ### Trigger Fields Reference
 
@@ -242,6 +295,8 @@ Or create an agent trigger directly:
 - `--json` on read commands gives parseable output. Always use it when processing results.
 - Unreachable devices have `"unreachable": true` in the compact map.
 - If CLI fails with "HomeClaw is not running", the app needs to be launched first.
+- On-disk event log: `~/Library/Containers/com.shahine.homeclaw/Data/Library/Application Support/HomeClaw/events.jsonl`
+- HomeClaw subscribes to HomeKit push notifications for all interesting characteristics on reachable accessories. Both Home app toggles and physical/external changes fire `characteristic_change` events.
 
 ## Batch Operations
 

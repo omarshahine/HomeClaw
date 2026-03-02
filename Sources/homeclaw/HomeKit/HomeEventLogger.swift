@@ -253,9 +253,11 @@ final class HomeEventLogger {
             try? line.data(using: .utf8)?.write(to: eventsFile, options: .atomic)
         }
 
-        // Fire general webhook and check triggers
-        deliverWebhook(event)
-        evaluateTriggers(event)
+        // Fire trigger-specific webhooks if any match; otherwise send the general webhook.
+        // This avoids duplicate delivery when a trigger matches the same event.
+        if !evaluateTriggers(event) {
+            deliverWebhook(event)
+        }
     }
 
     private func rotateIfNeeded() {
@@ -295,15 +297,17 @@ final class HomeEventLogger {
 
     /// Evaluates all enabled webhook triggers against an event.
     /// Matching triggers fire webhooks routed by action type (wake or agent).
-    private func evaluateTriggers(_ event: [String: Any]) {
+    /// Returns true if at least one trigger matched (so the caller can skip the general webhook).
+    @discardableResult
+    private func evaluateTriggers(_ event: [String: Any]) -> Bool {
         let config = HomeClawConfig.shared
         guard let webhook = config.webhookConfig,
               webhook.enabled,
               !webhook.url.isEmpty
-        else { return }
+        else { return false }
 
         let triggers = config.webhookTriggers
-        guard !triggers.isEmpty else { return }
+        guard !triggers.isEmpty else { return false }
 
         let baseURL = webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let eventType = event["type"] as? String ?? ""
@@ -315,6 +319,7 @@ final class HomeEventLogger {
         let sceneID = scene?["id"] as? String
         let sceneName = scene?["name"] as? String
 
+        var matched = false
         for trigger in triggers where trigger.enabled {
             guard matchesTrigger(
                 trigger,
@@ -326,6 +331,7 @@ final class HomeEventLogger {
                 sceneName: sceneName
             ) else { continue }
 
+            matched = true
             let action = trigger.action ?? "wake"
             let text = trigger.message ?? formatEventText(event)
             let isCritical = trigger.agentDeliver == true
@@ -341,6 +347,7 @@ final class HomeEventLogger {
                 sendWebhookPayload(payload, to: url, token: webhook.token, isCritical: isCritical)
             }
         }
+        return matched
     }
 
     /// Builds the JSON payload for an agent webhook call.
