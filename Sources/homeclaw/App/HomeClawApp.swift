@@ -16,6 +16,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     private var macOSController: (any iOS2Mac)?
     private var homeKitObserver: NSObjectProtocol?
     private var menuDataObserver: NSObjectProtocol?
+    private var webhookCircuitObserver: NSObjectProtocol?
 
     /// Set to true only by openSettings() — used to distinguish explicit
     /// settings requests from UIKit scene session restoration on launch.
@@ -183,6 +184,25 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             }
         }
 
+        // Observe webhook circuit breaker state changes
+        webhookCircuitObserver = NotificationCenter.default.addObserver(
+            forName: .webhookCircuitStateDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            // Extract state before crossing isolation boundary (Swift 6 strict concurrency)
+            let isHardOpen = (notification.userInfo?["state"] as? String) == "hardOpen"
+            MainActor.assumeIsolated {
+                let data = HomeKitManager.shared.buildMenuData()
+                self?.macOSController?.updateMenuData(data)
+
+                // Flash error on hard-open transition
+                if isHardOpen {
+                    self?.macOSController?.flashError()
+                }
+            }
+        }
+
         // Show onboarding on first launch — delay slightly to let HomeKit initialize
         #if targetEnvironment(macCatalyst)
         if !UserDefaults.standard.bool(forKey: "isOnboardingCompleted") {
@@ -202,6 +222,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = menuDataObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = webhookCircuitObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }

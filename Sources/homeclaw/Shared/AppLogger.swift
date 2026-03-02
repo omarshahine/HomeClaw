@@ -5,4 +5,5 @@ enum AppLogger {
     static let cli = Logger(subsystem: AppConfig.bundleID, category: "cli")
     static let app = Logger(subsystem: AppConfig.bundleID, category: "app")
     static let socket = Logger(subsystem: AppConfig.bundleID, category: "socket")
+    static let webhook = Logger(subsystem: AppConfig.bundleID, category: "webhook")
 }

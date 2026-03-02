@@ -30,7 +30,8 @@ Sources/
     Bridge/              # BridgeProtocols.swift (Mac2iOS, iOS2Mac)
     MCP/_disabled/       # Preserved HTTP MCP server code (not compiled)
     HomeKit/             # HomeKitManager, SocketServer, CharacteristicMapper,
-                         # AccessoryModel, DeviceMap, CharacteristicCache
+                         # AccessoryModel, DeviceMap, CharacteristicCache,
+                         # HomeEventLogger, WebhookCircuitBreaker
     Views/               # SettingsView, IntegrationsSettingsView
     Shared/              # AppConfig, AppLogger, HomeClawConfig
     Shared/_disabled/    # Preserved KeychainManager (not compiled)

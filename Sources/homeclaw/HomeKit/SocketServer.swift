@@ -186,11 +186,28 @@ final class SocketServer: @unchecked Sendable {
                     "is_stale": CharacteristicCache.shared.isStale,
                     "last_warmed": CharacteristicCache.shared.lastWarmedString as Any,
                 ]
+                let formatter = ISO8601DateFormatter()
+                let cb = WebhookCircuitBreaker.shared
+                let webhookConfig = HomeClawConfig.shared.webhookConfig
+                var webhookInfo: [String: Any] = [
+                    "enabled": webhookConfig?.enabled ?? false,
+                    "url_configured": !(webhookConfig?.url.isEmpty ?? true),
+                    "circuit_state": cb.state.rawValue,
+                ]
+                if cb.state != .closed {
+                    webhookInfo["soft_trip_count"] = cb.softTripCount
+                    webhookInfo["remaining_seconds"] = cb.remainingCooldownSeconds
+                    webhookInfo["total_dropped"] = cb.totalDroppedCount
+                }
+                if let d = cb.lastSuccessDate { webhookInfo["last_success"] = formatter.string(from: d) }
+                if let d = cb.lastFailureDate { webhookInfo["last_failure"] = formatter.string(from: d) }
+
                 result = [
                     "ready": hk.isReady,
                     "homes": hk.homes.count,
                     "accessories": hk.totalAccessoryCount,
                     "cache": cacheInfo,
+                    "webhook": webhookInfo,
                 ] as [String: Any]
 
             case "list_homes":
@@ -330,6 +347,10 @@ final class SocketServer: @unchecked Sendable {
                 HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
                     enabled: enabled, url: url, token: token, events: events
                 )
+                // Reset circuit breaker when re-enabling webhook
+                if enabled && WebhookCircuitBreaker.shared.state == .hardOpen {
+                    WebhookCircuitBreaker.shared.manualReset()
+                }
                 result = HomeClawConfig.shared.toDict()
 
             case "event_log_stats":

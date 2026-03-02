@@ -707,13 +707,25 @@ final class HomeKitManager: NSObject, Observable {
         }
         .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
 
-        return [
+        var data: [String: Any] = [
             "ready": true,
             "selected_home": selectedHome.name,
             "homes": homesList,
             "scenes": scenesList,
             "rooms": roomsList,
         ]
+
+        let cb = WebhookCircuitBreaker.shared
+        if cb.state != .closed {
+            data["webhookCircuit"] = [
+                "state": cb.state.rawValue,
+                "softTripCount": cb.softTripCount,
+                "remainingSeconds": cb.remainingCooldownSeconds,
+                "totalDropped": cb.totalDroppedCount,
+            ] as [String: Any]
+        }
+
+        return data
     }
 
     /// Debounced push of menu data via notification. Coalesces rapid updates
@@ -985,6 +997,7 @@ extension HomeKitManager: HMHomeManagerDelegate {
 extension Notification.Name {
     static let homeKitStatusDidChange = Notification.Name("HomeKitStatusDidChange")
     static let homeKitMenuDataDidChange = Notification.Name("HomeKitMenuDataDidChange")
+    static let webhookCircuitStateDidChange = Notification.Name("WebhookCircuitStateDidChange")
 }
 
 // MARK: - HMAccessoryDelegate

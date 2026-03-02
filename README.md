@@ -440,9 +440,26 @@ echo '{"command":"update_trigger","args":{"id":"<trigger-id>","action":"agent","
 
 See [SKILL.md](openclaw/skills/homekit/SKILL.md) for the full trigger fields reference and common automation patterns.
 
-### Reliability
+### Circuit Breaker
 
-Authentication uses `Authorization: Bearer <token>`. The webhook includes a circuit breaker -- after 5 consecutive failures, delivery pauses for 60 seconds before retrying. Agent calls use a 30-second timeout (vs 10 seconds for wake) to accommodate LLM inference time.
+The webhook system includes a **tiered circuit breaker** that prevents runaway delivery failures from overwhelming your network or hammering a down endpoint, while ensuring critical security events (like door unlocks) are never silently dropped.
+
+| State | Trigger | Behavior | Recovery |
+|-------|---------|----------|----------|
+| **Normal** | -- | All webhooks delivered normally | -- |
+| **Soft Open** | 5 consecutive failures | Non-critical webhooks paused | Auto-resumes after 5 minutes |
+| **Hard Open** | 3 soft trips without any success | All non-critical webhooks stopped | Toggle webhook off→on in Settings |
+
+**Critical triggers** (those with `agent_deliver: true`) always attempt delivery regardless of circuit state -- these are your security-critical events like door unlocks and leak sensors.
+
+The circuit state is visible in three places:
+- **Menu bar** -- warning icon and status item when paused or disabled
+- **Settings > Webhook** -- orange (paused) or red (disabled) banner with countdown and dropped count
+- **CLI** -- `homeclaw-cli status` shows circuit state, remaining cooldown, and dropped count
+
+### Authentication
+
+Uses `Authorization: Bearer <token>` with idempotency headers (`X-Request-ID`, `X-Event-Timestamp`). Agent calls use a 30-second timeout (vs 10 seconds for wake) to accommodate LLM inference time.
 
 ## Device Filtering
 
@@ -532,7 +549,7 @@ Sources/
     Bridge/                BridgeProtocols.swift (Mac2iOS, iOS2Mac)
     HomeKit/               HomeKitManager, SocketServer, CharacteristicMapper,
                            AccessoryModel, DeviceMap, CharacteristicCache,
-                           HomeEventLogger
+                           HomeEventLogger, WebhookCircuitBreaker
     Views/                 SettingsView, IntegrationsSettingsView
     Shared/                AppConfig, AppLogger, HomeClawConfig
   macOSBridge/             AppKit bundle (NSStatusItem menu bar)

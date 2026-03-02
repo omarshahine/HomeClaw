@@ -501,6 +501,13 @@ private struct WebhookSettingsView: View {
     @State private var isLoading = true
     @State private var saveTask: Task<Void, Never>?
 
+    // Circuit breaker observation
+    @State private var circuitState: String = "closed"
+    @State private var circuitSoftTripCount = 0
+    @State private var circuitRemainingSeconds = 0
+    @State private var circuitTotalDropped = 0
+    @State private var countdownTask: Task<Void, Never>?
+
     @State private var enabledSceneIDs: Set<String> = []
     @State private var enabledAccessoryIDs: Set<String> = []
 
@@ -568,6 +575,55 @@ private struct WebhookSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Circuit breaker status banner
+            if circuitState == "softOpen" {
+                let minutes = circuitRemainingSeconds / 60
+                let seconds = circuitRemainingSeconds % 60
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Webhooks Paused")
+                            .font(.headline)
+                        Text("Auto-resuming in \(minutes)m \(seconds)s (trip \(circuitSoftTripCount)/3)")
+                            .font(.caption)
+                        if circuitTotalDropped > 0 {
+                            Text("\(circuitTotalDropped) webhook(s) dropped")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(.orange.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            } else if circuitState == "hardOpen" {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.octagon.fill")
+                        .foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Webhooks Disabled")
+                            .font(.headline)
+                        Text("Toggle webhook off and on to re-enable")
+                            .font(.caption)
+                        if circuitTotalDropped > 0 {
+                            Text("\(circuitTotalDropped) webhook(s) dropped")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                }
+                .padding(10)
+                .background(.red.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
+
             // Webhook endpoint
             HStack {
                 Toggle("Enable Webhook", isOn: $webhookEnabled)
@@ -722,7 +778,50 @@ private struct WebhookSettingsView: View {
                 .padding(.vertical, 6)
             }
         }
-        .task { await loadSettings() }
+        .task {
+            await loadSettings()
+            loadCircuitState()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .webhookCircuitStateDidChange)
+        ) { notification in
+            if let state = notification.userInfo?["state"] as? String {
+                circuitState = state
+            }
+            if let count = notification.userInfo?["softTripCount"] as? Int {
+                circuitSoftTripCount = count
+            }
+            if let remaining = notification.userInfo?["remainingSeconds"] as? Int {
+                circuitRemainingSeconds = remaining
+            }
+            if let dropped = notification.userInfo?["totalDropped"] as? Int {
+                circuitTotalDropped = dropped
+            }
+            updateCountdownTimer()
+        }
+    }
+
+    // MARK: - Circuit Breaker
+
+    private func loadCircuitState() {
+        let cb = WebhookCircuitBreaker.shared
+        circuitState = cb.state.rawValue
+        circuitSoftTripCount = cb.softTripCount
+        circuitRemainingSeconds = cb.remainingCooldownSeconds
+        circuitTotalDropped = cb.totalDroppedCount
+        updateCountdownTimer()
+    }
+
+    private func updateCountdownTimer() {
+        countdownTask?.cancel()
+        guard circuitState == "softOpen" else { return }
+        countdownTask = Task { @MainActor in
+            while !Task.isCancelled && circuitState == "softOpen" {
+                circuitRemainingSeconds = WebhookCircuitBreaker.shared.remainingCooldownSeconds
+                if circuitRemainingSeconds <= 0 { break }
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     // MARK: - Bindings
@@ -871,6 +970,10 @@ private struct WebhookSettingsView: View {
                 token: webhookToken,
                 events: existingEvents
             )
+            // Reset circuit breaker when re-enabling webhook from hard-open state
+            if webhookEnabled && WebhookCircuitBreaker.shared.state == .hardOpen {
+                WebhookCircuitBreaker.shared.manualReset()
+            }
         }
     }
 }

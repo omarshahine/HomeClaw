@@ -21,6 +21,7 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     private var pendingMenuData: [String: Any]?
     private var originalStatusImage: NSImage?
     private var errorRestoreWorkItem: DispatchWorkItem?
+    private var persistentWarningActive = false
 
     public override required init() {
         super.init()
@@ -169,6 +170,38 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             homeItem.image = NSImage(
                 systemSymbolName: "house.fill", accessibilityDescription: nil)
             menu.addItem(homeItem)
+        }
+
+        // Webhook circuit breaker warnings
+        if let circuit = data["webhookCircuit"] as? [String: Any],
+           let state = circuit["state"] as? String
+        {
+            menu.addItem(.separator())
+            if state == "softOpen" {
+                let remaining = circuit["remainingSeconds"] as? Int ?? 0
+                let minutes = remaining / 60
+                let seconds = remaining % 60
+                let title = "Webhook paused (retrying in \(minutes)m \(seconds)s)"
+                let item = NSMenuItem(title: title, action: #selector(openSettings), keyEquivalent: "")
+                item.target = self
+                item.image = NSImage(
+                    systemSymbolName: "exclamationmark.triangle.fill",
+                    accessibilityDescription: "Webhook paused")
+                menu.addItem(item)
+                clearPersistentWarningIcon()
+            } else if state == "hardOpen" {
+                let dropped = circuit["totalDropped"] as? Int ?? 0
+                let title = "Webhook disabled (\(dropped) dropped)"
+                let item = NSMenuItem(title: title, action: #selector(openSettings), keyEquivalent: "")
+                item.target = self
+                item.image = NSImage(
+                    systemSymbolName: "xmark.octagon.fill",
+                    accessibilityDescription: "Webhook disabled")
+                menu.addItem(item)
+                setPersistentWarningIcon()
+            }
+        } else {
+            clearPersistentWarningIcon()
         }
 
         // Settings and Launch at Login right below the home selector
@@ -369,6 +402,28 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
+    }
+
+    // MARK: - Persistent Warning Icon
+
+    private func setPersistentWarningIcon() {
+        guard !persistentWarningActive else { return }
+        persistentWarningActive = true
+        // Cancel any flash restore so it doesn't overwrite our persistent icon
+        errorRestoreWorkItem?.cancel()
+        errorRestoreWorkItem = nil
+        originalStatusImage = nil
+        statusItem?.button?.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill",
+            accessibilityDescription: "Webhook error")
+    }
+
+    private func clearPersistentWarningIcon() {
+        guard persistentWarningActive else { return }
+        persistentWarningActive = false
+        statusItem?.button?.image = NSImage(
+            systemSymbolName: "house.badge.wifi.fill",
+            accessibilityDescription: "HomeClaw")
     }
 
     // MARK: - Accessory Behavior
