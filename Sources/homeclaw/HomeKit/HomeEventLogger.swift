@@ -460,6 +460,9 @@ final class HomeEventLogger {
         if !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        // Idempotency — lets the receiver deduplicate retried deliveries
+        request.setValue(UUID().uuidString, forHTTPHeaderField: "X-Request-ID")
+        request.setValue(Self.isoFormatter.string(from: Date()), forHTTPHeaderField: "X-Event-Timestamp")
         request.httpBody = body
         request.timeoutInterval = timeout
 

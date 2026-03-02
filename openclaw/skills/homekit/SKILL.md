@@ -103,22 +103,87 @@ Use events to answer questions like "what changed recently?", "when was the fron
 
 ## Webhook Setup
 
-HomeClaw can push events to OpenClaw via two endpoints:
+HomeClaw can push HomeKit events to [OpenClaw](https://docs.openclaw.ai/automation/webhook) via webhooks, enabling your AI assistant to react to real-world events — a door unlocking, a leak sensor triggering, or a scene activating.
+
+### How It Works
+
+HomeClaw sends HTTP POST requests to two OpenClaw webhook endpoints:
 
 - **`/hooks/wake`** — Lightweight text notification to the active session. The session sees "something happened" and can decide whether to act. Best for ambient events (scene triggers, temperature changes).
 - **`/hooks/agent`** — Runs an isolated AI agent turn that processes the event and can take action. Best for security events (door unlocked, garage opened) where you want the AI to analyze and potentially alert you.
 
-### Basic Setup (Wake Events)
+**Security model:** Bearer token authentication + network isolation. HomeClaw sends a shared secret token in the `Authorization` header. OpenClaw validates the token and rejects unauthorized requests. For local setups, both services run on `127.0.0.1` (loopback) or within a Tailnet, so the webhook traffic never leaves the machine/network. HMAC signatures are not needed.
 
-Configure the webhook with a **base URL** (no endpoint path — HomeClaw appends `/hooks/wake` or `/hooks/agent` automatically):
+Each request also includes `X-Request-ID` (UUID) and `X-Event-Timestamp` (ISO8601) headers for idempotency and staleness detection.
+
+### End-to-End Setup
+
+#### Step 1: Configure OpenClaw
+
+In your `openclaw.config.ts`, enable the hooks section with a secure token and allow HomeClaw's agent:
+
+```typescript
+hooks: {
+  enabled: true,
+  token: "your-secure-random-token",   // Generate with: openssl rand -hex 32
+  allowedAgentIds: ["homeclaw"],        // Optional: restrict which agents can be invoked
+}
+```
+
+See the [OpenClaw webhook docs](https://docs.openclaw.ai/automation/webhook) for the full configuration reference.
+
+#### Step 2: Configure HomeClaw
+
+Point HomeClaw at your OpenClaw instance with a **base URL** (no endpoint path — HomeClaw appends `/hooks/wake` or `/hooks/agent` automatically):
 
 ```bash
 homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
-                    --webhook-token "shared-secret" \
+                    --webhook-token "your-secure-random-token" \
                     --webhook-enabled true
 ```
 
-Once enabled, all HomeKit events are POSTed to `/hooks/wake` as `{"text": "...", "mode": "now"}`. Use the Webhook tab in HomeClaw Settings to select which scenes and accessories trigger webhooks.
+The token must match what you set in `openclaw.config.ts`.
+
+#### Step 3: Create Triggers
+
+Use the Webhook tab in HomeClaw Settings to select which scenes and accessories trigger webhooks. All triggers default to wake mode. Once enabled, matching HomeKit events are POSTed to `/hooks/wake` as `{"text": "...", "mode": "now"}`.
+
+### Testing Your Webhook
+
+Verify the connection is working end-to-end:
+
+```bash
+# 1. Confirm HomeClaw is running and connected to HomeKit
+echo '{"command":"status"}' | nc -U /tmp/homeclaw.sock
+
+# 2. Check webhook config
+homeclaw-cli config --json | python3 -c "import sys,json; c=json.load(sys.stdin); print(json.dumps(c.get('webhook',{}), indent=2))"
+
+# 3. Trigger a test event (toggle a light or run a scene)
+homeclaw-cli trigger "Good Night"
+
+# 4. Check OpenClaw logs for the incoming webhook
+# Look for: POST /hooks/wake with X-Request-ID header
+```
+
+If the webhook isn't arriving, check:
+- HomeClaw webhook is enabled (`webhook.enabled: true` in config)
+- Token matches between HomeClaw and OpenClaw
+- OpenClaw is listening on the configured port (default: 18789)
+- No firewall blocking loopback connections
+
+### Quick Setup via Claude Code
+
+Paste this into a Claude Code session to configure webhooks end-to-end:
+
+```
+Set up HomeClaw webhooks to OpenClaw:
+1. Verify HomeClaw is running and connected to HomeKit
+2. Configure my OpenClaw hooks section with a secure token
+3. Point HomeClaw webhooks at my OpenClaw instance
+4. Create a trigger for my front door lock (agent mode, deliver alerts)
+5. Test the connection
+```
 
 ### Per-Trigger Agent Routing
 
