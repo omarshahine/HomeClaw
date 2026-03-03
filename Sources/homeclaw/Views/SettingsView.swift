@@ -724,11 +724,20 @@ private struct WebhookSettingsView: View {
                 .padding(.bottom, 4)
             }
 
-            Text("Only triggered accessories fire webhooks. Tap \(Image(systemName: "bolt.fill")) for immediate delivery.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 6)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Check an accessory or scene below to send a webhook when it changes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                (Text("By default, events are batched with the next heartbeat. Tap ")
+                    + Text(Image(systemName: "bolt.fill")).foregroundColor(.orange)
+                    + Text(" to deliver immediately."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("[OpenClaw webhook docs](https://docs.openclaw.ai/automation/webhook)")
+                    .font(.caption)
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
 
             Divider()
 
@@ -913,7 +922,7 @@ private struct WebhookSettingsView: View {
             }
         } label: {
             Image(systemName: "bolt.fill")
-                .font(.caption)
+                .font(.body)
                 .foregroundStyle(isImmediate ? .orange : Color.secondary.opacity(0.3))
         }
         .buttonStyle(.plain)
