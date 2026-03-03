@@ -333,7 +333,7 @@ Five configuration tabs accessible from the menu bar:
 | **HomeKit** | Connection status, home list with accessory and room counts, active home selector |
 | **Devices** | Filter mode (all/allowlist), per-device toggles grouped by room, search, bulk select/deselect |
 | **Event Log** | Enable/disable event logging, configure file rotation (size limit + backup count), view storage stats, purge logs, reveal in Finder |
-| **Webhook** | Configure webhook base URL + bearer token, select which scenes and accessories trigger webhooks using checkboxes grouped by room. Per-trigger agent routing available via CLI. |
+| **Webhook** | Configure webhook base URL + bearer token, select which scenes and accessories trigger webhooks using checkboxes grouped by room. Per-trigger delivery mode (Batched/Immediate) via segmented control. Agent routing available via CLI. Circuit breaker status banner when tripped. |
 | **Integrations** | One-click install for Claude Desktop, Claude Code plugin detection, OpenClaw gateway setup |
 
 ### HomeKit
@@ -387,12 +387,26 @@ The `--since` flag accepts ISO 8601 timestamps or duration shorthand: `1h`, `30m
 
 ## Webhook
 
-HomeClaw can push HomeKit events to [OpenClaw](https://openclaw.ai) or any webhook-compatible service. Two endpoints are supported:
+HomeClaw can push HomeKit events to [OpenClaw](https://openclaw.ai) or any webhook-compatible service. Only accessories and scenes with **configured triggers** fire webhooks -- untriggered events are logged to disk but not pushed. Two endpoints are supported:
 
-- **`/hooks/wake`** -- lightweight text notification injected into the active session (default). Best for ambient events: lights toggled, scenes triggered, temperature changes.
-- **`/hooks/agent`** -- runs an isolated AI agent turn that can analyze the event and take action. Best for security events: door unlocked, garage opened, leak detected.
+- **`/hooks/wake`** (default) -- text notification routed to a dedicated `hook:homeclaw` session. Best for ambient events: lights toggled, scenes triggered, temperature changes. Delivery is **batched** by default (`next-heartbeat`), or **immediate** (`now`) per trigger.
+- **`/hooks/agent`** -- runs an isolated AI agent turn in its own `hook:<uuid>` session. Best for security events: door unlocked, garage opened, leak detected. Always immediate.
 
 HomeClaw appends the endpoint path to your base URL automatically.
+
+### Trigger Delivery Modes
+
+Each trigger has a **delivery mode** that controls timing:
+
+| Mode | Behavior | Set via |
+|------|----------|---------|
+| **Batched** (default) | Event queued until next heartbeat cycle | Settings UI segmented control |
+| **Immediate** | Event delivered right away | Settings UI segmented control |
+| **Agent** | Isolated AI agent turn, always immediate | Socket command only |
+
+In **Settings > Webhook**, each enabled trigger shows a **Batched / Immediate** picker. Use Immediate for events you want to react to right away (scene triggers, door locks). Use Batched for ambient events (light toggles, temperature changes) to avoid noise.
+
+Agent mode is configured via the socket for power users -- it routes to `/hooks/agent` instead of `/hooks/wake`.
 
 ### Setup with AI Assistant
 

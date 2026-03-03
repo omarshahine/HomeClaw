@@ -508,6 +508,9 @@ private struct WebhookSettingsView: View {
     @State private var circuitTotalDropped = 0
     @State private var countdownTask: Task<Void, Never>?
 
+    // Per-trigger wake mode: trigger ID → "now" or "next-heartbeat"
+    @State private var triggerWakeModes: [String: String] = [:]
+
     @State private var enabledSceneIDs: Set<String> = []
     @State private var enabledAccessoryIDs: Set<String> = []
 
@@ -712,8 +715,13 @@ private struct WebhookSettingsView: View {
                     if !filteredScenes.isEmpty {
                         Section {
                             ForEach(filteredScenes) { scene in
-                                Toggle(isOn: sceneBinding(scene.id, name: scene.name)) {
-                                    Label(scene.name, systemImage: "star.fill")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Toggle(isOn: sceneBinding(scene.id, name: scene.name)) {
+                                        Label(scene.name, systemImage: "star.fill")
+                                    }
+                                    if enabledSceneIDs.contains(scene.id) {
+                                        wakeModePickerForScene(scene.id)
+                                    }
                                 }
                             }
                         } header: {
@@ -736,13 +744,18 @@ private struct WebhookSettingsView: View {
                     ForEach(groupedByRoom, id: \.room) { group in
                         Section {
                             ForEach(group.items) { item in
-                                Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
-                                    HStack {
-                                        Text(item.name)
-                                        Spacer()
-                                        Text(item.category)
-                                            .foregroundStyle(.secondary)
-                                            .font(.caption)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
+                                        HStack {
+                                            Text(item.name)
+                                            Spacer()
+                                            Text(item.category)
+                                                .foregroundStyle(.secondary)
+                                                .font(.caption)
+                                        }
+                                    }
+                                    if enabledAccessoryIDs.contains(item.id) {
+                                        wakeModePickerForAccessory(item.id)
                                     }
                                 }
                             }
@@ -822,6 +835,45 @@ private struct WebhookSettingsView: View {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+    }
+
+    // MARK: - Wake Mode Pickers
+
+    @ViewBuilder
+    private func wakeModePickerForScene(_ sceneID: String) -> some View {
+        if let trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.sceneID == sceneID }) {
+            wakeModePicker(triggerID: trigger.id)
+        }
+    }
+
+    @ViewBuilder
+    private func wakeModePickerForAccessory(_ accessoryID: String) -> some View {
+        if let trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.accessoryID == accessoryID }) {
+            wakeModePicker(triggerID: trigger.id)
+        }
+    }
+
+    private func wakeModePicker(triggerID: String) -> some View {
+        let binding = Binding<String>(
+            get: { triggerWakeModes[triggerID] ?? "next-heartbeat" },
+            set: { newValue in
+                triggerWakeModes[triggerID] = newValue
+                updateTriggerWakeMode(triggerID: triggerID, mode: newValue)
+            }
+        )
+        return Picker("Delivery", selection: binding) {
+            Text("Batched").tag("next-heartbeat")
+            Text("Immediate").tag("now")
+        }
+        .pickerStyle(.segmented)
+        .frame(maxWidth: 200)
+        .padding(.leading, 24)
+    }
+
+    private func updateTriggerWakeMode(triggerID: String, mode: String) {
+        guard var trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.id == triggerID }) else { return }
+        trigger.wakeMode = mode == "next-heartbeat" ? nil : mode  // nil = default (next-heartbeat)
+        HomeClawConfig.shared.updateWebhookTrigger(trigger)
     }
 
     // MARK: - Bindings
@@ -923,6 +975,11 @@ private struct WebhookSettingsView: View {
         let triggers = config.webhookTriggers
         enabledSceneIDs = Set(triggers.compactMap(\.sceneID).filter { !$0.isEmpty })
         enabledAccessoryIDs = Set(triggers.compactMap(\.accessoryID).filter { !$0.isEmpty })
+
+        // Load per-trigger wake modes
+        for trigger in triggers {
+            triggerWakeModes[trigger.id] = trigger.wakeMode ?? "next-heartbeat"
+        }
 
         let hk = HomeKitManager.shared
 
