@@ -338,12 +338,15 @@ final class SocketServer: @unchecked Sendable {
                 ] as [String: Any]
 
             case "set_webhook":
+                // Merge provided fields into existing config (PATCH, not PUT).
+                // Missing fields retain their current values.
+                let existing = HomeClawConfig.shared.webhookConfig
                 let enabled = (args["enabled"] as? Bool)
                     ?? (args["enabled"] as? String).map { $0 == "true" }
-                    ?? false
-                let url = args["url"] as? String ?? ""
-                let token = args["token"] as? String ?? ""
-                let events = args["events"] as? [String]
+                    ?? existing?.enabled ?? false
+                let url = (args["url"] as? String) ?? existing?.url ?? ""
+                let token = (args["token"] as? String) ?? existing?.token ?? ""
+                let events = (args["events"] as? [String]) ?? existing?.events
                 HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
                     enabled: enabled, url: url, token: token, events: events
                 )
