@@ -253,11 +253,9 @@ final class HomeEventLogger {
             try? line.data(using: .utf8)?.write(to: eventsFile, options: .atomic)
         }
 
-        // Fire trigger-specific webhooks if any match; otherwise send the general webhook.
-        // This avoids duplicate delivery when a trigger matches the same event.
-        if !evaluateTriggers(event) {
-            deliverWebhook(event)
-        }
+        // Only fire webhooks for events that match a configured trigger.
+        // No catch-all — untriggered events are logged but not pushed.
+        evaluateTriggers(event)
     }
 
     private func rotateIfNeeded() {
@@ -342,7 +340,9 @@ final class HomeEventLogger {
                 sendWebhookPayload(payload, to: url, token: webhook.token, timeout: 30, isCritical: isCritical)
             } else {
                 guard let url = URL(string: baseURL + "/hooks/wake") else { continue }
-                let mode = trigger.wakeMode ?? "now"
+                // Default wake mode is "next-heartbeat" (batched) for ambient events.
+                // Security triggers should set wakeMode: "now" explicitly.
+                let mode = trigger.wakeMode ?? "next-heartbeat"
                 let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": mode]
                 sendWebhookPayload(payload, to: url, token: webhook.token, isCritical: isCritical)
             }
@@ -416,28 +416,6 @@ final class HomeEventLogger {
     }
 
     // MARK: - Webhook
-
-    private func deliverWebhook(_ event: [String: Any]) {
-        let config = HomeClawConfig.shared
-        guard let webhook = config.webhookConfig,
-              webhook.enabled,
-              !webhook.url.isEmpty,
-              let url = URL(string: webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/hooks/wake")
-        else { return }
-
-        // Check event type filter
-        if let eventType = event["type"] as? String,
-           let allowedEvents = webhook.events,
-           !allowedEvents.isEmpty,
-           !allowedEvents.contains(eventType)
-        {
-            return
-        }
-
-        let text = formatEventText(event)
-        let payload: [String: Any] = ["text": text, "mode": "now"]
-        sendWebhookPayload(payload, to: url, token: webhook.token)
-    }
 
     private func sendWebhookPayload(
         _ payload: [String: Any], to url: URL, token: String,
