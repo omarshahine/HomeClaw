@@ -508,8 +508,12 @@ private struct WebhookSettingsView: View {
     @State private var circuitTotalDropped = 0
     @State private var countdownTask: Task<Void, Never>?
 
-    // Per-trigger wake mode: trigger ID → "now" or "next-heartbeat"
-    @State private var triggerWakeModes: [String: String] = [:]
+    // Copy feedback and edit mode for URL/token fields
+    @State private var copiedField: String?
+    @State private var isEditingEndpoint = false
+
+    // Per-trigger wake mode: keyed by scene ID or accessory ID → "now" or "next-heartbeat"
+    @State private var wakeModes: [String: String] = [:]
 
     @State private var enabledSceneIDs: Set<String> = []
     @State private var enabledAccessoryIDs: Set<String> = []
@@ -582,52 +586,50 @@ private struct WebhookSettingsView: View {
             if circuitState == "softOpen" {
                 let minutes = circuitRemainingSeconds / 60
                 let seconds = circuitRemainingSeconds % 60
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Webhooks Paused")
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                         Text("Auto-resuming in \(minutes)m \(seconds)s (trip \(circuitSoftTripCount)/3)")
                             .font(.caption)
                         if circuitTotalDropped > 0 {
-                            Text("\(circuitTotalDropped) webhook(s) dropped")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Text("\(circuitTotalDropped) dropped")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Spacer()
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                 }
                 .padding(10)
-                .background(.orange.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
             } else if circuitState == "hardOpen" {
-                HStack(spacing: 8) {
-                    Image(systemName: "xmark.octagon.fill")
-                        .foregroundStyle(.red)
+                Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Webhooks Disabled")
-                            .font(.headline)
+                            .font(.subheadline.weight(.semibold))
                         Text("Toggle webhook off and on to re-enable")
                             .font(.caption)
                         if circuitTotalDropped > 0 {
-                            Text("\(circuitTotalDropped) webhook(s) dropped")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Text("\(circuitTotalDropped) dropped")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    Spacer()
+                } icon: {
+                    Image(systemName: "xmark.octagon.fill")
+                        .foregroundStyle(.red)
                 }
                 .padding(10)
-                .background(.red.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
             }
 
-            // Webhook endpoint
+            // Endpoint configuration
             HStack {
                 Toggle("Enable Webhook", isOn: $webhookEnabled)
                     .onChange(of: webhookEnabled) { _, _ in debouncedSaveWebhook() }
@@ -635,43 +637,98 @@ private struct WebhookSettingsView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
-            .padding(.bottom, 4)
+            .padding(.bottom, 6)
 
-            HStack(spacing: 8) {
-                TextField("Base URL", text: $webhookURL, prompt: Text("http://127.0.0.1:18789"))
-                    .textContentType(.none)
-                    .keyboardType(.URL)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .textFieldStyle(.roundedBorder)
-                    .foregroundStyle(.primary)
-                    .tint(.primary)
-                    .onChange(of: webhookURL) { _, _ in debouncedSaveWebhook() }
-            }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 4)
-
-            HStack(spacing: 8) {
-                TextField("Bearer Token", text: $webhookToken, prompt: Text("token"))
-                    .textContentType(.none)
-                    .autocorrectionDisabled()
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: webhookToken) { _, _ in debouncedSaveWebhook() }
-
-                Button("Generate") {
-                    webhookToken = generateSecret()
-                    debouncedSaveWebhook()
+            if isEditingEndpoint {
+                // Edit mode — TextFields for URL and Token
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("URL")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        TextField("http://127.0.0.1:18789", text: $webhookURL)
+                            .textContentType(.none)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: webhookURL) { _, _ in debouncedSaveWebhook() }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Token")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        TextField("token", text: $webhookToken)
+                            .textContentType(.none)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: webhookToken) { _, _ in debouncedSaveWebhook() }
+                    }
+                    HStack(spacing: 8) {
+                        Spacer()
+                        Button("Generate Token") {
+                            webhookToken = generateSecret()
+                            debouncedSaveWebhook()
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Done") {
+                            isEditingEndpoint = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
                 }
-                .buttonStyle(.bordered)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+            } else {
+                // Display mode — plain Text views (no URL link detection)
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("URL")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        Text(webhookURL.isEmpty ? "Not configured" : webhookURL)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(webhookURL.isEmpty ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        copyButton(webhookURL, field: "URL")
+                    }
+                    HStack {
+                        Text("Token")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 40, alignment: .trailing)
+                        Text(webhookToken.isEmpty ? "Not set" : webhookToken)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(webhookToken.isEmpty ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        copyButton(webhookToken, field: "Token")
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Edit") { isEditingEndpoint = true }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 4)
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 4)
 
-            Text("Events sent to /hooks/wake by default. Configure agent routing per-trigger via CLI.")
+            Text("Only triggered accessories fire webhooks. Tap \(Image(systemName: "bolt.fill")) for immediate delivery.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.bottom, 6)
 
             Divider()
 
@@ -715,12 +772,13 @@ private struct WebhookSettingsView: View {
                     if !filteredScenes.isEmpty {
                         Section {
                             ForEach(filteredScenes) { scene in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Toggle(isOn: sceneBinding(scene.id, name: scene.name)) {
+                                Toggle(isOn: sceneBinding(scene.id, name: scene.name)) {
+                                    HStack(spacing: 6) {
                                         Label(scene.name, systemImage: "star.fill")
-                                    }
-                                    if enabledSceneIDs.contains(scene.id) {
-                                        wakeModePickerForScene(scene.id)
+                                        Spacer()
+                                        if enabledSceneIDs.contains(scene.id) {
+                                            wakeModeButton(itemID: scene.id, findTrigger: { $0.sceneID == scene.id })
+                                        }
                                     }
                                 }
                             }
@@ -744,18 +802,16 @@ private struct WebhookSettingsView: View {
                     ForEach(groupedByRoom, id: \.room) { group in
                         Section {
                             ForEach(group.items) { item in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
-                                        HStack {
-                                            Text(item.name)
-                                            Spacer()
-                                            Text(item.category)
-                                                .foregroundStyle(.secondary)
-                                                .font(.caption)
+                                Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
+                                    HStack {
+                                        Text(item.name)
+                                        Spacer()
+                                        if enabledAccessoryIDs.contains(item.id) {
+                                            wakeModeButton(itemID: item.id, findTrigger: { $0.accessoryID == item.id })
                                         }
-                                    }
-                                    if enabledAccessoryIDs.contains(item.id) {
-                                        wakeModePickerForAccessory(item.id)
+                                        Text(item.category)
+                                            .foregroundStyle(.secondary)
+                                            .font(.caption)
                                     }
                                 }
                             }
@@ -837,43 +893,31 @@ private struct WebhookSettingsView: View {
         }
     }
 
-    // MARK: - Wake Mode Pickers
+    // MARK: - Wake Mode Toggle
 
+    /// Compact bolt icon that toggles between batched (default) and immediate delivery.
+    /// Only visible when set to immediate — batched is the default and needs no indicator.
+    /// Tap the bolt to revert to batched; tap empty space to make it immediate.
     @ViewBuilder
-    private func wakeModePickerForScene(_ sceneID: String) -> some View {
-        if let trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.sceneID == sceneID }) {
-            wakeModePicker(triggerID: trigger.id)
-        }
-    }
-
-    @ViewBuilder
-    private func wakeModePickerForAccessory(_ accessoryID: String) -> some View {
-        if let trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.accessoryID == accessoryID }) {
-            wakeModePicker(triggerID: trigger.id)
-        }
-    }
-
-    private func wakeModePicker(triggerID: String) -> some View {
-        let binding = Binding<String>(
-            get: { triggerWakeModes[triggerID] ?? "next-heartbeat" },
-            set: { newValue in
-                triggerWakeModes[triggerID] = newValue
-                updateTriggerWakeMode(triggerID: triggerID, mode: newValue)
+    private func wakeModeButton(
+        itemID: String,
+        findTrigger: @escaping (HomeClawConfig.WebhookTrigger) -> Bool
+    ) -> some View {
+        let isImmediate = wakeModes[itemID] == "now"
+        Button {
+            let newMode = isImmediate ? "next-heartbeat" : "now"
+            wakeModes[itemID] = newMode
+            if var trigger = HomeClawConfig.shared.webhookTriggers.first(where: findTrigger) {
+                trigger.wakeMode = newMode == "next-heartbeat" ? nil : newMode
+                HomeClawConfig.shared.updateWebhookTrigger(trigger)
             }
-        )
-        return Picker("Delivery", selection: binding) {
-            Text("Batched").tag("next-heartbeat")
-            Text("Immediate").tag("now")
+        } label: {
+            Image(systemName: "bolt.fill")
+                .font(.caption)
+                .foregroundStyle(isImmediate ? .orange : Color.secondary.opacity(0.3))
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 200)
-        .padding(.leading, 24)
-    }
-
-    private func updateTriggerWakeMode(triggerID: String, mode: String) {
-        guard var trigger = HomeClawConfig.shared.webhookTriggers.first(where: { $0.id == triggerID }) else { return }
-        trigger.wakeMode = mode == "next-heartbeat" ? nil : mode  // nil = default (next-heartbeat)
-        HomeClawConfig.shared.updateWebhookTrigger(trigger)
+        .buttonStyle(.plain)
+        .help(isImmediate ? "Immediate delivery (tap to batch)" : "Batched delivery (tap for immediate)")
     }
 
     // MARK: - Bindings
@@ -976,9 +1020,15 @@ private struct WebhookSettingsView: View {
         enabledSceneIDs = Set(triggers.compactMap(\.sceneID).filter { !$0.isEmpty })
         enabledAccessoryIDs = Set(triggers.compactMap(\.accessoryID).filter { !$0.isEmpty })
 
-        // Load per-trigger wake modes
+        // Load per-trigger wake modes keyed by scene/accessory ID
         for trigger in triggers {
-            triggerWakeModes[trigger.id] = trigger.wakeMode ?? "next-heartbeat"
+            let mode = trigger.wakeMode ?? "next-heartbeat"
+            if let sceneID = trigger.sceneID, !sceneID.isEmpty {
+                wakeModes[sceneID] = mode
+            }
+            if let accID = trigger.accessoryID, !accID.isEmpty {
+                wakeModes[accID] = mode
+            }
         }
 
         let hk = HomeKitManager.shared
@@ -1003,6 +1053,28 @@ private struct WebhookSettingsView: View {
 
         if selectedHome.isEmpty, let firstName = homeNames.first {
             selectedHome = firstName
+        }
+    }
+
+    @ViewBuilder
+    private func copyButton(_ text: String, field: String) -> some View {
+        if !text.isEmpty {
+            Button {
+                #if targetEnvironment(macCatalyst)
+                UIPasteboard.general.string = text
+                #endif
+                copiedField = field
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    if copiedField == field { copiedField = nil }
+                }
+            } label: {
+                Image(systemName: copiedField == field ? "checkmark" : "doc.on.doc")
+                    .font(.caption)
+                    .foregroundStyle(copiedField == field ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Copy \(field.lowercased())")
         }
     }
 
