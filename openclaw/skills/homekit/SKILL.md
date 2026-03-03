@@ -111,8 +111,8 @@ HomeClaw pushes HomeKit events to [OpenClaw](https://docs.openclaw.ai/automation
 |---|---|---|
 | **Purpose** | Notify the active session | Run an isolated AI agent turn |
 | **Payload** | `{"text": "...", "mode": "now"}` | `{"message": "...", "name": "...", "deliver": true}` |
-| **Session** | Injected as a `System:` line | Separate `hook:<uuid>` session |
-| **Persistence** | Ephemeral — not saved to JSONL | Persisted in its own session |
+| **Session** | Dedicated `hook:homeclaw` session | Separate `hook:<uuid>` per event |
+| **Persistence** | Persistent session, accumulates events | Persisted in its own session |
 | **Timeout** | 10 seconds | 30 seconds (for LLM inference) |
 | **Use for** | Lights, scenes, temperature | Door unlocks, leak sensors, security |
 
@@ -138,8 +138,8 @@ HomeClaw event logger (writes to events.jsonl)
         ▼
 OpenClaw gateway validates Bearer token
         │
-        ├── /hooks/wake ──► System: line → heartbeat agent run
-        └── /hooks/agent ──► Isolated agent turn with tool access
+        ├── /hooks/wake ──► hook:homeclaw session (dedicated, persistent)
+        └── /hooks/agent ──► Isolated agent turn in hook:<uuid> session
 ```
 
 HomeClaw subscribes to HomeKit push notifications for all interesting characteristics. Events fire for changes from **any source** — Home app, physical switches, Siri, manufacturer apps, and the CLI.
@@ -154,6 +154,7 @@ Add the `hooks` block to `~/.openclaw/openclaw.json`:
 "hooks": {
   "enabled": true,
   "token": "${HOMECLAW_WEBHOOK_TOKEN}",
+  "defaultSessionKey": "hook:homeclaw",
   "internal": {
     "enabled": true,
     "entries": {
@@ -162,6 +163,8 @@ Add the `hooks` block to `~/.openclaw/openclaw.json`:
   }
 }
 ```
+
+The `defaultSessionKey` routes all wake events to a dedicated `hook:homeclaw` session instead of the main session. This prevents HomeKit noise (every light toggle, motion sensor) from polluting the main conversation context. Agent triggers (`/hooks/agent`) still create isolated sessions.
 
 Generate a token and add it to `~/.openclaw/.env`:
 

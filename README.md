@@ -406,9 +406,11 @@ Paste this prompt into **OpenClaw** or **Claude Code** to configure webhooks end
 > "hooks": {
 >   "enabled": true,
 >   "token": "${HOMECLAW_WEBHOOK_TOKEN}",
+>   "defaultSessionKey": "hook:homeclaw",
 >   "internal": { "enabled": true, "entries": { "audit-logger": { "enabled": true } } }
 > }
 > ```
+> The `defaultSessionKey` routes wake events to a dedicated session (`hook:homeclaw`) so HomeKit noise doesn't pollute the main conversation.
 > Add the token to `~/.openclaw/.env`:
 > ```
 > HOMECLAW_WEBHOOK_TOKEN=<generate-a-secure-token>
@@ -444,6 +446,7 @@ Add the `hooks` block to `~/.openclaw/openclaw.json`:
 "hooks": {
   "enabled": true,
   "token": "${HOMECLAW_WEBHOOK_TOKEN}",
+  "defaultSessionKey": "hook:homeclaw",
   "internal": {
     "enabled": true,
     "entries": {
@@ -452,6 +455,8 @@ Add the `hooks` block to `~/.openclaw/openclaw.json`:
   }
 }
 ```
+
+The `defaultSessionKey` routes wake events to a dedicated `hook:homeclaw` session so HomeKit events don't pollute the main conversation.
 
 Generate a token and add it to `~/.openclaw/.env`:
 
@@ -502,8 +507,8 @@ log show --predicate 'process == "HomeClaw" AND category == "webhook"' --last 5m
 |---|---|---|
 | **Purpose** | Notify the active session | Run an isolated AI agent turn |
 | **Payload** | `{"text": "...", "mode": "now"}` | `{"message": "...", "name": "HomeClaw", "deliver": true}` |
-| **Session** | Injected into the active session as a `System:` line | Runs in a separate `hook:<uuid>` session |
-| **Persistence** | Ephemeral -- not saved to session JSONL | Persisted in its own session |
+| **Session** | Dedicated `hook:homeclaw` session | Separate `hook:<uuid>` per event |
+| **Persistence** | Persistent session, accumulates events | Persisted in its own session |
 | **Timeout** | 10 seconds | 30 seconds (for LLM inference) |
 | **Use for** | Lights, scenes, temperature, ambient events | Door unlocks, leak sensors, security events |
 | **AI analysis** | None -- just a notification | Full agent turn with context and tool access |
@@ -558,7 +563,7 @@ HomeClaw event logger
         ▼
 OpenClaw gateway validates Bearer token
         │
-        ├── /hooks/wake ──► System: line in active session → heartbeat agent run
+        ├── /hooks/wake ──► hook:homeclaw session (dedicated, persistent)
         └── /hooks/agent ──► Isolated agent turn in hook:<uuid> session
 ```
 
