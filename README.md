@@ -506,7 +506,7 @@ log show --predicate 'process == "HomeClaw" AND category == "webhook"' --last 5m
 | | `/hooks/wake` | `/hooks/agent` |
 |---|---|---|
 | **Purpose** | Notify the active session | Run an isolated AI agent turn |
-| **Payload** | `{"text": "...", "mode": "now"}` | `{"message": "...", "name": "HomeClaw", "deliver": true}` |
+| **Payload** | `{"text": "...", "mode": "next-heartbeat"}` | `{"message": "...", "name": "HomeClaw", "deliver": true}` |
 | **Session** | Dedicated `hook:homeclaw` session | Separate `hook:<uuid>` per event |
 | **Persistence** | Persistent session, accumulates events | Persisted in its own session |
 | **Timeout** | 10 seconds | 30 seconds (for LLM inference) |
@@ -554,13 +554,13 @@ Home app / physical device / Siri
 HomeKit (HMAccessoryDelegate callback)
         │
         ▼
-HomeClaw event logger
+HomeClaw event logger (writes to events.jsonl)
         │
-        ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent (with trigger label)
+        ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent
         │
-        └── No trigger match ──► POST /hooks/wake (general catch-all)
-        │
-        ▼
+        └── No trigger ──► Logged to disk only (no webhook sent)
+
+        ▼  (trigger matched)
 OpenClaw gateway validates Bearer token
         │
         ├── /hooks/wake ──► hook:homeclaw session (dedicated, persistent)

@@ -131,11 +131,11 @@ HomeKit (HMAccessoryDelegate push notification)
         ▼
 HomeClaw event logger (writes to events.jsonl)
         │
-        ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent (trigger label prefix)
+        ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent
         │
-        └── No trigger ──► POST /hooks/wake (general catch-all)
-        │
-        ▼
+        └── No trigger ──► Logged to disk only (no webhook sent)
+
+        ▼  (trigger matched)
 OpenClaw gateway validates Bearer token
         │
         ├── /hooks/wake ──► hook:homeclaw session (dedicated, persistent)
@@ -251,22 +251,23 @@ echo '{"command":"add_trigger","args":{
 
 ### Common Trigger Patterns
 
-| Scenario | Action | agent_deliver | Why |
-|----------|--------|---------------|-----|
-| Door unlocked | `agent` | `true` | Security — AI analyzes context, bypasses circuit breaker |
-| Garage door opened | `agent` | `true` | Security — AI analyzes context, bypasses circuit breaker |
-| Leak sensor triggered | `agent` | `true` | Critical — AI should alert immediately |
-| Scene "Good Night" | `wake` | — | Informational — just notify the session |
-| Light toggled | `wake` | — | Ambient — session awareness |
-| Temperature changed | `wake` | — | Ambient — session awareness |
-| Motion detected | `wake` | — | Awareness — don't need AI analysis |
+| Scenario | Action | wake_mode | agent_deliver | Why |
+|----------|--------|-----------|---------------|-----|
+| Door unlocked | `agent` | — | `true` | Security — AI analyzes, bypasses circuit breaker |
+| Garage door opened | `agent` | — | `true` | Security — AI analyzes, bypasses circuit breaker |
+| Leak sensor triggered | `agent` | — | `true` | Critical — AI should alert immediately |
+| Scene "Good Night" | `wake` | `now` | — | Informational — notify immediately |
+| Light toggled | `wake` | (default) | — | Ambient — batched with next heartbeat |
+| Temperature changed | `wake` | (default) | — | Ambient — batched with next heartbeat |
+| Motion detected | `wake` | (default) | — | Awareness — batched, no AI analysis |
 
 ### Tips
 
+- **Default wake mode is `next-heartbeat`.** Wake triggers batch events into the next heartbeat cycle. Set `wake_mode: "now"` explicitly on triggers that need immediate delivery (e.g., scene triggers where you want instant feedback).
 - **Start with wake, promote to agent.** Get wake working first, then selectively upgrade security triggers. Agent calls are heavier (30s timeout, separate session, LLM inference cost).
 - **Use `agent_deliver: true` sparingly.** It marks triggers as circuit-breaker-critical. Reserve it for events that must never be silently dropped (door unlocks, leaks). Overusing it defeats the circuit breaker's protection.
 - **Triggers are additive.** Multiple triggers can match the same event (e.g., an accessory trigger + a characteristic trigger). Each matched trigger fires its own webhook.
-- **General webhook is the catch-all.** If no trigger matches an event, the general webhook fires to `/hooks/wake`. If any trigger matches, the general webhook is skipped (no duplicates).
+- **No catch-all.** Only events matching a configured trigger fire webhooks. Untriggered events are logged to disk but not pushed to the gateway.
 - **Scene triggers match by name or UUID.** Use scene UUID for precision, scene name for convenience (case-insensitive).
 - **Characteristic + value filtering.** A trigger with `characteristic: "lock_current_state"` and `value: "unlocked"` only fires on unlock, not on lock. Omit `value` to fire on any state change.
 - **Check `homeclaw-cli status --json`** for webhook health: `circuit_state`, `last_success`, `last_failure`, `total_dropped`.
@@ -286,7 +287,7 @@ Critical triggers (`agent_deliver: true`) always bypass.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `action` | string | `"wake"` | `"wake"` or `"agent"` — which endpoint receives the event |
-| `wake_mode` | string | `"now"` | `"now"` or `"next-heartbeat"` — delivery timing |
+| `wake_mode` | string | `"next-heartbeat"` | `"now"` (immediate) or `"next-heartbeat"` (batched, default) |
 | `agent_prompt` | string | event text | Custom prompt for the agent (falls back to formatted event text) |
 | `agent_id` | string | — | Route to a specific OpenClaw agent by ID |
 | `agent_name` | string | `"HomeClaw"` | Human label shown in agent responses |
