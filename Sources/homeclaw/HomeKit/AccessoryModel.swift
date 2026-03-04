@@ -46,6 +46,12 @@ enum AccessoryModel {
             dict["room"] = room.name
         }
 
+        // Home app display name (only when different from raw name)
+        let homeDisplayName = computeHomeAppDisplayName(for: accessory, roomName: accessory.room?.name)
+        if homeDisplayName != accessory.name {
+            dict["home_display_name"] = homeDisplayName
+        }
+
         // Enrichment fields
         if let zone { dict["zone"] = zone }
         if let displayName, displayName != accessory.name { dict["display_name"] = displayName }
@@ -141,6 +147,42 @@ enum AccessoryModel {
             "action_count": actionSet.actions.count,
             "type": actionSetType(actionSet),
         ]
+    }
+
+    // MARK: - Home App Display Name
+
+    /// Service types where the Home app prefers the service name over the accessory name.
+    private static let serviceNamePreferredTypes: Set<String> = [
+        HMServiceTypeGarageDoorOpener,
+        HMServiceTypeDoor,
+        HMServiceTypeWindowCovering,
+        HMServiceTypeWindow,
+    ]
+
+    /// Computes the display name that Apple's Home app would show for an accessory.
+    /// Applies two transformations:
+    /// 1. Prefers the service name for garage doors, window coverings, etc.
+    /// 2. Strips the room name prefix (e.g. "Garage Aqara Hub" in "Garage" → "Aqara Hub")
+    static func computeHomeAppDisplayName(for accessory: HMAccessory, roomName: String?) -> String {
+        var name = accessory.name
+
+        // Prefer service name for garage doors, window coverings, etc.
+        for service in accessory.services {
+            if serviceNamePreferredTypes.contains(service.serviceType) && !service.name.isEmpty {
+                name = service.name
+                break
+            }
+        }
+
+        // Strip room prefix ("Garage Aqara Hub" in "Garage" room → "Aqara Hub")
+        if let roomName, !roomName.isEmpty {
+            let prefix = roomName + " "
+            if name.hasPrefix(prefix) && name.count > prefix.count {
+                name = String(name.dropFirst(prefix.count))
+            }
+        }
+
+        return name
     }
 
     // MARK: - Helpers

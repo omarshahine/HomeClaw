@@ -645,6 +645,11 @@ final class HomeKitManager: NSObject, Observable {
                 if let room = accessory.room {
                     dict["room"] = room.name
                 }
+                let homeDisplayName = AccessoryModel.computeHomeAppDisplayName(
+                    for: accessory, roomName: accessory.room?.name)
+                if homeDisplayName != accessory.name {
+                    dict["home_display_name"] = homeDisplayName
+                }
                 return dict
             }
         }

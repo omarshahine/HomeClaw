@@ -364,7 +364,7 @@ private struct DeviceFilterSettingsView: View {
             let id = dict["id"] as? String ?? UUID().uuidString
             return AccessoryItem(
                 id: id,
-                name: dict["name"] as? String ?? "Unknown",
+                name: dict["home_display_name"] as? String ?? dict["name"] as? String ?? "Unknown",
                 category: dict["category"] as? String ?? "Other",
                 room: dict["room"] as? String ?? "",
                 homeName: dict["home_name"] as? String ?? "",
@@ -1054,7 +1054,7 @@ private struct WebhookSettingsView: View {
         let accList = await hk.listAllAccessories()
         allAccessories = accList.map { AccessoryItem(
             id: $0["id"] as? String ?? UUID().uuidString,
-            name: $0["name"] as? String ?? "Unknown",
+            name: $0["home_display_name"] as? String ?? $0["name"] as? String ?? "Unknown",
             category: $0["category"] as? String ?? "Other",
             room: $0["room"] as? String ?? "",
             homeName: $0["home_name"] as? String ?? ""

@@ -301,7 +301,7 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     }
 
     private func addAccessoryItem(_ accessory: [String: Any], to menu: NSMenu) {
-        let name = accessory["name"] as? String ?? "?"
+        let name = accessory["home_display_name"] as? String ?? accessory["name"] as? String ?? "?"
         let id = accessory["id"] as? String ?? ""
         let category = accessory["category"] as? String ?? "other"
         let reachable = accessory["reachable"] as? Bool ?? false
