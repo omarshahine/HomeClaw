@@ -632,7 +632,13 @@ private struct WebhookSettingsView: View {
             // Endpoint configuration
             HStack {
                 Toggle("Enable Webhook", isOn: $webhookEnabled)
-                    .onChange(of: webhookEnabled) { _, _ in debouncedSaveWebhook() }
+                    .onChange(of: webhookEnabled) { _, newValue in
+                        // Reset circuit breaker only when toggling on (not during URL/token edits)
+                        if newValue && WebhookCircuitBreaker.shared.state == .hardOpen {
+                            WebhookCircuitBreaker.shared.manualReset()
+                        }
+                        debouncedSaveWebhook()
+                    }
                 Spacer()
             }
             .padding(.horizontal, 12)
@@ -1108,10 +1114,6 @@ private struct WebhookSettingsView: View {
                 token: webhookToken,
                 events: existingEvents
             )
-            // Reset circuit breaker when re-enabling webhook from hard-open state
-            if webhookEnabled && WebhookCircuitBreaker.shared.state == .hardOpen {
-                WebhookCircuitBreaker.shared.manualReset()
-            }
         }
     }
 }

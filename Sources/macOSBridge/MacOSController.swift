@@ -414,8 +414,8 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         errorRestoreWorkItem = nil
         originalStatusImage = nil
         statusItem?.button?.image = NSImage(
-            systemSymbolName: "exclamationmark.triangle.fill",
-            accessibilityDescription: "Webhook error")
+            systemSymbolName: "xmark.octagon.fill",
+            accessibilityDescription: "Webhook disabled")
     }
 
     private func clearPersistentWarningIcon() {
