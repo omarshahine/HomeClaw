@@ -68,37 +68,58 @@ final class WebhookEventLogger {
     // MARK: - Reading
 
     /// Reads webhook log entries, newest first.
+    /// Scans the active log file and backup files to ensure complete results
+    /// when a `since` window spans a log rotation boundary.
     func readEntries(
         since: Date? = nil,
         limit: Int = 100,
         outcome: Outcome? = nil
     ) -> [[String: Any]] {
-        guard let data = try? Data(contentsOf: logFile),
-              let content = String(data: data, encoding: .utf8)
-        else { return [] }
-
         let formatter = ISO8601DateFormatter()
         var entries: [[String: Any]] = []
 
-        let lines = content.components(separatedBy: "\n").reversed()
-        for line in lines {
-            guard !line.isEmpty else { continue }
-            guard let lineData = line.data(using: .utf8),
-                  let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
+        // Scan active file first, then backups (newest to oldest)
+        var filesToScan = [logFile]
+        for i in 1...maxBackups {
+            let backup = logDir.appendingPathComponent("webhooks.jsonl.\(i)")
+            if fileManager.fileExists(atPath: backup.path) {
+                filesToScan.append(backup)
+            }
+        }
+
+        for file in filesToScan {
+            guard entries.count < limit else { break }
+
+            guard let data = try? Data(contentsOf: file),
+                  let content = String(data: data, encoding: .utf8)
             else { continue }
 
-            if let outcome, entry["outcome"] as? String != outcome.rawValue {
-                continue
+            let lines = content.components(separatedBy: "\n").reversed()
+            var reachedSinceBoundary = false
+
+            for line in lines {
+                guard !line.isEmpty else { continue }
+                guard let lineData = line.data(using: .utf8),
+                      let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
+                else { continue }
+
+                if let outcome, entry["outcome"] as? String != outcome.rawValue {
+                    continue
+                }
+
+                if let since, let ts = entry["timestamp"] as? String,
+                   let entryDate = formatter.date(from: ts), entryDate < since
+                {
+                    reachedSinceBoundary = true
+                    break
+                }
+
+                entries.append(entry)
+                if entries.count >= limit { break }
             }
 
-            if let since, let ts = entry["timestamp"] as? String,
-               let entryDate = formatter.date(from: ts), entryDate < since
-            {
-                break
-            }
-
-            entries.append(entry)
-            if entries.count >= limit { break }
+            // If we hit the since boundary in this file, no need to check older backups
+            if reachedSinceBoundary { break }
         }
 
         return entries
