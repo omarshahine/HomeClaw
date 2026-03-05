@@ -561,6 +561,8 @@ private struct WebhookSettingsView: View {
 
     @State private var enabledSceneIDs: Set<String> = []
     @State private var enabledAccessoryIDs: Set<String> = []
+    /// Tracks enabled per-characteristic triggers as "accessoryID:characteristic" compound keys.
+    @State private var enabledCharacteristics: Set<String> = []
 
     @State private var allScenes: [SceneItem] = []
     @State private var allAccessories: [AccessoryItem] = []
@@ -578,6 +580,8 @@ private struct WebhookSettingsView: View {
         let room: String
         let homeName: String
         let stateSummary: String
+        /// Non-battery interesting characteristics for this accessory.
+        let characteristics: [String]
     }
 
     private var homeNames: [String] {
@@ -618,11 +622,14 @@ private struct WebhookSettingsView: View {
     }
 
     private var enabledCount: Int {
-        enabledSceneIDs.count + enabledAccessoryIDs.count
+        enabledSceneIDs.count + enabledAccessoryIDs.count + enabledCharacteristics.count
     }
 
     private var totalCount: Int {
-        scenes.count + accessories.count
+        let accCount = accessories.reduce(0) { total, item in
+            total + (item.characteristics.count > 1 ? item.characteristics.count : 1)
+        }
+        return scenes.count + accCount
     }
 
     var body: some View {
@@ -916,31 +923,45 @@ private struct WebhookSettingsView: View {
                     ForEach(groupedByRoom, id: \.room) { group in
                         Section {
                             ForEach(group.items) { item in
-                                Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: symbolForCategory(item.category))
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 16)
-                                        Text(item.name)
-                                        if !item.stateSummary.isEmpty && item.stateSummary != "unknown" {
-                                            Text(item.stateSummary)
-                                                .font(.caption)
+                                if item.characteristics.count > 1 {
+                                    // Multi-characteristic: show individual rows
+                                    accessoryHeader(item)
+                                    ForEach(item.characteristics, id: \.self) { char in
+                                        characteristicRow(item: item, characteristic: char)
+                                    }
+                                } else {
+                                    // Single characteristic: simple toggle
+                                    Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: symbolForCategory(item.category))
                                                 .foregroundStyle(.secondary)
-                                                .padding(.horizontal, 6)
-                                                .padding(.vertical, 2)
-                                                .background(.quaternary, in: Capsule())
-                                        }
-                                        Spacer()
-                                        if enabledAccessoryIDs.contains(item.id) {
-                                            wakeModeButton(itemID: item.id, findTrigger: { $0.accessoryID == item.id })
+                                                .frame(width: 16)
+                                            Text(item.name)
+                                            if !item.stateSummary.isEmpty && item.stateSummary != "unknown" {
+                                                Text(item.stateSummary)
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 2)
+                                                    .background(.quaternary, in: Capsule())
+                                            }
+                                            Spacer()
+                                            if enabledAccessoryIDs.contains(item.id) {
+                                                wakeModeButton(itemID: item.id, findTrigger: { $0.accessoryID == item.id })
+                                            }
                                         }
                                     }
                                 }
                             }
                         } header: {
                             HStack {
-                                let allChecked = group.items.allSatisfy {
-                                    enabledAccessoryIDs.contains($0.id)
+                                let allChecked = group.items.allSatisfy { item in
+                                    if item.characteristics.count > 1 {
+                                        return item.characteristics.allSatisfy {
+                                            enabledCharacteristics.contains("\(item.id):\($0)")
+                                        }
+                                    }
+                                    return enabledAccessoryIDs.contains(item.id)
                                 }
                                 Toggle(isOn: Binding(
                                     get: { allChecked },
@@ -1050,6 +1071,74 @@ private struct WebhookSettingsView: View {
         .help(isImmediate ? "Immediate delivery (tap to batch)" : "Batched delivery (tap for immediate)")
     }
 
+    // MARK: - Multi-Characteristic Views
+
+    /// Header row for accessories with multiple characteristics (non-interactive label).
+    @ViewBuilder
+    private func accessoryHeader(_ item: AccessoryItem) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbolForCategory(item.category))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(item.name)
+                .fontWeight(.medium)
+            if !item.stateSummary.isEmpty && item.stateSummary != "unknown" {
+                Text(item.stateSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.quaternary, in: Capsule())
+            }
+            Spacer()
+        }
+    }
+
+    /// Indented toggle row for a single characteristic of a multi-characteristic accessory.
+    @ViewBuilder
+    private func characteristicRow(item: AccessoryItem, characteristic: String) -> some View {
+        let compoundKey = "\(item.id):\(characteristic)"
+        Toggle(isOn: characteristicBinding(item: item, characteristic: characteristic)) {
+            HStack(spacing: 6) {
+                Text(characteristicDisplayName(characteristic))
+                    .padding(.leading, 24)
+                Spacer()
+                if enabledCharacteristics.contains(compoundKey) {
+                    wakeModeButton(
+                        itemID: compoundKey,
+                        findTrigger: { $0.accessoryID == item.id && $0.characteristic == characteristic }
+                    )
+                }
+            }
+        }
+    }
+
+    private func characteristicBinding(item: AccessoryItem, characteristic: String) -> Binding<Bool> {
+        let compoundKey = "\(item.id):\(characteristic)"
+        return Binding(
+            get: { enabledCharacteristics.contains(compoundKey) },
+            set: { newValue in
+                if newValue {
+                    enabledCharacteristics.insert(compoundKey)
+                    var trigger = HomeClawConfig.WebhookTrigger.create(
+                        label: "\(item.name) \(characteristicDisplayName(characteristic))"
+                    )
+                    trigger.accessoryID = item.id
+                    trigger.characteristic = characteristic
+                    HomeClawConfig.shared.addWebhookTrigger(trigger)
+                } else {
+                    enabledCharacteristics.remove(compoundKey)
+                    removeTrigger(where: { $0.accessoryID == item.id && $0.characteristic == characteristic })
+                }
+            }
+        )
+    }
+
+    /// Human-readable display name for a characteristic key.
+    private func characteristicDisplayName(_ key: String) -> String {
+        key.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
     // MARK: - Bindings
 
     private func sceneBinding(_ sceneID: String, name: String) -> Binding<Bool> {
@@ -1106,14 +1195,35 @@ private struct WebhookSettingsView: View {
 
     private func toggleRoom(_ items: [AccessoryItem], isOn: Bool) {
         for item in items {
-            if isOn && !enabledAccessoryIDs.contains(item.id) {
-                enabledAccessoryIDs.insert(item.id)
-                var trigger = HomeClawConfig.WebhookTrigger.create(label: item.name)
-                trigger.accessoryID = item.id
-                HomeClawConfig.shared.addWebhookTrigger(trigger)
-            } else if !isOn {
-                enabledAccessoryIDs.remove(item.id)
-                removeTrigger(where: { $0.accessoryID == item.id })
+            if item.characteristics.count > 1 {
+                // Multi-characteristic: toggle each characteristic individually
+                for char in item.characteristics {
+                    let key = "\(item.id):\(char)"
+                    if isOn && !enabledCharacteristics.contains(key) {
+                        enabledCharacteristics.insert(key)
+                        var trigger = HomeClawConfig.WebhookTrigger.create(
+                            label: "\(item.name) \(characteristicDisplayName(char))"
+                        )
+                        trigger.accessoryID = item.id
+                        trigger.characteristic = char
+                        HomeClawConfig.shared.addWebhookTrigger(trigger)
+                    } else if !isOn {
+                        enabledCharacteristics.remove(key)
+                    }
+                }
+                if !isOn {
+                    removeTrigger(where: { $0.accessoryID == item.id })
+                }
+            } else {
+                if isOn && !enabledAccessoryIDs.contains(item.id) {
+                    enabledAccessoryIDs.insert(item.id)
+                    var trigger = HomeClawConfig.WebhookTrigger.create(label: item.name)
+                    trigger.accessoryID = item.id
+                    HomeClawConfig.shared.addWebhookTrigger(trigger)
+                } else if !isOn {
+                    enabledAccessoryIDs.remove(item.id)
+                    removeTrigger(where: { $0.accessoryID == item.id })
+                }
             }
         }
     }
@@ -1148,16 +1258,31 @@ private struct WebhookSettingsView: View {
 
         let triggers = config.webhookTriggers
         enabledSceneIDs = Set(triggers.compactMap(\.sceneID).filter { !$0.isEmpty })
-        enabledAccessoryIDs = Set(triggers.compactMap(\.accessoryID).filter { !$0.isEmpty })
+        // Accessory-level triggers (no characteristic filter)
+        enabledAccessoryIDs = Set(
+            triggers
+                .filter { $0.accessoryID != nil && ($0.characteristic == nil || $0.characteristic?.isEmpty == true) }
+                .compactMap(\.accessoryID)
+        )
+        // Per-characteristic triggers
+        enabledCharacteristics = Set(
+            triggers
+                .filter { $0.accessoryID != nil && $0.characteristic != nil && !($0.characteristic?.isEmpty ?? true) }
+                .map { "\($0.accessoryID!):\($0.characteristic!)" }
+        )
 
-        // Load per-trigger wake modes keyed by scene/accessory ID
+        // Load per-trigger wake modes keyed by scene ID, accessory ID, or compound key
         for trigger in triggers {
             let mode = trigger.wakeMode ?? "next-heartbeat"
             if let sceneID = trigger.sceneID, !sceneID.isEmpty {
                 wakeModes[sceneID] = mode
             }
             if let accID = trigger.accessoryID, !accID.isEmpty {
-                wakeModes[accID] = mode
+                if let char = trigger.characteristic, !char.isEmpty {
+                    wakeModes["\(accID):\(char)"] = mode
+                } else {
+                    wakeModes[accID] = mode
+                }
             }
         }
 
@@ -1171,19 +1296,24 @@ private struct WebhookSettingsView: View {
             homeName: $0["home_name"] as? String ?? ""
         )}
 
-        // Load accessories with home name
+        // Load accessories with home name and per-accessory characteristics
+        let batteryChars: Set<String> = ["battery_level", "low_battery"]
         let accList = await hk.listAllAccessories()
         allAccessories = accList.map {
             let category = $0["category"] as? String ?? "Other"
             let state = $0["state"] as? [String: String]
             let reachable = $0["reachable"] as? Bool ?? false
+            let chars = (state ?? [:]).keys
+                .filter { !batteryChars.contains($0) }
+                .sorted()
             return AccessoryItem(
                 id: $0["id"] as? String ?? UUID().uuidString,
                 name: $0["home_display_name"] as? String ?? $0["name"] as? String ?? "Unknown",
                 category: category,
                 room: $0["room"] as? String ?? "",
                 homeName: $0["home_name"] as? String ?? "",
-                stateSummary: DeviceMap.stateSummary(from: state, category: category, reachable: reachable)
+                stateSummary: DeviceMap.stateSummary(from: state, category: category, reachable: reachable),
+                characteristics: chars
             )
         }
 
