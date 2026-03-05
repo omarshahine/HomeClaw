@@ -242,7 +242,11 @@ final class SocketServer: @unchecked Sendable {
                 else {
                     return encodeResponse(success: false, error: "Missing id, characteristic, or value")
                 }
-                result = try await hk.controlAccessory(id: id, characteristic: characteristic, value: value, homeID: args["home_id"] as? String)
+                result = try await hk.controlAccessory(
+                    id: id, characteristic: characteristic, value: value,
+                    homeID: args["home_id"] as? String,
+                    serviceType: args["service_type"] as? String
+                )
 
             case "list_rooms":
                 result = await hk.listRooms(homeID: args["home_id"] as? String)

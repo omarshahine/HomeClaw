@@ -131,6 +131,7 @@ final class HomeKitManager: NSObject, Observable {
         case characteristicNotWritable(String)
         case invalidValue(String)
         case writeFailed(String)
+        case ambiguousCharacteristic(String, String)
 
         var errorDescription: String? {
             switch self {
@@ -140,11 +141,13 @@ final class HomeKitManager: NSObject, Observable {
             case .characteristicNotWritable(let name): "Characteristic not writable: \(name)"
             case .invalidValue(let detail): "Invalid value: \(detail)"
             case .writeFailed(let detail): "Write failed: \(detail)"
+            case .ambiguousCharacteristic(let name, let options):
+                "Ambiguous: '\(name)' exists on multiple services. Use --service-type to disambiguate:\n\(options)"
             }
         }
     }
 
-    func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil) async throws -> [String: Any] {
+    func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil, serviceType: String? = nil) async throws -> [String: Any] {
         await waitForReady()
 
         guard let accessory = findAccessory(id: id, homeID: homeID) else {
@@ -158,8 +161,15 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         // Find the characteristic by human-readable name or UUID
-        guard let (hmCharacteristic, _) = findCharacteristic(named: characteristic, on: accessory) else {
+        let hmCharacteristic: HMCharacteristic
+        switch findCharacteristic(named: characteristic, on: accessory, serviceType: serviceType) {
+        case .found(let c, _):
+            hmCharacteristic = c
+        case .notFound:
             throw ControlError.characteristicNotFound(characteristic)
+        case .ambiguous(let matches):
+            let options = matches.map { "  - service_type: \($0.serviceType) (service: \($0.service))" }.joined(separator: "\n")
+            throw ControlError.ambiguousCharacteristic(characteristic, options)
         }
 
         // Check writability via properties
@@ -946,20 +956,45 @@ final class HomeKitManager: NSObject, Observable {
         return nil
     }
 
+    /// Result of a characteristic lookup, which may be ambiguous.
+    enum CharacteristicLookup {
+        case found(HMCharacteristic, String)
+        case ambiguous([(service: String, serviceType: String, characteristicName: String)])
+        case notFound
+    }
+
+    /// Find a characteristic on an accessory by human-readable name or UUID.
+    /// When `serviceType` is provided, only matches within that service.
+    /// When nil and multiple services have a matching characteristic, returns `.ambiguous`.
     private func findCharacteristic(
-        named name: String, on accessory: HMAccessory
-    ) -> (HMCharacteristic, String)? {
+        named name: String, on accessory: HMAccessory, serviceType: String? = nil
+    ) -> CharacteristicLookup {
+        var matches: [(characteristic: HMCharacteristic, humanName: String, serviceName: String, serviceType: String)] = []
+
         for service in accessory.services {
+            if let filter = serviceType, service.serviceType != filter { continue }
             for characteristic in service.characteristics {
                 let humanName = CharacteristicMapper.name(for: characteristic.characteristicType)
                 if humanName.localizedCaseInsensitiveCompare(name) == .orderedSame
                     || characteristic.characteristicType == name
                 {
-                    return (characteristic, humanName)
+                    matches.append((characteristic, humanName, service.name, service.serviceType))
                 }
             }
         }
-        return nil
+
+        switch matches.count {
+        case 0:
+            return .notFound
+        case 1:
+            return .found(matches[0].characteristic, matches[0].humanName)
+        default:
+            if serviceType != nil {
+                // Filter was provided but still matched multiple in the same service — take first
+                return .found(matches[0].characteristic, matches[0].humanName)
+            }
+            return .ambiguous(matches.map { (service: $0.serviceName, serviceType: $0.serviceType, characteristicName: $0.humanName) })
+        }
     }
 }
 

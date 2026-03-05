@@ -20721,6 +20721,10 @@ var tools = [
         value: {
           type: "string",
           description: "Value to set e.g. true, 75, locked (control action)"
+        },
+        service_type: {
+          type: "string",
+          description: "Service UUID to target when the characteristic exists on multiple services (control action). Required when an ambiguity error is returned."
         }
       }
     }
@@ -20943,6 +20947,7 @@ async function handleAccessories(args) {
         value: args.value
       };
       if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.service_type) socketArgs.service_type = args.service_type;
       return sendCommand("control", socketArgs);
     }
     default:

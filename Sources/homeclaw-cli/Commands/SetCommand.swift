@@ -15,14 +15,20 @@ struct Set: ParsableCommand {
     @Argument(help: "Value to set (e.g., true, 75, locked)")
     var value: String
 
+    @Option(name: .long, help: "Target a specific service by UUID when the characteristic exists on multiple services")
+    var serviceType: String?
+
     func run() throws {
+        var args: [String: String] = [
+            "id": accessory,
+            "characteristic": characteristic,
+            "value": value,
+        ]
+        if let serviceType { args["service_type"] = serviceType }
+
         let response = try SocketClient.send(
             command: "control",
-            args: [
-                "id": accessory,
-                "characteristic": characteristic,
-                "value": value,
-            ]
+            args: args
         )
 
         guard response.success else {
