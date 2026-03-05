@@ -142,7 +142,7 @@ final class HomeKitManager: NSObject, Observable {
             case .invalidValue(let detail): "Invalid value: \(detail)"
             case .writeFailed(let detail): "Write failed: \(detail)"
             case .ambiguousCharacteristic(let name, let options):
-                "Ambiguous: '\(name)' exists on multiple services. Use --service-type to disambiguate:\n\(options)"
+                "Ambiguous: '\(name)' exists on multiple services. Use service_type to disambiguate:\n\(options)"
             }
         }
     }
@@ -972,7 +972,7 @@ final class HomeKitManager: NSObject, Observable {
         var matches: [(characteristic: HMCharacteristic, humanName: String, serviceName: String, serviceType: String)] = []
 
         for service in accessory.services {
-            if let filter = serviceType, service.serviceType != filter { continue }
+            if let filter = serviceType, service.serviceType.localizedCaseInsensitiveCompare(filter) != .orderedSame { continue }
             for characteristic in service.characteristics {
                 let humanName = CharacteristicMapper.name(for: characteristic.characteristicType)
                 if humanName.localizedCaseInsensitiveCompare(name) == .orderedSame
