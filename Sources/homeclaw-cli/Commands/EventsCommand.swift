@@ -21,7 +21,7 @@ struct Events: ParsableCommand {
     func run() throws {
         var args: [String: String] = ["limit": "\(limit)"]
         if let type { args["type"] = type }
-        if let since { args["since"] = parseSince(since) }
+        if let since { args["since"] = try parseSinceValue(since) }
 
         let response = try SocketClient.send(command: "events", args: args)
 
@@ -54,30 +54,6 @@ struct Events: ParsableCommand {
         }
 
         print("\n\(events.count) event(s)")
-    }
-
-    private func parseSince(_ value: String) -> String {
-        // Try ISO 8601 first
-        if ISO8601DateFormatter().date(from: value) != nil {
-            return value
-        }
-
-        // Try duration shorthand: 1h, 30m, 2d
-        let trimmed = value.trimmingCharacters(in: .whitespaces).lowercased()
-        var seconds: TimeInterval = 0
-        if trimmed.hasSuffix("h"), let n = Double(trimmed.dropLast()) {
-            seconds = n * 3600
-        } else if trimmed.hasSuffix("m"), let n = Double(trimmed.dropLast()) {
-            seconds = n * 60
-        } else if trimmed.hasSuffix("d"), let n = Double(trimmed.dropLast()) {
-            seconds = n * 86400
-        }
-
-        if seconds > 0 {
-            return ISO8601DateFormatter().string(from: Date().addingTimeInterval(-seconds))
-        }
-
-        return value
     }
 
     private func formatTimestamp(_ iso: String) -> String {

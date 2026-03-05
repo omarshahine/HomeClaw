@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 
 /// Returns true if the CLI should output JSON instead of human-readable text.
@@ -14,6 +15,33 @@ func shouldOutputJSON(_ flag: Bool) -> Bool {
         return true
     }
     return isatty(STDOUT_FILENO) == 0
+}
+
+/// Parses a duration shorthand (e.g. "1h", "30m", "2d") or ISO 8601 timestamp
+/// into an ISO 8601 string suitable for the server's `since` filter.
+/// Throws `ValidationError` for unrecognized formats instead of silently passing through.
+func parseSinceValue(_ value: String) throws -> String {
+    // Try ISO 8601 first
+    if ISO8601DateFormatter().date(from: value) != nil {
+        return value
+    }
+
+    // Try duration shorthand: Nh, Nm, Nd
+    let trimmed = value.trimmingCharacters(in: .whitespaces).lowercased()
+    var seconds: TimeInterval = 0
+    if trimmed.hasSuffix("h"), let n = Double(trimmed.dropLast()) {
+        seconds = n * 3600
+    } else if trimmed.hasSuffix("m"), let n = Double(trimmed.dropLast()) {
+        seconds = n * 60
+    } else if trimmed.hasSuffix("d"), let n = Double(trimmed.dropLast()) {
+        seconds = n * 86400
+    }
+
+    if seconds > 0 {
+        return ISO8601DateFormatter().string(from: Date().addingTimeInterval(-seconds))
+    }
+
+    throw ValidationError("Unrecognized --since format: '\(value)'. Use ISO 8601 or duration (e.g. 1h, 30m, 2d)")
 }
 
 /// Validates a string argument against control character injection.

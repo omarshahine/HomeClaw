@@ -132,6 +132,11 @@ struct AddTrigger: ParsableCommand {
     var json = false
 
     func run() throws {
+        if let err = validateInput(label, label: "label") { throw ValidationError(err) }
+        if let v = accessoryId, let err = validateInput(v, label: "accessory-id") { throw ValidationError(err) }
+        if let v = sceneName, let err = validateInput(v, label: "scene-name") { throw ValidationError(err) }
+        if let v = characteristic, let err = validateInput(v, label: "characteristic") { throw ValidationError(err) }
+
         var args: [String: String] = ["label": label]
         if let v = accessoryId { args["accessory_id"] = v }
         if let v = sceneName { args["scene_name"] = v }
@@ -181,6 +186,7 @@ struct RemoveTrigger: ParsableCommand {
     var json = false
 
     func run() throws {
+        if let err = validateInput(id, label: "id") { throw ValidationError(err) }
         let response = try SocketClient.send(command: "remove_trigger", args: ["id": id])
         guard response.success else {
             throw ValidationError(response.error ?? "Unknown error")
@@ -252,6 +258,9 @@ struct UpdateTrigger: ParsableCommand {
     var json = false
 
     func run() throws {
+        if let err = validateInput(id, label: "id") { throw ValidationError(err) }
+        if let v = label, let err = validateInput(v, label: "label") { throw ValidationError(err) }
+
         var args: [String: String] = ["id": id]
         if let v = label { args["label"] = v }
         if let v = enabled {

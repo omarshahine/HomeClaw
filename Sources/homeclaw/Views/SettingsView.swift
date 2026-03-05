@@ -1266,9 +1266,12 @@ private struct WebhookSettingsView: View {
         )
         // Per-characteristic triggers
         enabledCharacteristics = Set(
-            triggers
-                .filter { $0.accessoryID != nil && $0.characteristic != nil && !($0.characteristic?.isEmpty ?? true) }
-                .map { "\($0.accessoryID!):\($0.characteristic!)" }
+            triggers.compactMap { trigger -> String? in
+                guard let accID = trigger.accessoryID, !accID.isEmpty,
+                      let char = trigger.characteristic, !char.isEmpty
+                else { return nil }
+                return "\(accID):\(char)"
+            }
         )
 
         // Load per-trigger wake modes keyed by scene ID, accessory ID, or compound key

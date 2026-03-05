@@ -26,7 +26,7 @@ struct WebhookLog: ParsableCommand {
         func run() throws {
             var args: [String: String] = ["limit": "\(limit)"]
             if let outcome { args["outcome"] = outcome }
-            if let since { args["since"] = parseSince(since) }
+            if let since { args["since"] = try parseSinceValue(since) }
 
             let response = try SocketClient.send(command: "webhook_log", args: args)
             guard response.success else {
@@ -91,25 +91,6 @@ struct WebhookLog: ParsableCommand {
             if let reason { parts.append("reason: \(reason)") }
 
             return parts.joined(separator: "  ")
-        }
-
-        private func parseSince(_ value: String) -> String {
-            if ISO8601DateFormatter().date(from: value) != nil {
-                return value
-            }
-            let trimmed = value.trimmingCharacters(in: .whitespaces).lowercased()
-            var seconds: TimeInterval = 0
-            if trimmed.hasSuffix("h"), let n = Double(trimmed.dropLast()) {
-                seconds = n * 3600
-            } else if trimmed.hasSuffix("m"), let n = Double(trimmed.dropLast()) {
-                seconds = n * 60
-            } else if trimmed.hasSuffix("d"), let n = Double(trimmed.dropLast()) {
-                seconds = n * 86400
-            }
-            if seconds > 0 {
-                return ISO8601DateFormatter().string(from: Date().addingTimeInterval(-seconds))
-            }
-            return value
         }
 
         private func formatTimestamp(_ iso: String) -> String {
