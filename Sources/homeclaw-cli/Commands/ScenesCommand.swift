@@ -16,7 +16,7 @@ struct Scenes: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }
@@ -48,11 +48,21 @@ struct Trigger: ParsableCommand {
     @Argument(help: "Scene name or UUID")
     var scene: String
 
+    @Flag(name: .long, help: "Output raw JSON")
+    var json = false
+
     func run() throws {
+        if let err = validateInput(scene, label: "scene") { throw ValidationError(err) }
+
         let response = try SocketClient.send(command: "trigger_scene", args: ["id": scene])
 
         guard response.success else {
             throw ValidationError(response.error ?? "Unknown error")
+        }
+
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
         }
 
         if let data = response.data?.value as? [String: Any],

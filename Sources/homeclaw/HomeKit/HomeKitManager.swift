@@ -147,7 +147,7 @@ final class HomeKitManager: NSObject, Observable {
         }
     }
 
-    func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil, serviceType: String? = nil) async throws -> [String: Any] {
+    func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil, serviceType: String? = nil, dryRun: Bool = false) async throws -> [String: Any] {
         await waitForReady()
 
         guard let accessory = findAccessory(id: id, homeID: homeID) else {
@@ -181,6 +181,25 @@ final class HomeKitManager: NSObject, Observable {
         // Parse value
         guard let parsedValue = CharacteristicMapper.parseValue(value, for: hmCharacteristic) else {
             throw ControlError.invalidValue("Cannot parse '\(value)' for \(characteristic)")
+        }
+
+        // Dry run: validate without writing
+        if dryRun {
+            let currentValue = hmCharacteristic.value.map { CharacteristicMapper.formatValue($0, for: hmCharacteristic) } ?? "unknown"
+            var result: [String: Any] = [
+                "dry_run": true,
+                "valid": true,
+                "name": accessory.name,
+                "id": accessory.uniqueIdentifier.uuidString,
+                "characteristic": characteristic,
+                "current_value": currentValue,
+                "new_value": value,
+                "parsed_value": "\(parsedValue)",
+            ]
+            if let home = findHome(for: accessory) {
+                result["home"] = home.name
+            }
+            return result
         }
 
         // Write
@@ -260,7 +279,7 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Scene Management
 
-    func deleteScene(name: String, homeName: String? = nil) async throws -> [String: Any] {
+    func deleteScene(name: String, homeName: String? = nil, dryRun: Bool = false) async throws -> [String: Any] {
         await waitForReady()
         let targetHomes = filteredHomes(homeID: homeName)
 
@@ -268,6 +287,15 @@ final class HomeKitManager: NSObject, Observable {
             if let actionSet = home.actionSets.first(where: {
                 $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
             }) {
+                if dryRun {
+                    return [
+                        "dry_run": true,
+                        "valid": true,
+                        "name": actionSet.name,
+                        "home": home.name,
+                        "action_count": actionSet.actions.count,
+                    ]
+                }
                 try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     home.removeActionSet(actionSet) { error in
                         if let error { continuation.resume(throwing: error) }

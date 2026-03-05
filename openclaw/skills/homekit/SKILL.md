@@ -303,6 +303,23 @@ Critical triggers (`agent_deliver: true`) always bypass.
 | `agent_name` | string | `"HomeClaw"` | Human label shown in agent responses |
 | `agent_deliver` | bool | — | Send the agent's response to a messaging channel |
 
+## Agent-Friendly CLI
+
+The CLI follows [AI-agent best practices](https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/):
+
+- **Auto-JSON**: When stdout is not a TTY (piped or called by an agent), all commands output JSON automatically — no `--json` flag needed.
+- **`OUTPUT_FORMAT=json`**: Set this environment variable to force JSON output in all contexts.
+- **`--dry-run` on mutations**: `set --dry-run` validates the accessory, characteristic, and value without writing to the device. `delete-scene --dry-run` confirms the scene exists without deleting.
+- **Input validation**: Control characters (ASCII < 0x20) are rejected from all string arguments to defend against hallucinated inputs.
+
+```bash
+# Dry run: validate without actuating
+homeclaw-cli set "Front Door" lock_target_state locked --dry-run
+
+# Force JSON from any context
+OUTPUT_FORMAT=json homeclaw-cli status
+```
+
 ## Important Notes
 
 - Temperature values come back formatted: `"71F"`. Set with plain numbers.

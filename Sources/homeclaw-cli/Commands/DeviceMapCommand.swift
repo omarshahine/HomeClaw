@@ -32,8 +32,8 @@ struct DeviceMapCmd: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        // Resolve effective format: --json flag is shorthand for --format json
-        let effectiveFormat = format ?? (json ? .json : .text)
+        // Resolve effective format: --json flag, env var, or non-TTY auto-detects JSON
+        let effectiveFormat = format ?? (shouldOutputJSON(json) ? .json : .text)
 
         let content: String
         switch effectiveFormat {

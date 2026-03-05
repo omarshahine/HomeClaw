@@ -13,13 +13,14 @@ struct Get: ParsableCommand {
     var json = false
 
     func run() throws {
+        if let err = validateInput(accessory, label: "accessory") { throw ValidationError(err) }
         let response = try SocketClient.send(command: "get_accessory", args: ["id": accessory])
 
         guard response.success else {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }

@@ -32,7 +32,7 @@ struct ListTriggers: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }
@@ -151,7 +151,7 @@ struct AddTrigger: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }
@@ -186,7 +186,7 @@ struct RemoveTrigger: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }
@@ -278,7 +278,7 @@ struct UpdateTrigger: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }

@@ -187,6 +187,14 @@ homeclaw-cli triggers add --label "Front Door" --accessory-id "<uuid>"
 homeclaw-cli triggers add --label "Mailbox Open" --accessory-id "<uuid>" --characteristic contact_state
 homeclaw-cli triggers update "<trigger-id>" --wake-mode now
 homeclaw-cli triggers remove "<trigger-id>"
+
+# Dry-run mutations (validate without actuating)
+homeclaw-cli set "Front Door" lock_target_state locked --dry-run
+homeclaw-cli delete-scene "Movie Night" --dry-run
+
+# Auto-JSON: all commands output JSON when piped or when env var is set
+homeclaw-cli status | jq .                   # Auto-detects non-TTY
+OUTPUT_FORMAT=json homeclaw-cli list          # Force JSON via env var
 ```
 
 ## Using with Claude Code

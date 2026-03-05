@@ -242,10 +242,14 @@ final class SocketServer: @unchecked Sendable {
                 else {
                     return encodeResponse(success: false, error: "Missing id, characteristic, or value")
                 }
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
                 result = try await hk.controlAccessory(
                     id: id, characteristic: characteristic, value: value,
                     homeID: args["home_id"] as? String,
-                    serviceType: args["service_type"] as? String
+                    serviceType: args["service_type"] as? String,
+                    dryRun: dryRun
                 )
 
             case "list_rooms":
@@ -504,7 +508,10 @@ final class SocketServer: @unchecked Sendable {
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")
                 }
-                result = try await hk.deleteScene(name: name, homeName: args["home"] as? String)
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
+                result = try await hk.deleteScene(name: name, homeName: args["home"] as? String, dryRun: dryRun)
 
             case "assign_rooms":
                 guard let assignments = args["assignments"] as? [[String: String]] else {

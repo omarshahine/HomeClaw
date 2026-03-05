@@ -58,7 +58,7 @@ struct Config: ParsableCommand {
             guard response.success else {
                 throw ValidationError(response.error ?? "Unknown error")
             }
-            if json {
+            if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
             } else {
                 print("Circuit breaker reset to closed.")
@@ -87,7 +87,7 @@ struct Config: ParsableCommand {
             guard response.success else {
                 throw ValidationError(response.error ?? "Unknown error")
             }
-            if json {
+            if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
             } else {
                 print("Active home reset to primary home.")
@@ -122,7 +122,7 @@ struct Config: ParsableCommand {
             guard response.success else {
                 throw ValidationError(response.error ?? "Unknown error")
             }
-            if json {
+            if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
             } else {
                 print("Webhook configuration updated.")
@@ -159,7 +159,7 @@ struct Config: ParsableCommand {
             guard response.success else {
                 throw ValidationError(response.error ?? "Unknown error")
             }
-            if json {
+            if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
             } else {
                 print("Configuration updated.")
@@ -176,7 +176,7 @@ struct Config: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }
@@ -256,7 +256,7 @@ struct Config: ParsableCommand {
             }
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(allResponse.data?.value)
             return
         }
@@ -298,7 +298,7 @@ struct Config: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }

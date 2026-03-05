@@ -16,6 +16,7 @@ struct Search: ParsableCommand {
     var json = false
 
     func run() throws {
+        if let err = validateInput(query, label: "query") { throw ValidationError(err) }
         var args: [String: String] = ["query": query]
         if let category { args["category"] = category }
 
@@ -25,7 +26,7 @@ struct Search: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if json {
+        if shouldOutputJSON(json) {
             printJSON(response.data?.value)
             return
         }
