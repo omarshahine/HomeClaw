@@ -20,6 +20,7 @@ struct HomeKitCLI: ParsableCommand {
             DeviceMapCmd.self,
             Events.self,
             Triggers.self,
+            WebhookLog.self,
         ],
         defaultSubcommand: Status.self
     )

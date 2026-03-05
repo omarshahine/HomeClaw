@@ -536,6 +536,27 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: dryRun
                 )
 
+            case "webhook_log":
+                let limit = (args["limit"] as? Int) ?? (args["limit"] as? String).flatMap(Int.init) ?? 50
+                let outcomeFilter: WebhookEventLogger.Outcome? = (args["outcome"] as? String).flatMap {
+                    WebhookEventLogger.Outcome(rawValue: $0)
+                }
+                var since: Date?
+                if let sinceStr = args["since"] as? String {
+                    since = ISO8601DateFormatter().date(from: sinceStr)
+                }
+                result = [
+                    "entries": WebhookEventLogger.shared.readEntries(
+                        since: since, limit: limit, outcome: outcomeFilter),
+                ] as [String: Any]
+
+            case "webhook_log_stats":
+                result = WebhookEventLogger.shared.logStats()
+
+            case "purge_webhook_log":
+                WebhookEventLogger.shared.purge()
+                result = WebhookEventLogger.shared.logStats()
+
             default:
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
             }
