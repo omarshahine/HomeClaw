@@ -293,6 +293,12 @@ final class HomeEventLogger {
 
     // MARK: - Triggers
 
+    /// Battery-related characteristics that should never trigger webhooks.
+    /// These change frequently and are not actionable state transitions.
+    private static let webhookExcludedCharacteristics: Set<String> = [
+        "battery_level", "low_battery",
+    ]
+
     /// Evaluates all enabled webhook triggers against an event.
     /// Matching triggers fire webhooks routed by action type (wake or agent).
     /// Returns true if at least one trigger matched (so the caller can skip the general webhook).
@@ -313,6 +319,11 @@ final class HomeEventLogger {
         let accessoryID = accessory?["id"] as? String
         let characteristic = event["characteristic"] as? String
         let value = event["value"] as? String
+
+        // Skip battery-related characteristics — they are not actionable state changes
+        if let characteristic, Self.webhookExcludedCharacteristics.contains(characteristic) {
+            return false
+        }
         let scene = event["scene"] as? [String: Any]
         let sceneID = scene?["id"] as? String
         let sceneName = scene?["name"] as? String
