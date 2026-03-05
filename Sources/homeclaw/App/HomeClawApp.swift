@@ -22,6 +22,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     /// settings requests from UIKit scene session restoration on launch.
     static var settingsRequested = false
 
+    /// Weak reference to the settings scene session for reuse.
+    static weak var settingsSession: UISceneSession?
+
     /// Set to true only by openOnboarding() — same gating pattern as settingsRequested.
     static var onboardingRequested = false
 
@@ -86,10 +89,9 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func openSettings() {
-        // Reuse an existing Settings session instead of creating a new one each time
-        let existingSession = UIApplication.shared.openSessions.first {
-            $0.configuration.name == "Settings"
-        }
+        // Reuse stored session, or search open sessions, or create new
+        let existingSession = Self.settingsSession
+            ?? UIApplication.shared.openSessions.first { $0.configuration.name == "Settings" }
         Self.settingsRequested = true
         let activity = NSUserActivity(activityType: "com.shahine.homeclaw.settings")
         UIApplication.shared.requestSceneSessionActivation(
@@ -328,73 +330,82 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
 // MARK: - Settings Scene Delegate
 
 /// Creates a window hosting the SwiftUI SettingsView when triggered by openSettings().
+/// The window is created once and reused — subsequent openSettings() calls just
+/// bring it to front without recreating the view hierarchy or re-centering.
 class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    private var hasConfiguredScene = false
 
     func scene(
         _ scene: UIScene, willConnectTo session: UISceneSession,
         options connectionOptions: UIScene.ConnectionOptions
     ) {
-        // Only show settings if explicitly requested via openSettings().
-        // UIKit restores scene sessions on launch, replaying the original
-        // userActivity — so we can't distinguish via connectionOptions alone.
-        // The settingsRequested flag is only set by openSettings().
-        guard HomeClawApp.settingsRequested else {
-            AppLogger.app.info("Settings scene restored on launch — hiding window")
-            // Don't destroy the session — keep it around so openSettings() can
-            // find it via openSessions and reuse it instead of spawning duplicates.
-            if let ws = scene as? UIWindowScene {
-                ws.windows.forEach { $0.isHidden = true }
-            }
-            return
-        }
-        HomeClawApp.settingsRequested = false
-
         guard let windowScene = scene as? UIWindowScene else { return }
+        HomeClawApp.settingsSession = session
 
-        let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = UIHostingController(rootView: SettingsView())
-        window.makeKeyAndVisible()
-        self.window = window
-
-        configureWindowScene(windowScene)
-        AppLogger.app.info("Settings window opened")
+        if HomeClawApp.settingsRequested {
+            HomeClawApp.settingsRequested = false
+            createAndShowWindow(in: windowScene)
+        } else {
+            // Restored on launch — don't show, but keep session for reuse.
+            AppLogger.app.info("Settings scene restored on launch — suppressed")
+        }
     }
 
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
-        // Called when openSettings() reactivates an existing Settings scene session.
-        // Just bring the existing window to front.
+        // Called when openSettings() reactivates an existing Settings session.
         guard let windowScene = scene as? UIWindowScene else { return }
 
-        if window == nil {
-            // Window was hidden on restore — create it now
-            let w = UIWindow(windowScene: windowScene)
-            w.rootViewController = UIHostingController(rootView: SettingsView())
-            w.makeKeyAndVisible()
-            self.window = w
+        if let window {
+            window.isHidden = false
+            window.makeKeyAndVisible()
         } else {
-            window?.isHidden = false
-            window?.makeKeyAndVisible()
+            createAndShowWindow(in: windowScene)
         }
 
-        configureWindowScene(windowScene)
+        #if targetEnvironment(macCatalyst)
+        // Just bring to front — don't re-center (user may have moved the window)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            Self.activateApp()
+            Self.orderWindowFront()
+        }
+        #endif
         AppLogger.app.info("Settings window reactivated")
     }
 
-    private func configureWindowScene(_ windowScene: UIWindowScene) {
-        #if targetEnvironment(macCatalyst)
-        // Single space title suppresses the app name without showing text
-        windowScene.title = " "
-        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
-        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
+    func sceneDidDisconnect(_ scene: UIScene) {
+        window = nil
+        hasConfiguredScene = false
+        HomeClawApp.settingsSession = nil
+    }
 
-        // Bring the app to the foreground and center the window in one pass
-        // so the window doesn't appear off-center then visibly jump.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            Self.activateApp()
-            Self.centerWindow()
+    private func createAndShowWindow(in windowScene: UIWindowScene) {
+        let w = UIWindow(windowScene: windowScene)
+        w.rootViewController = UIHostingController(rootView: SettingsView())
+        w.makeKeyAndVisible()
+        self.window = w
+
+        if !hasConfiguredScene {
+            hasConfiguredScene = true
+            #if targetEnvironment(macCatalyst)
+            windowScene.title = " "
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
+            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                Self.activateApp()
+                Self.centerWindow()
+            }
+            #endif
+        } else {
+            #if targetEnvironment(macCatalyst)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                Self.activateApp()
+                Self.orderWindowFront()
+            }
+            #endif
         }
-        #endif
+        AppLogger.app.info("Settings window opened")
     }
 
     #if targetEnvironment(macCatalyst)
@@ -418,47 +429,57 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
     }
 
-    /// Centers the key NSWindow on screen via ObjC runtime.
-    private static func centerWindow() {
+    /// Brings the key NSWindow to front without moving it.
+    private static func orderWindowFront() {
+        guard let window = findKeyWindow() else { return }
+        let orderFrontSel = NSSelectorFromString("orderFrontRegardless")
+        if window.responds(to: orderFrontSel) {
+            typealias OrderFrontFn = @convention(c) (NSObject, Selector) -> Void
+            let orderFront = unsafeBitCast(window.method(for: orderFrontSel), to: OrderFrontFn.self)
+            orderFront(window, orderFrontSel)
+        }
+    }
+
+    /// Finds the key NSWindow via ObjC runtime, falling back to last visible window.
+    private static func findKeyWindow() -> NSObject? {
         guard let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
               let metaclass = object_getClass(nsAppClass),
               let imp = class_getMethodImplementation(metaclass, NSSelectorFromString("sharedApplication"))
-        else { return }
+        else { return nil }
         typealias SharedAppFn = @convention(c) (AnyObject, Selector) -> NSObject
         let sharedApp = unsafeBitCast(imp, to: SharedAppFn.self)(
             nsAppClass, NSSelectorFromString("sharedApplication"))
 
-        // Prefer the key window; fall back to the last visible window
         let keyWindowSel = NSSelectorFromString("keyWindow")
-        var targetWindow: NSObject?
         if sharedApp.responds(to: keyWindowSel),
            let kw = sharedApp.value(forKey: "keyWindow") as? NSObject {
-            targetWindow = kw
-        } else if let windows = sharedApp.value(forKey: "windows") as? [NSObject] {
-            // Find a visible window (isVisible == true)
+            return kw
+        }
+        if let windows = sharedApp.value(forKey: "windows") as? [NSObject] {
             let isVisibleSel = NSSelectorFromString("isVisible")
-            targetWindow = windows.last(where: {
+            return windows.last(where: {
                 $0.responds(to: isVisibleSel) && ($0.value(forKey: "visible") as? Bool == true)
             }) ?? windows.last
         }
+        return nil
+    }
 
-        if let window = targetWindow {
-            let centerSel = NSSelectorFromString("center")
-            if window.responds(to: centerSel) {
-                typealias CenterFn = @convention(c) (NSObject, Selector) -> Void
-                let center = unsafeBitCast(window.method(for: centerSel), to: CenterFn.self)
-                center(window, centerSel)
-            }
+    /// Centers the key NSWindow on screen and brings it to front.
+    private static func centerWindow() {
+        guard let window = findKeyWindow() else { return }
 
-            // In accessory mode there's no dock icon, so the window might
-            // not come to front automatically. orderFrontRegardless ensures
-            // it appears above other apps' windows.
-            let orderFrontSel = NSSelectorFromString("orderFrontRegardless")
-            if window.responds(to: orderFrontSel) {
-                typealias OrderFrontFn = @convention(c) (NSObject, Selector) -> Void
-                let orderFront = unsafeBitCast(window.method(for: orderFrontSel), to: OrderFrontFn.self)
-                orderFront(window, orderFrontSel)
-            }
+        let centerSel = NSSelectorFromString("center")
+        if window.responds(to: centerSel) {
+            typealias CenterFn = @convention(c) (NSObject, Selector) -> Void
+            let center = unsafeBitCast(window.method(for: centerSel), to: CenterFn.self)
+            center(window, centerSel)
+        }
+
+        let orderFrontSel = NSSelectorFromString("orderFrontRegardless")
+        if window.responds(to: orderFrontSel) {
+            typealias OrderFrontFn = @convention(c) (NSObject, Selector) -> Void
+            let orderFront = unsafeBitCast(window.method(for: orderFrontSel), to: OrderFrontFn.self)
+            orderFront(window, orderFrontSel)
         }
     }
     #endif
