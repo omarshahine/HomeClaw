@@ -288,6 +288,16 @@ enum CharacteristicMapper {
                 }
             }
 
+        case HMCharacteristicTypeInputEvent:
+            if let intVal = value as? Int {
+                switch intVal {
+                case 0: return "single_press"
+                case 1: return "double_press"
+                case 2: return "long_press"
+                default: return "press_\(intVal)"
+                }
+            }
+
         case HMCharacteristicTypePowerState,
              HMCharacteristicTypeObstructionDetected,
              HMCharacteristicTypeMotionDetected,

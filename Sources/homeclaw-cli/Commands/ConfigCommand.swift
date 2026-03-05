@@ -27,6 +27,12 @@ struct Config: ParsableCommand {
     @Option(name: .long, help: "Enable or disable webhook (true/false)")
     var webhookEnabled: String?
 
+    @Flag(name: .long, help: "Send a test event to the configured webhook URL")
+    var webhookTest = false
+
+    @Flag(name: .long, help: "Reset the webhook circuit breaker without toggling")
+    var webhookReset = false
+
     @Flag(name: .long, help: "Show all accessories with their allowed status")
     var listDevices = false
 
@@ -37,6 +43,26 @@ struct Config: ParsableCommand {
         // List devices mode
         if listDevices {
             try showDeviceList()
+            return
+        }
+
+        // Webhook test
+        if webhookTest {
+            try runWebhookTest()
+            return
+        }
+
+        // Webhook circuit breaker reset
+        if webhookReset {
+            let response = try SocketClient.send(command: "webhook_reset")
+            guard response.success else {
+                throw ValidationError(response.error ?? "Unknown error")
+            }
+            if json {
+                printJSON(response.data?.value)
+            } else {
+                print("Circuit breaker reset to closed.")
+            }
             return
         }
 
@@ -72,7 +98,19 @@ struct Config: ParsableCommand {
         // Apply webhook settings
         if webhookURL != nil || webhookToken != nil || webhookEnabled != nil {
             var args: [String: String] = [:]
-            if let url = webhookURL { args["url"] = url }
+            if var url = webhookURL {
+                // Validate and auto-fix URLs with path suffixes that HomeClaw appends automatically
+                let suffixes = ["/hooks/wake", "/hooks/agent", "/hooks"]
+                for suffix in suffixes where url.hasSuffix(suffix) {
+                    let stripped = String(url.dropLast(suffix.count))
+                    print("\u{26A0}\u{FE0F}  URL should be the base gateway URL (e.g. http://127.0.0.1:18789)")
+                    print("   HomeClaw appends \(suffix) automatically.")
+                    print("   Stripping path suffix: \(url) \u{2192} \(stripped)")
+                    url = stripped
+                    break
+                }
+                args["url"] = url
+            }
             if let token = webhookToken { args["token"] = token }
             if let enabled = webhookEnabled {
                 guard enabled == "true" || enabled == "false" else {
@@ -252,6 +290,48 @@ struct Config: ParsableCommand {
             }
         }
         print("\n\(allowedCount) of \(accessories.count) accessories exposed")
+    }
+
+    private func runWebhookTest() throws {
+        let response = try SocketClient.send(command: "webhook_test")
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
+
+        if json {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let data = response.data?.value as? [String: Any] else {
+            print("Could not parse test result.")
+            return
+        }
+
+        let url = data["url"] as? String ?? "?"
+        let status = data["status"] as? Int ?? 0
+        let ok = data["ok"] as? Bool ?? false
+        let body = data["body"] as? String ?? ""
+        let error = data["error"] as? String
+
+        print("Testing webhook \u{2192} \(url)")
+        if ok {
+            print("  Status: \(status) OK")
+            if !body.isEmpty { print("  Body:   \(body)") }
+            print("  \u{2705} Webhook is working")
+        } else if let error {
+            print("  \u{274C} Connection failed: \(error)")
+            if url.contains("/hooks/hooks/") {
+                print("  Hint: URL appears to have a doubled path. Check --webhook-url value.")
+            }
+        } else {
+            print("  Status: \(status)")
+            if !body.isEmpty { print("  Body:   \(body)") }
+            print("  \u{274C} Webhook delivery failed \u{2014} check the URL")
+            if url.contains("/hooks/hooks/") {
+                print("  Hint: URL appears to have a doubled path. Check --webhook-url value.")
+            }
+        }
     }
 
     private func printConfigSummary(_ config: [String: Any]) {

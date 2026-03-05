@@ -635,10 +635,12 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
         return homes.flatMap { home in
             home.accessories.map { accessory in
+                let id = accessory.uniqueIdentifier.uuidString
                 var dict: [String: Any] = [
-                    "id": accessory.uniqueIdentifier.uuidString,
+                    "id": id,
                     "name": accessory.name,
                     "category": CharacteristicMapper.inferredCategoryName(for: accessory),
+                    "reachable": accessory.isReachable,
                     "home_name": home.name,
                     "home_id": home.uniqueIdentifier.uuidString,
                 ]
@@ -649,6 +651,9 @@ final class HomeKitManager: NSObject, Observable {
                     for: accessory, roomName: accessory.room?.name)
                 if homeDisplayName != accessory.name {
                     dict["home_display_name"] = homeDisplayName
+                }
+                if let cachedState = cache.cachedState(for: id), !cachedState.isEmpty {
+                    dict["state"] = cachedState
                 }
                 return dict
             }

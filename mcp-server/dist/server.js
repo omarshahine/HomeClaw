@@ -20802,6 +20802,32 @@ var tools = [
     }
   },
   {
+    name: "homekit_webhook",
+    description: "Manage webhook configuration for pushing HomeKit events to OpenClaw or other services. Actions: setup (configure URL, token, and enable in one step), test (send a test event and show the HTTP response), reset (reset the circuit breaker), status (show webhook health and delivery stats).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["setup", "test", "reset", "status"],
+          description: "Action to perform. Default: status"
+        },
+        url: {
+          type: "string",
+          description: "Base gateway URL, e.g. http://127.0.0.1:18789 (setup action). HomeClaw appends /hooks/wake automatically \u2014 do NOT include the path."
+        },
+        token: {
+          type: "string",
+          description: "Bearer token for webhook authentication (setup action)"
+        },
+        enabled: {
+          type: "boolean",
+          description: "Enable or disable the webhook (setup action). Default: true"
+        }
+      }
+    }
+  },
+  {
     name: "homekit_events",
     description: "Get recent HomeKit events \u2014 characteristic changes, scene triggers, and accessory control actions. Use to understand what happened recently in the home.",
     inputSchema: {
@@ -20958,6 +20984,43 @@ async function handleEvents(args) {
   if (args.type) socketArgs.type = args.type;
   return sendCommand("events", socketArgs);
 }
+async function handleWebhook(args) {
+  const action = args.action || "status";
+  switch (action) {
+    case "setup": {
+      const socketArgs = {};
+      if (args.url) {
+        let url2 = args.url;
+        for (const suffix of ["/hooks/wake", "/hooks/agent", "/hooks"]) {
+          if (url2.endsWith(suffix)) {
+            url2 = url2.slice(0, -suffix.length);
+            break;
+          }
+        }
+        socketArgs.url = url2;
+      }
+      if (args.token) socketArgs.token = args.token;
+      socketArgs.enabled = String(args.enabled !== false);
+      const result = await sendCommand("set_webhook", socketArgs);
+      try {
+        const testResult = await sendCommand("webhook_test");
+        return { setup: result, test: testResult };
+      } catch {
+        return { setup: result, test: { error: "Test failed \u2014 HomeClaw may not be running" } };
+      }
+    }
+    case "test":
+      return sendCommand("webhook_test");
+    case "reset":
+      return sendCommand("webhook_reset");
+    case "status": {
+      const status = await sendCommand("status");
+      return status.webhook || { enabled: false };
+    }
+    default:
+      throw new Error(`Unknown webhook action: ${action}`);
+  }
+}
 async function handleConfig(args) {
   const action = args.action || "get";
   switch (action) {
@@ -21010,6 +21073,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "homekit_device_map":
         result = await handleDeviceMap(args);
+        break;
+      case "homekit_webhook":
+        result = await handleWebhook(args);
         break;
       case "homekit_config":
         result = await handleConfig(args);

@@ -340,8 +340,12 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         // userActivity — so we can't distinguish via connectionOptions alone.
         // The settingsRequested flag is only set by openSettings().
         guard HomeClawApp.settingsRequested else {
-            AppLogger.app.info("Settings scene restored on launch — discarding")
-            UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+            AppLogger.app.info("Settings scene restored on launch — hiding window")
+            // Don't destroy the session — keep it around so openSettings() can
+            // find it via openSessions and reuse it instead of spawning duplicates.
+            if let ws = scene as? UIWindowScene {
+                ws.windows.forEach { $0.isHidden = true }
+            }
             return
         }
         HomeClawApp.settingsRequested = false
@@ -353,6 +357,31 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         self.window = window
 
+        configureWindowScene(windowScene)
+        AppLogger.app.info("Settings window opened")
+    }
+
+    func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
+        // Called when openSettings() reactivates an existing Settings scene session.
+        // Just bring the existing window to front.
+        guard let windowScene = scene as? UIWindowScene else { return }
+
+        if window == nil {
+            // Window was hidden on restore — create it now
+            let w = UIWindow(windowScene: windowScene)
+            w.rootViewController = UIHostingController(rootView: SettingsView())
+            w.makeKeyAndVisible()
+            self.window = w
+        } else {
+            window?.isHidden = false
+            window?.makeKeyAndVisible()
+        }
+
+        configureWindowScene(windowScene)
+        AppLogger.app.info("Settings window reactivated")
+    }
+
+    private func configureWindowScene(_ windowScene: UIWindowScene) {
         #if targetEnvironment(macCatalyst)
         // Single space title suppresses the app name without showing text
         windowScene.title = " "
@@ -366,8 +395,6 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
             Self.centerWindow()
         }
         #endif
-
-        AppLogger.app.info("Settings window opened")
     }
 
     #if targetEnvironment(macCatalyst)

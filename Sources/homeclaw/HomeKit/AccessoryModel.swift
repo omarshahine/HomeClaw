@@ -196,6 +196,7 @@ enum AccessoryModel {
             "motion_detected", "contact_state", "battery_level",
             "active", "current_humidity", "color_temperature",
             "current_position", "target_position",
+            "input_event",
         ]
         return interesting.contains(name)
     }

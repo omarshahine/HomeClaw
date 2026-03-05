@@ -41,23 +41,39 @@ struct Status: ParsableCommand {
         if let webhook = status["webhook"] as? [String: Any] {
             let enabled = webhook["enabled"] as? Bool ?? false
             let circuitState = webhook["circuit_state"] as? String ?? "closed"
+            let delivered = webhook["total_delivered"] as? Int ?? 0
+            let dropped = webhook["total_dropped"] as? Int ?? 0
+            let failures = webhook["consecutive_failures"] as? Int ?? 0
+            let lastHTTP = webhook["last_http_status"] as? Int
+            let lastSuccess = webhook["last_success"] as? String
+            let lastFailure = webhook["last_failure"] as? String
 
             if enabled {
                 switch circuitState {
                 case "softOpen":
                     let remaining = webhook["remaining_seconds"] as? Int ?? 0
                     let tripCount = webhook["soft_trip_count"] as? Int ?? 0
-                    let dropped = webhook["total_dropped"] as? Int ?? 0
                     let minutes = remaining / 60
                     let seconds = remaining % 60
-                    print("  Webhook:     \u{26A0} Paused (auto-resuming in \(minutes)m \(seconds)s)")
-                    print("               Trip \(tripCount)/3, \(dropped) dropped")
+                    print("  Webhook:     \u{26A0}\u{FE0F}  Circuit open \u{2014} paused, auto-resuming in \(minutes)m \(seconds)s")
+                    print("               Trip \(tripCount)/3, \(delivered) delivered, \(dropped) dropped")
+                    if let status = lastHTTP { print("               Last HTTP status: \(status)") }
                 case "hardOpen":
-                    let dropped = webhook["total_dropped"] as? Int ?? 0
-                    print("  Webhook:     \u{274C} Disabled (\(dropped) dropped)")
-                    print("               Toggle webhook off\u{2192}on to re-enable")
+                    print("  Webhook:     \u{274C} Circuit hard-open \u{2014} \(dropped) dropped")
+                    print("               Run: homeclaw-cli config --webhook-reset")
+                    if let status = lastHTTP { print("               Last HTTP status: \(status)") }
                 default:
-                    print("  Webhook:     \u{2705} Active")
+                    if failures > 0 {
+                        print("  Webhook:     \u{2705} Delivering (\(delivered) sent, \(failures) consecutive failures)")
+                    } else {
+                        print("  Webhook:     \u{2705} Delivering (\(delivered) sent, 0 failed)")
+                    }
+                    if let ts = lastSuccess {
+                        print("               Last success: \(ts)")
+                    }
+                }
+                if let ts = lastFailure, circuitState != "closed" {
+                    print("               Last failure: \(ts)")
                 }
             } else {
                 print("  Webhook:     Disabled")

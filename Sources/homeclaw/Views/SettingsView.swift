@@ -27,6 +27,34 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Shared Helpers
+
+/// Maps a HomeKit accessory category to an SF Symbol name.
+private func symbolForCategory(_ category: String) -> String {
+    switch category {
+    case "lightbulb": return "lightbulb.fill"
+    case "fan": return "fan.fill"
+    case "outlet": return "powerplug.fill"
+    case "switch": return "lightswitch.on.fill"
+    case "thermostat": return "thermometer.medium"
+    case "lock": return "lock.fill"
+    case "garage_door": return "door.garage.closed"
+    case "door": return "door.left.hand.closed"
+    case "window_covering": return "blinds.vertical.closed"
+    case "sensor": return "sensor"
+    case "camera": return "video.fill"
+    case "doorbell": return "bell.fill"
+    case "security_system": return "shield.fill"
+    case "air_purifier": return "air.purifier.fill"
+    case "valve": return "spigot.fill"
+    case "television": return "tv"
+    case "speaker": return "hifispeaker.fill"
+    case "network": return "network"
+    case "programmable_switch": return "button.programmable"
+    default: return "square.grid.2x2"
+    }
+}
+
 // MARK: - HomeKit
 
 private struct HomeKitSettingsView: View {
@@ -148,6 +176,7 @@ private struct DeviceFilterSettingsView: View {
         let category: String
         let room: String
         let homeName: String
+        let stateSummary: String
         var isAllowed: Bool
     }
 
@@ -295,12 +324,20 @@ private struct DeviceFilterSettingsView: View {
             }
         )
         Toggle(isOn: binding) {
-            HStack {
-                Text(item.name)
-                Spacer()
-                Text(item.category)
+            HStack(spacing: 6) {
+                Image(systemName: symbolForCategory(item.category))
                     .foregroundStyle(.secondary)
-                    .font(.caption)
+                    .frame(width: 16)
+                Text(item.name)
+                if !item.stateSummary.isEmpty && item.stateSummary != "unknown" {
+                    Text(item.stateSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
+                Spacer()
             }
         }
         .toggleStyle(.automatic)
@@ -362,12 +399,16 @@ private struct DeviceFilterSettingsView: View {
         filterMode = currentMode
         allAccessories = arr.map { dict in
             let id = dict["id"] as? String ?? UUID().uuidString
+            let category = dict["category"] as? String ?? "Other"
+            let state = dict["state"] as? [String: String]
+            let reachable = dict["reachable"] as? Bool ?? false
             return AccessoryItem(
                 id: id,
                 name: dict["home_display_name"] as? String ?? dict["name"] as? String ?? "Unknown",
-                category: dict["category"] as? String ?? "Other",
+                category: category,
                 room: dict["room"] as? String ?? "",
                 homeName: dict["home_name"] as? String ?? "",
+                stateSummary: DeviceMap.stateSummary(from: state, category: category, reachable: reachable),
                 isAllowed: allowedIDs.isEmpty || allowedIDs.contains(id)
             )
         }
@@ -506,6 +547,9 @@ private struct WebhookSettingsView: View {
     @State private var circuitSoftTripCount = 0
     @State private var circuitRemainingSeconds = 0
     @State private var circuitTotalDropped = 0
+    @State private var circuitTotalDelivered = 0
+    @State private var circuitConsecutiveFailures = 0
+    @State private var circuitLastHTTPStatus: Int?
     @State private var countdownTask: Task<Void, Never>?
 
     // Copy feedback and edit mode for URL/token fields
@@ -533,6 +577,7 @@ private struct WebhookSettingsView: View {
         let category: String
         let room: String
         let homeName: String
+        let stateSummary: String
     }
 
     private var homeNames: [String] {
@@ -586,20 +631,31 @@ private struct WebhookSettingsView: View {
             if circuitState == "softOpen" {
                 let minutes = circuitRemainingSeconds / 60
                 let seconds = circuitRemainingSeconds % 60
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Webhooks Paused")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Auto-resuming in \(minutes)m \(seconds)s (trip \(circuitSoftTripCount)/3)")
-                            .font(.caption)
-                        if circuitTotalDropped > 0 {
-                            Text("\(circuitTotalDropped) dropped")
-                                .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Webhooks Paused")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Auto-resuming in \(minutes)m \(seconds)s (trip \(circuitSoftTripCount)/3)")
+                                .font(.caption)
+                            if let status = circuitLastHTTPStatus {
+                                Text("Last HTTP status: \(status)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if circuitTotalDropped > 0 {
+                                Text("\(circuitTotalDropped) dropped")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
                     }
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                    Spacer()
+                    Button("Reset") {
+                        WebhookCircuitBreaker.shared.manualReset()
+                    }
+                    .buttonStyle(.bordered)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -607,26 +663,69 @@ private struct WebhookSettingsView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
             } else if circuitState == "hardOpen" {
-                Label {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Webhooks Disabled")
-                            .font(.subheadline.weight(.semibold))
-                        Text("Toggle webhook off and on to re-enable")
-                            .font(.caption)
-                        if circuitTotalDropped > 0 {
-                            Text("\(circuitTotalDropped) dropped")
-                                .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Webhooks Disabled")
+                                .font(.subheadline.weight(.semibold))
+                            if let status = circuitLastHTTPStatus {
+                                Text("Last HTTP status: \(status)")
+                                    .font(.caption)
+                            }
+                            if circuitTotalDropped > 0 {
+                                Text("\(circuitTotalDropped) events dropped")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
+                    } icon: {
+                        Image(systemName: "xmark.octagon.fill")
+                            .foregroundStyle(.red)
                     }
-                } icon: {
-                    Image(systemName: "xmark.octagon.fill")
-                        .foregroundStyle(.red)
+                    Spacer()
+                    Button("Reset") {
+                        WebhookCircuitBreaker.shared.manualReset()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
+            }
+
+            // Delivery stats (visible when webhook is enabled and circuit is closed)
+            if webhookEnabled && circuitState == "closed" && circuitTotalDelivered > 0 {
+                HStack(spacing: 12) {
+                    Label {
+                        Text("\(circuitTotalDelivered) delivered")
+                    } icon: {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    .font(.caption)
+
+                    if circuitConsecutiveFailures > 0 {
+                        Label {
+                            Text("\(circuitConsecutiveFailures) failing")
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                        .font(.caption)
+                    }
+
+                    if let status = circuitLastHTTPStatus {
+                        Text("HTTP \(status)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
             }
 
             // Endpoint configuration
@@ -818,15 +917,23 @@ private struct WebhookSettingsView: View {
                         Section {
                             ForEach(group.items) { item in
                                 Toggle(isOn: accessoryBinding(item.id, name: item.name)) {
-                                    HStack {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: symbolForCategory(item.category))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 16)
                                         Text(item.name)
+                                        if !item.stateSummary.isEmpty && item.stateSummary != "unknown" {
+                                            Text(item.stateSummary)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(.quaternary, in: Capsule())
+                                        }
                                         Spacer()
                                         if enabledAccessoryIDs.contains(item.id) {
                                             wakeModeButton(itemID: item.id, findTrigger: { $0.accessoryID == item.id })
                                         }
-                                        Text(item.category)
-                                            .foregroundStyle(.secondary)
-                                            .font(.caption)
                                     }
                                 }
                             }
@@ -881,6 +988,11 @@ private struct WebhookSettingsView: View {
             if let dropped = notification.userInfo?["totalDropped"] as? Int {
                 circuitTotalDropped = dropped
             }
+            // Refresh computed fields from the circuit breaker directly
+            let cb = WebhookCircuitBreaker.shared
+            circuitTotalDelivered = cb.totalDeliveredCount
+            circuitConsecutiveFailures = cb.consecutiveFailures
+            circuitLastHTTPStatus = cb.lastHTTPStatus
             updateCountdownTimer()
         }
     }
@@ -893,6 +1005,9 @@ private struct WebhookSettingsView: View {
         circuitSoftTripCount = cb.softTripCount
         circuitRemainingSeconds = cb.remainingCooldownSeconds
         circuitTotalDropped = cb.totalDroppedCount
+        circuitTotalDelivered = cb.totalDeliveredCount
+        circuitConsecutiveFailures = cb.consecutiveFailures
+        circuitLastHTTPStatus = cb.lastHTTPStatus
         updateCountdownTimer()
     }
 
@@ -1058,13 +1173,19 @@ private struct WebhookSettingsView: View {
 
         // Load accessories with home name
         let accList = await hk.listAllAccessories()
-        allAccessories = accList.map { AccessoryItem(
-            id: $0["id"] as? String ?? UUID().uuidString,
-            name: $0["home_display_name"] as? String ?? $0["name"] as? String ?? "Unknown",
-            category: $0["category"] as? String ?? "Other",
-            room: $0["room"] as? String ?? "",
-            homeName: $0["home_name"] as? String ?? ""
-        )}
+        allAccessories = accList.map {
+            let category = $0["category"] as? String ?? "Other"
+            let state = $0["state"] as? [String: String]
+            let reachable = $0["reachable"] as? Bool ?? false
+            return AccessoryItem(
+                id: $0["id"] as? String ?? UUID().uuidString,
+                name: $0["home_display_name"] as? String ?? $0["name"] as? String ?? "Unknown",
+                category: category,
+                room: $0["room"] as? String ?? "",
+                homeName: $0["home_name"] as? String ?? "",
+                stateSummary: DeviceMap.stateSummary(from: state, category: category, reachable: reachable)
+            )
+        }
 
         if selectedHome.isEmpty, let firstName = homeNames.first {
             selectedHome = firstName

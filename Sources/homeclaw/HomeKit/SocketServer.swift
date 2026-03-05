@@ -191,14 +191,18 @@ final class SocketServer: @unchecked Sendable {
                 let webhookConfig = HomeClawConfig.shared.webhookConfig
                 var webhookInfo: [String: Any] = [
                     "enabled": webhookConfig?.enabled ?? false,
+                    "url": webhookConfig?.url ?? "",
                     "url_configured": !(webhookConfig?.url.isEmpty ?? true),
                     "circuit_state": cb.state.rawValue,
+                    "consecutive_failures": cb.consecutiveFailures,
+                    "total_delivered": cb.totalDeliveredCount,
+                    "total_dropped": cb.totalDroppedCount,
                 ]
                 if cb.state != .closed {
                     webhookInfo["soft_trip_count"] = cb.softTripCount
                     webhookInfo["remaining_seconds"] = cb.remainingCooldownSeconds
-                    webhookInfo["total_dropped"] = cb.totalDroppedCount
                 }
+                if let status = cb.lastHTTPStatus { webhookInfo["last_http_status"] = status }
                 if let d = cb.lastSuccessDate { webhookInfo["last_success"] = formatter.string(from: d) }
                 if let d = cb.lastFailureDate { webhookInfo["last_failure"] = formatter.string(from: d) }
 
@@ -355,6 +359,58 @@ final class SocketServer: @unchecked Sendable {
                     WebhookCircuitBreaker.shared.manualReset()
                 }
                 result = HomeClawConfig.shared.toDict()
+
+            case "webhook_test":
+                guard let webhook = HomeClawConfig.shared.webhookConfig,
+                      webhook.enabled, !webhook.url.isEmpty
+                else {
+                    return encodeResponse(success: false, error: "Webhook is not configured or not enabled")
+                }
+                let baseURL = webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                guard let testURL = URL(string: baseURL + "/hooks/wake") else {
+                    return encodeResponse(success: false, error: "Invalid webhook URL: \(baseURL)")
+                }
+                let testPayload: [String: Any] = [
+                    "text": "[HomeClaw] Webhook test event",
+                    "mode": "now",
+                ]
+                guard let body = try? JSONSerialization.data(withJSONObject: testPayload) else {
+                    return encodeResponse(success: false, error: "Failed to serialize test payload")
+                }
+                var testRequest = URLRequest(url: testURL)
+                testRequest.httpMethod = "POST"
+                testRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                if !webhook.token.isEmpty {
+                    testRequest.setValue("Bearer \(webhook.token)", forHTTPHeaderField: "Authorization")
+                }
+                testRequest.httpBody = body
+                testRequest.timeoutInterval = 10
+                do {
+                    let (responseData, response) = try await URLSession.shared.data(for: testRequest)
+                    let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    let responseBody = String(data: responseData.prefix(1024), encoding: .utf8) ?? ""
+                    result = [
+                        "url": testURL.absoluteString,
+                        "status": httpStatus,
+                        "ok": httpStatus >= 200 && httpStatus < 400,
+                        "body": responseBody,
+                    ] as [String: Any]
+                } catch {
+                    result = [
+                        "url": testURL.absoluteString,
+                        "status": 0,
+                        "ok": false,
+                        "error": error.localizedDescription,
+                    ] as [String: Any]
+                }
+
+            case "webhook_reset":
+                WebhookCircuitBreaker.shared.manualReset()
+                let cb = WebhookCircuitBreaker.shared
+                result = [
+                    "circuit_state": cb.state.rawValue,
+                    "message": "Circuit breaker reset to closed",
+                ] as [String: Any]
 
             case "event_log_stats":
                 result = HomeEventLogger.shared.logStats()

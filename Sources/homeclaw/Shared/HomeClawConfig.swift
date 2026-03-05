@@ -252,7 +252,7 @@ final class HomeClawConfig: @unchecked Sendable {
         }
     }
 
-    func toDict() -> [String: Any] {
+    @MainActor func toDict() -> [String: Any] {
         var dict: [String: Any] = [:]
         if let id = config.defaultHomeID {
             dict["default_home_id"] = id
@@ -270,6 +270,16 @@ final class HomeClawConfig: @unchecked Sendable {
             if let events = webhook.events, !events.isEmpty {
                 whDict["events"] = events
             }
+            // Include circuit breaker state for scriptable health checks
+            let cb = WebhookCircuitBreaker.shared
+            whDict["circuit"] = cb.state.rawValue
+            whDict["consecutive_failures"] = cb.consecutiveFailures
+            whDict["total_delivered"] = cb.totalDeliveredCount
+            whDict["total_dropped"] = cb.totalDroppedCount
+            if let status = cb.lastHTTPStatus { whDict["last_http_status"] = status }
+            let formatter = ISO8601DateFormatter()
+            if let d = cb.lastSuccessDate { whDict["last_delivery"] = formatter.string(from: d) }
+            if let d = cb.lastFailureDate { whDict["last_failure"] = formatter.string(from: d) }
             dict["webhook"] = whDict
         }
         dict["event_log"] = [

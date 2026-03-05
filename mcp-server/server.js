@@ -11,6 +11,7 @@ import {
   handleRooms,
   handleScenes,
   handleDeviceMap,
+  handleWebhook,
   handleConfig,
   handleEvents,
 } from '../lib/handlers/homekit.js';
@@ -45,6 +46,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'homekit_device_map':
         result = await handleDeviceMap(args);
+        break;
+      case 'homekit_webhook':
+        result = await handleWebhook(args);
         break;
       case 'homekit_config':
         result = await handleConfig(args);

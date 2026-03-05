@@ -29,8 +29,10 @@ final class WebhookCircuitBreaker {
     private(set) var consecutiveFailures = 0
     private(set) var softTripCount = 0
     private(set) var totalDroppedCount = 0
+    private(set) var totalDeliveredCount = 0
     private(set) var lastFailureDate: Date?
     private(set) var lastSuccessDate: Date?
+    private(set) var lastHTTPStatus: Int?
 
     private var softOpenedAt: Date?
     private var resumeTask: Task<Void, Never>?
@@ -74,10 +76,12 @@ final class WebhookCircuitBreaker {
 
     // MARK: - Recording
 
-    func recordSuccess() {
+    func recordSuccess(httpStatus: Int = 200) {
         consecutiveFailures = 0
         softTripCount = 0
+        totalDeliveredCount += 1
         lastSuccessDate = Date()
+        lastHTTPStatus = httpStatus
 
         if state == .softOpen {
             logger.info("Webhook succeeded during soft-open — resetting to closed")
@@ -85,9 +89,10 @@ final class WebhookCircuitBreaker {
         }
     }
 
-    func recordFailure() {
+    func recordFailure(httpStatus: Int? = nil) {
         consecutiveFailures += 1
         lastFailureDate = Date()
+        if let status = httpStatus { lastHTTPStatus = status }
 
         if consecutiveFailures >= Self.failureThreshold && state == .closed {
             tripSoft()
@@ -103,6 +108,8 @@ final class WebhookCircuitBreaker {
         consecutiveFailures = 0
         softTripCount = 0
         totalDroppedCount = 0
+        totalDeliveredCount = 0
+        lastHTTPStatus = nil
         softOpenedAt = nil
         transition(to: .closed)
         logger.info("Circuit breaker manually reset")

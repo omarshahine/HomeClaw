@@ -442,10 +442,11 @@ final class HomeEventLogger {
             do {
                 let (_, response) = try await URLSession.shared.data(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
-                    await WebhookCircuitBreaker.shared.recordFailure()
+                    await WebhookCircuitBreaker.shared.recordFailure(httpStatus: http.statusCode)
                     logger.warning("Webhook returned \(http.statusCode)")
                 } else {
-                    await WebhookCircuitBreaker.shared.recordSuccess()
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+                    await WebhookCircuitBreaker.shared.recordSuccess(httpStatus: status)
                 }
             } catch {
                 await WebhookCircuitBreaker.shared.recordFailure()
