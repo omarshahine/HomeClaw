@@ -320,15 +320,9 @@ final class HomeEventLogger {
         let characteristic = event["characteristic"] as? String
         let value = event["value"] as? String
 
-        // Skip battery-related characteristics — they are not actionable state changes
+        // Skip battery-related characteristics — they are not actionable state changes.
+        // Silently drop these without logging; they fire too frequently and flood webhooks.jsonl.
         if let characteristic, Self.webhookExcludedCharacteristics.contains(characteristic) {
-            let accessoryName = (event["accessory"] as? [String: Any])?["name"] as? String
-            WebhookEventLogger.shared.log(
-                outcome: .skipped,
-                accessoryName: accessoryName,
-                characteristic: characteristic,
-                reason: "battery_characteristic"
-            )
             return false
         }
         let scene = event["scene"] as? [String: Any]
