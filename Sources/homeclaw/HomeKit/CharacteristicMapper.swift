@@ -92,6 +92,78 @@ enum CharacteristicMapper {
         writableTypes.contains(characteristicType)
     }
 
+    // MARK: - Webhook Filtering
+
+    /// Characteristic names (snake_case) that represent commands/controls, not state changes.
+    /// These should be excluded from webhook trigger lists.
+    static let commandOnlyNames: Set<String> = [
+        "target_door_state",
+        "target_heating_cooling",
+        "target_temperature",
+        "target_humidity",
+        "target_position",
+        "target_fan_state",
+        "target_air_purifier_state",
+        "lock_target_state",
+        "identify",
+        "name",
+    ]
+
+    /// Returns true if a characteristic name (snake_case) represents observable state
+    /// suitable for webhook notifications, rather than a command/control.
+    static func isWebhookRelevant(_ name: String) -> Bool {
+        !commandOnlyNames.contains(name)
+    }
+
+    // MARK: - Display Names
+
+    /// User-friendly display names for characteristics shown in the settings UI.
+    private static let displayNames: [String: String] = [
+        "power": "Power",
+        "brightness": "Brightness",
+        "hue": "Hue",
+        "saturation": "Saturation",
+        "current_temperature": "Temperature",
+        "current_heating_cooling": "Heating/Cooling Mode",
+        "current_humidity": "Humidity",
+        "lock_current_state": "Lock Status",
+        "current_door_state": "Door Open/Closed",
+        "obstruction_detected": "Obstruction Detected",
+        "motion_detected": "Motion Detected",
+        "contact_state": "Contact Sensor",
+        "current_light_level": "Light Level",
+        "color_temperature": "Color Temperature",
+        "current_position": "Position",
+        "position_state": "Position State",
+        "outlet_in_use": "Outlet In Use",
+        "current_fan_state": "Fan State",
+        "rotation_direction": "Rotation Direction",
+        "rotation_speed": "Rotation Speed",
+        "swing_mode": "Swing Mode",
+        "active": "Active",
+        "air_purifier_state": "Air Purifier State",
+        "air_quality": "Air Quality",
+        "smoke_detected": "Smoke Detected",
+        "carbon_monoxide_detected": "CO Detected",
+        "carbon_dioxide_detected": "CO2 Detected",
+        "status_active": "Device Active",
+        "status_fault": "Fault Status",
+        "status_tampered": "Tampered",
+        "input_event": "Button Press",
+        "volume": "Volume",
+        "mute": "Muted",
+        "lock_physical_controls": "Child Lock",
+        "battery_level": "Battery Level",
+        "low_battery": "Low Battery",
+        "charging_state": "Charging State",
+        "temperature_units": "Temperature Units",
+    ]
+
+    /// Returns a user-friendly display name for a characteristic snake_case key.
+    static func displayName(for key: String) -> String {
+        displayNames[key] ?? key.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
     // MARK: - Category Names
 
     /// Returns a human-readable category name for an accessory category type.

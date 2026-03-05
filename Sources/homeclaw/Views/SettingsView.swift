@@ -1136,7 +1136,7 @@ private struct WebhookSettingsView: View {
 
     /// Human-readable display name for a characteristic key.
     private func characteristicDisplayName(_ key: String) -> String {
-        key.replacingOccurrences(of: "_", with: " ").capitalized
+        CharacteristicMapper.displayName(for: key)
     }
 
     // MARK: - Bindings
@@ -1307,7 +1307,7 @@ private struct WebhookSettingsView: View {
             let state = $0["state"] as? [String: String]
             let reachable = $0["reachable"] as? Bool ?? false
             let chars = (state ?? [:]).keys
-                .filter { !batteryChars.contains($0) }
+                .filter { !batteryChars.contains($0) && CharacteristicMapper.isWebhookRelevant($0) }
                 .sorted()
             return AccessoryItem(
                 id: $0["id"] as? String ?? UUID().uuidString,
