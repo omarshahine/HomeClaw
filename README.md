@@ -180,6 +180,13 @@ homeclaw-cli config --webhook-token "your-secret-token"
 homeclaw-cli config --webhook-enabled true
 homeclaw-cli config --webhook-test           # Send test event, show HTTP response
 homeclaw-cli config --webhook-reset          # Reset circuit breaker without toggling
+
+# Webhook triggers
+homeclaw-cli triggers                        # List all triggers
+homeclaw-cli triggers add --label "Front Door" --accessory-id "<uuid>"
+homeclaw-cli triggers add --label "Mailbox Open" --accessory-id "<uuid>" --characteristic contact_state
+homeclaw-cli triggers update "<trigger-id>" --wake-mode now
+homeclaw-cli triggers remove "<trigger-id>"
 ```
 
 ## Using with Claude Code
@@ -341,7 +348,7 @@ Five configuration tabs accessible from the menu bar:
 | **HomeKit** | Connection status, home list with accessory and room counts, active home selector |
 | **Devices** | Filter mode (all/allowlist), per-device toggles with category icons and state badges, grouped by room, search, bulk select/deselect |
 | **Event Log** | Enable/disable event logging, configure file rotation (size limit + backup count), view storage stats, purge logs, reveal in Finder |
-| **Webhook** | Configure webhook base URL + bearer token, select which scenes and accessories trigger webhooks with category icons and state badges. Per-trigger delivery mode (Batched/Immediate). Circuit breaker banners with Reset button, delivery stats, and last HTTP status. Test webhook connectivity from CLI. |
+| **Webhook** | Configure webhook base URL + bearer token, select which scenes and accessories trigger webhooks with category icons and state badges. Accessories with multiple characteristics (e.g., a sensor with both contact and motion) show individual toggles per characteristic; battery characteristics are excluded. Per-trigger delivery mode (Batched/Immediate). Circuit breaker banners with Reset button, delivery stats, and last HTTP status. Test webhook connectivity from CLI or manage triggers via `homeclaw-cli triggers`. |
 | **Integrations** | One-click install for Claude Desktop, Claude Code plugin detection, OpenClaw gateway setup |
 
 ### HomeKit
@@ -506,7 +513,16 @@ homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
 
 #### 3. Create Triggers
 
-In Settings > Webhook, check the accessories and scenes you want to fire webhooks. Only checked items generate events.
+In Settings > Webhook, check the accessories and scenes you want to fire webhooks. Only checked items generate events. Accessories with multiple characteristics (e.g., a sensor with both contact state and motion) show individual toggles so you can choose exactly which state changes fire webhooks. Battery-related characteristics are automatically excluded.
+
+Or manage triggers from the CLI:
+
+```bash
+homeclaw-cli triggers list
+homeclaw-cli triggers add --label "Front Door" --accessory-id "<uuid>"
+homeclaw-cli triggers add --label "Mailbox Open" --accessory-id "<uuid>" --characteristic contact_state
+homeclaw-cli triggers remove "<trigger-id>"
+```
 
 #### 4. Test
 
@@ -538,14 +554,12 @@ log show --predicate 'process == "HomeClaw" AND category == "webhook"' --last 5m
 All triggers default to **wake**. Upgrade individual triggers to **agent** mode for events that need AI analysis:
 
 ```bash
-# Via the HomeClaw socket (use nc or the CLI)
-echo '{"command":"update_trigger","args":{
-  "id":"<trigger-id>",
-  "action":"agent",
-  "agent_prompt":"The front door was unlocked. Check recent activity and alert me if unexpected.",
-  "agent_name":"HomeClaw Security",
-  "agent_deliver":true
-}}' | nc -U ~/Library/Group\ Containers/group.com.shahine.homeclaw/homeclaw.sock
+# Via the CLI
+homeclaw-cli triggers update "<trigger-id>" \
+  --action agent \
+  --agent-prompt "The front door was unlocked. Check recent activity and alert me if unexpected." \
+  --agent-name "HomeClaw Security" \
+  --agent-deliver true
 ```
 
 Set `agent_deliver: true` on security triggers -- this marks them as **critical**, meaning they bypass the circuit breaker and always attempt delivery even when the circuit is tripped.
@@ -577,6 +591,8 @@ HomeKit (HMAccessoryDelegate callback)
         │
         ▼
 HomeClaw event logger (writes to events.jsonl)
+        │
+        ├── Battery event? ──► Logged to disk only (never sent via webhook)
         │
         ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent
         │
@@ -689,7 +705,7 @@ Sources/
     Info.plist             NSPrincipalClass: MacOSController
   homeclaw-cli/            CLI tool (SPM executable + Xcode target)
     Commands/              list, get, set, search, scenes, status, config, device-map, events,
-                           delete-scene, import-scene, assign-rooms
+                           triggers, delete-scene, import-scene, assign-rooms
     SocketClient.swift     Direct socket communication
 Resources/                 Info.plist, entitlements, app icons
 scripts/
