@@ -201,6 +201,7 @@ enum DeviceMap {
             if let temp = state["current_temperature"] { parts.append(temp) }
             if let humidity = state["current_humidity"] { parts.append("\(humidity)% humidity") }
             if let motion = state["motion_detected"] { parts.append(motion == "true" ? "motion" : "clear") }
+            if let occupancy = state["occupancy_detected"] { parts.append(occupancy == "true" ? "occupied" : "clear") }
             if let contact = state["contact_state"] { parts.append(contact == "0" ? "closed" : "open") }
             return parts.isEmpty ? "unknown" : parts.joined(separator: ", ")
 

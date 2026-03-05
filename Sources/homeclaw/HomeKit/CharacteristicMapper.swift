@@ -51,6 +51,7 @@ enum CharacteristicMapper {
         HMCharacteristicTypeStatusFault: "status_fault",
         HMCharacteristicTypeStatusTampered: "status_tampered",
         HMCharacteristicTypeInputEvent: "input_event",
+        HMCharacteristicTypeOccupancyDetected: "occupancy_detected",
         HMCharacteristicTypeVolume: "volume",
         HMCharacteristicTypeMute: "mute",
         HMCharacteristicTypeLockPhysicalControls: "lock_physical_controls",
@@ -150,6 +151,7 @@ enum CharacteristicMapper {
         "status_fault": "Fault Status",
         "status_tampered": "Tampered",
         "input_event": "Button Press",
+        "occupancy_detected": "Presence Detected",
         "volume": "Volume",
         "mute": "Muted",
         "lock_physical_controls": "Child Lock",
@@ -373,6 +375,7 @@ enum CharacteristicMapper {
         case HMCharacteristicTypePowerState,
              HMCharacteristicTypeObstructionDetected,
              HMCharacteristicTypeMotionDetected,
+             HMCharacteristicTypeOccupancyDetected,
              HMCharacteristicTypeStatusActive,
              HMCharacteristicTypeOutletInUse,
              HMCharacteristicTypeMute:

@@ -435,6 +435,8 @@ Agent mode is configured via the socket for power users -- it routes to `/hooks/
 
 Paste this prompt into **OpenClaw** or **Claude Code** to configure webhooks end-to-end:
 
+> **Prerequisites:** HomeClaw must be installed and running (menu bar icon visible). If using Claude Code, the `homeclaw` plugin must be registered (`/plugin install homeclaw@homeclaw`). The `homeclaw-cli` binary must be in your PATH.
+>
 > Set up HomeClaw webhooks to push HomeKit events to OpenClaw:
 >
 > **1. OpenClaw gateway config:**
@@ -447,27 +449,41 @@ Paste this prompt into **OpenClaw** or **Claude Code** to configure webhooks end
 >   "internal": { "enabled": true, "entries": { "audit-logger": { "enabled": true } } }
 > }
 > ```
-> The `defaultSessionKey` routes wake events to a dedicated session (`hook:homeclaw`) so HomeKit noise doesn't pollute the main conversation.
-> Add the token to `~/.openclaw/.env`:
-> ```
-> HOMECLAW_WEBHOOK_TOKEN=<generate-a-secure-token>
+> The `defaultSessionKey` is what keeps HomeKit events in their own session (`hook:homeclaw`) -- don't omit it, or wake events will pollute the main conversation.
+>
+> Generate a secure token and add it to `~/.openclaw/.env`:
+> ```bash
+> # Generate a token
+> openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
+> # Add to .env (replace <token> with the output above)
+> echo 'HOMECLAW_WEBHOOK_TOKEN=<token>' >> ~/.openclaw/.env
 > ```
 > The gateway hot-reloads `hooks.enabled` and `hooks.token`. Restart with `openclaw gateway restart` if `.env` wasn't loaded at process start.
 >
 > **2. HomeClaw config:**
+> Open **HomeClaw Settings > Webhook**. Toggle Enable, enter `http://127.0.0.1:18789` as the base URL, and paste the same token from step 1.
+>
+> Alternatively, use the CLI (but note: **the CLI updates the running daemon only** -- it does not persist to `config.json`. To make the config survive app restarts, use the Settings UI or edit `~/Library/Application Support/HomeClaw/config.json` directly):
 > ```bash
 > homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
 >                     --webhook-token "<same-token-from-step-1>" \
 >                     --webhook-enabled true
 > ```
 >
-> **3. Create triggers:**
-> Open HomeClaw Settings > Webhook. Check the scenes and accessories you want to generate webhook events. Start with security accessories (locks, garage doors, leak sensors) and a few lights to verify.
+> **3. Test the pipe:**
+> Before creating triggers, verify the webhook connection works:
+> ```bash
+> homeclaw-cli config --webhook-test
+> ```
+> You should see an HTTP 200 response. If it fails, check the token matches and the OpenClaw gateway is running.
 >
-> **4. Test:**
+> **4. Create triggers:**
+> Open **HomeClaw Settings > Webhook**. Check the scenes and accessories you want to generate webhook events. **Trigger creation is GUI-only** -- the CLI can list and manage existing triggers but cannot create them through the settings UI. Start with security accessories (locks, garage doors, leak sensors) and a few lights to verify.
+>
+> **5. Test end-to-end:**
 > Toggle a light from the Home app. Verify a `System:` line appears in the OpenClaw TUI. Check `homeclaw-cli status --json` shows `circuit_state: closed` and a recent `last_success` timestamp.
 >
-> **5. (Optional) Upgrade security triggers to agent mode:**
+> **6. (Optional) Upgrade security triggers to agent mode:**
 > For door locks and leak sensors, upgrade the trigger to use `/hooks/agent` with `agent_deliver: true` so the AI analyzes the event and can alert you immediately.
 
 ### Manual Setup
@@ -511,7 +527,7 @@ Restart the gateway: `openclaw gateway restart`
 
 **Option A -- GUI:** Open Settings > Webhook. Toggle Enable, enter `http://127.0.0.1:18789` as the base URL, paste the same token from step 1. Click Generate if you need a new token (then update OpenClaw's `.env` to match).
 
-**Option B -- CLI:**
+**Option B -- CLI** (note: the CLI updates the running daemon only -- it does not persist to `config.json`. Use the Settings UI or edit the config file directly for persistent changes):
 
 ```bash
 homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
@@ -519,20 +535,23 @@ homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
                     --webhook-enabled true
 ```
 
-#### 3. Create Triggers
+#### 3. Test the Pipe
 
-In Settings > Webhook, check the accessories and scenes you want to fire webhooks. Only checked items generate events. Accessories with multiple characteristics (e.g., a sensor with both contact state and motion) show individual toggles so you can choose exactly which state changes fire webhooks. Battery-related characteristics are automatically excluded.
-
-Or manage triggers from the CLI:
+Before creating triggers, verify the webhook connection works:
 
 ```bash
-homeclaw-cli triggers list
-homeclaw-cli triggers add --label "Front Door" --accessory-id "<uuid>"
-homeclaw-cli triggers add --label "Mailbox Open" --accessory-id "<uuid>" --characteristic contact_state
-homeclaw-cli triggers remove "<trigger-id>"
+homeclaw-cli config --webhook-test
 ```
 
-#### 4. Test
+You should see an HTTP 200 response. If it fails, check the token matches and the OpenClaw gateway is running.
+
+#### 4. Create Triggers
+
+In **Settings > Webhook**, check the accessories and scenes you want to fire webhooks. Only checked items generate events. Accessories with multiple characteristics (e.g., a sensor with both contact state and motion) show individual toggles so you can choose exactly which state changes fire webhooks. Battery-related characteristics are automatically excluded.
+
+> **Note:** Trigger creation is GUI-only. The CLI can list and manage existing triggers (`homeclaw-cli triggers list`, `triggers remove`), but new triggers must be created in the HomeClaw app's Settings > Webhook tab.
+
+#### 5. Test End-to-End
 
 ```bash
 # Verify HomeClaw is connected and webhook is healthy
@@ -540,6 +559,9 @@ homeclaw-cli status
 
 # Toggle a light from the Home app, then check events
 homeclaw-cli events --since 5m
+
+# Check webhook delivery log
+homeclaw-cli webhook-log
 
 # Check HomeClaw delivery logs
 log show --predicate 'process == "HomeClaw" AND category == "webhook"' --last 5m --style compact
@@ -597,10 +619,12 @@ Home app / physical device / Siri
         ▼
 HomeKit (HMAccessoryDelegate callback)
         │
+        ├── Cache warmup? ──► Update cache only (no logging, no webhooks)
+        │
+        ├── Battery event? ──► Update cache only (silently dropped)
+        │
         ▼
 HomeClaw event logger (writes to events.jsonl)
-        │
-        ├── Battery event? ──► Logged to disk only (never sent via webhook)
         │
         ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent
         │

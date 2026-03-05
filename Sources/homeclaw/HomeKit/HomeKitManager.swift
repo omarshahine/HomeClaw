@@ -1107,6 +1107,21 @@ extension HomeKitManager: HMAccessoryDelegate {
             cache.setValues(for: accessoryID, state: state)
             cache.save()
 
+            // Skip battery events from logging — they fire every 30-60s and flood the log.
+            // Cache is already updated above so battery level is still queryable.
+            let batteryChars: Set<String> = ["battery_level", "low_battery"]
+            guard !batteryChars.contains(name) else {
+                scheduleMenuDataPush()
+                return
+            }
+
+            // During cache warmup, readValue() triggers this delegate for every characteristic.
+            // Those are initial reads, not real state changes — skip logging and webhooks.
+            guard !isWarmingCache else {
+                scheduleMenuDataPush()
+                return
+            }
+
             // Look up which home this accessory belongs to
             let home = findHome(for: accessory)
 

@@ -477,6 +477,9 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             if let motion = state["motion_detected"] {
                 return .statusOnly(motion == "true" ? "motion" : "clear")
             }
+            if let occupancy = state["occupancy_detected"] {
+                return .statusOnly(occupancy == "true" ? "occupied" : "clear")
+            }
             if let contact = state["contact_state"] {
                 return .statusOnly(contact == "0" ? "closed" : "open")
             }

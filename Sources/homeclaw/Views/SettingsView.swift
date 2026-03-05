@@ -1301,9 +1301,12 @@ private struct WebhookSettingsView: View {
 
         // Load accessories with home name and per-accessory characteristics
         let batteryChars: Set<String> = ["battery_level", "low_battery"]
+        let hiddenCategories: Set<String> = ["bridge", "range_extender"]
         let accList = await hk.listAllAccessories()
-        allAccessories = accList.map {
+        allAccessories = accList.compactMap {
             let category = $0["category"] as? String ?? "Other"
+            // Skip infrastructure devices — hubs, bridges, range extenders
+            guard !hiddenCategories.contains(category) else { return nil }
             let state = $0["state"] as? [String: String]
             let reachable = $0["reachable"] as? Bool ?? false
             let chars = (state ?? [:]).keys
