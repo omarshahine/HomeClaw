@@ -97,7 +97,7 @@ enum CharacteristicMapper {
 
     /// Characteristic names (snake_case) that represent commands/controls, not state changes.
     /// These should be excluded from webhook trigger lists.
-    static let commandOnlyNames: Set<String> = [
+    private static let commandOnlyNames: Set<String> = [
         "target_door_state",
         "target_heating_cooling",
         "target_temperature",
@@ -106,6 +106,7 @@ enum CharacteristicMapper {
         "target_fan_state",
         "target_air_purifier_state",
         "lock_target_state",
+        "temperature_units",
         "identify",
         "name",
     ]
