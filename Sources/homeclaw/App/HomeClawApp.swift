@@ -334,20 +334,20 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
 /// bring it to front without recreating the view hierarchy or re-centering.
 class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
-    private var hasConfiguredScene = false
 
     func scene(
         _ scene: UIScene, willConnectTo session: UISceneSession,
         options connectionOptions: UIScene.ConnectionOptions
     ) {
         guard let windowScene = scene as? UIWindowScene else { return }
-        HomeClawApp.settingsSession = session
 
         if HomeClawApp.settingsRequested {
             HomeClawApp.settingsRequested = false
+            HomeClawApp.settingsSession = session
             createAndShowWindow(in: windowScene)
         } else {
-            // Restored on launch — don't show, but keep session for reuse.
+            // Restored on launch — don't show or store session reference
+            // (it may be queued for destruction by didFinishLaunchingWithOptions).
             AppLogger.app.info("Settings scene restored on launch — suppressed")
         }
     }
@@ -355,6 +355,7 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         // Called when openSettings() reactivates an existing Settings session.
         guard let windowScene = scene as? UIWindowScene else { return }
+        HomeClawApp.settingsRequested = false
 
         if let window {
             window.isHidden = false
@@ -364,7 +365,6 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
 
         #if targetEnvironment(macCatalyst)
-        // Just bring to front — don't re-center (user may have moved the window)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             Self.activateApp()
             Self.orderWindowFront()
@@ -375,7 +375,6 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidDisconnect(_ scene: UIScene) {
         window = nil
-        hasConfiguredScene = false
         HomeClawApp.settingsSession = nil
     }
 
@@ -385,26 +384,16 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         w.makeKeyAndVisible()
         self.window = w
 
-        if !hasConfiguredScene {
-            hasConfiguredScene = true
-            #if targetEnvironment(macCatalyst)
-            windowScene.title = " "
-            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
-            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
+        #if targetEnvironment(macCatalyst)
+        windowScene.title = " "
+        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
+        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                Self.activateApp()
-                Self.centerWindow()
-            }
-            #endif
-        } else {
-            #if targetEnvironment(macCatalyst)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                Self.activateApp()
-                Self.orderWindowFront()
-            }
-            #endif
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            Self.activateApp()
+            Self.centerWindow()
         }
+        #endif
         AppLogger.app.info("Settings window opened")
     }
 
