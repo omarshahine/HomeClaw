@@ -354,17 +354,17 @@ final class SocketServer: @unchecked Sendable {
                 HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
                     enabled: enabled, url: url, token: token, events: events
                 )
-                // Reset circuit breaker when re-enabling webhook
+                // Full reset (including counters) when re-enabling webhook
                 if enabled && WebhookCircuitBreaker.shared.state == .hardOpen {
-                    WebhookCircuitBreaker.shared.manualReset()
+                    WebhookCircuitBreaker.shared.fullReset()
                 }
                 result = HomeClawConfig.shared.toDict()
 
             case "webhook_test":
                 guard let webhook = HomeClawConfig.shared.webhookConfig,
-                      webhook.enabled, !webhook.url.isEmpty
+                      !webhook.url.isEmpty
                 else {
-                    return encodeResponse(success: false, error: "Webhook is not configured or not enabled")
+                    return encodeResponse(success: false, error: "Webhook URL is not configured")
                 }
                 let baseURL = webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
                 guard let testURL = URL(string: baseURL + "/hooks/wake") else {

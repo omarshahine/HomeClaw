@@ -65,6 +65,9 @@ struct Status: ParsableCommand {
                 default:
                     if failures > 0 {
                         print("  Webhook:     \u{2705} Delivering (\(delivered) sent, \(failures) consecutive failures)")
+                        if let ts = lastFailure {
+                            print("               Last failure: \(ts)")
+                        }
                     } else {
                         print("  Webhook:     \u{2705} Delivering (\(delivered) sent, 0 failed)")
                     }

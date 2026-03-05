@@ -102,17 +102,25 @@ final class WebhookCircuitBreaker {
     // MARK: - Manual Reset
 
     /// Full reset, called when user re-enables webhook or toggles off→on.
+    /// Resets the circuit breaker state while preserving delivery history.
+    /// Called by --webhook-reset and the Settings UI Reset button.
     func manualReset() {
         resumeTask?.cancel()
         resumeTask = nil
         consecutiveFailures = 0
         softTripCount = 0
-        totalDroppedCount = 0
-        totalDeliveredCount = 0
-        lastHTTPStatus = nil
         softOpenedAt = nil
         transition(to: .closed)
         logger.info("Circuit breaker manually reset")
+    }
+
+    /// Full reset including delivery history. Called when webhook is toggled off→on.
+    func fullReset() {
+        manualReset()
+        totalDroppedCount = 0
+        totalDeliveredCount = 0
+        lastHTTPStatus = nil
+        logger.info("Circuit breaker fully reset (counters cleared)")
     }
 
     // MARK: - Computed

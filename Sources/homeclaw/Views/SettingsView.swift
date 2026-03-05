@@ -732,9 +732,9 @@ private struct WebhookSettingsView: View {
             HStack {
                 Toggle("Enable Webhook", isOn: $webhookEnabled)
                     .onChange(of: webhookEnabled) { _, newValue in
-                        // Reset circuit breaker only when toggling on (not during URL/token edits)
+                        // Full reset (including counters) when toggling on
                         if newValue && WebhookCircuitBreaker.shared.state == .hardOpen {
-                            WebhookCircuitBreaker.shared.manualReset()
+                            WebhookCircuitBreaker.shared.fullReset()
                         }
                         debouncedSaveWebhook()
                     }
