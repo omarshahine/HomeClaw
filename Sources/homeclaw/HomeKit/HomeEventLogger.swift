@@ -442,9 +442,10 @@ final class HomeEventLogger {
         }
 
         // Match characteristic + value (if specified)
-        let hasCharFilter = trigger.characteristic != nil && !trigger.characteristic!.isEmpty
-        if hasCharFilter {
-            guard characteristic?.localizedCaseInsensitiveCompare(trigger.characteristic!) == .orderedSame else {
+        var hasCharFilter = false
+        if let triggerChar = trigger.characteristic, !triggerChar.isEmpty {
+            hasCharFilter = true
+            guard characteristic?.localizedCaseInsensitiveCompare(triggerChar) == .orderedSame else {
                 return false
             }
         }
@@ -461,7 +462,7 @@ final class HomeEventLogger {
         // built-in light on a garage door opener). Triggers that specifically
         // want power events can set characteristic: "power".
         if !hasCharFilter, characteristic == "power" {
-            let isPrimary = serviceCategory.map { Self.powerPrimaryCategories.contains($0) } ?? false
+            let isPrimary = serviceCategory.map { Self.powerPrimaryCategories.contains($0) } ?? true
             if !isPrimary {
                 return false
             }
