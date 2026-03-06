@@ -356,54 +356,22 @@ final class HomeEventLogger {
             ) else { continue }
 
             matched = true
-            let action = trigger.action ?? "wake"
             let text = trigger.message ?? formatEventText(event)
             let isCritical = trigger.agentDeliver == true
 
             let accessoryName = (event["accessory"] as? [String: Any])?["name"] as? String
 
-            if action == "agent" {
-                guard let url = URL(string: baseURL + "/hooks/agent") else { continue }
-                let payload = buildAgentPayload(trigger: trigger, eventText: text)
-                sendWebhookPayload(
-                    payload, to: url, token: webhook.token, timeout: 30,
-                    isCritical: isCritical, trigger: trigger,
-                    accessoryName: accessoryName, characteristic: characteristic,
-                    value: value, previousValue: previousValue
-                )
-            } else {
-                guard let url = URL(string: baseURL + "/hooks/wake") else { continue }
-                // Default wake mode is "next-heartbeat" (batched) for ambient events.
-                // Security triggers should set wakeMode: "now" explicitly.
-                let mode = trigger.wakeMode ?? "next-heartbeat"
-                let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": mode]
-                sendWebhookPayload(
-                    payload, to: url, token: webhook.token,
-                    isCritical: isCritical, trigger: trigger,
-                    accessoryName: accessoryName, characteristic: characteristic,
-                    value: value, previousValue: previousValue
-                )
-            }
+            guard let url = URL(string: baseURL + config.effectiveEndpoint) else { continue }
+            let mode = trigger.wakeMode ?? "next-heartbeat"
+            let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": mode]
+            sendWebhookPayload(
+                payload, to: url, token: webhook.token,
+                isCritical: isCritical, trigger: trigger,
+                accessoryName: accessoryName, characteristic: characteristic,
+                value: value, previousValue: previousValue
+            )
         }
         return matched
-    }
-
-    /// Builds the JSON payload for an agent webhook call.
-    private func buildAgentPayload(trigger: HomeClawConfig.WebhookTrigger, eventText: String) -> [String: Any] {
-        var payload: [String: Any] = [
-            "message": trigger.agentPrompt ?? "[\(trigger.label)] \(eventText)",
-            "name": trigger.agentName ?? "HomeClaw",
-        ]
-        if let agentId = trigger.agentId, !agentId.isEmpty {
-            payload["agentId"] = agentId
-        }
-        if let wakeMode = trigger.wakeMode {
-            payload["wakeMode"] = wakeMode
-        }
-        if let deliver = trigger.agentDeliver {
-            payload["deliver"] = deliver
-        }
-        return payload
     }
 
     /// Service categories where `power` is the primary state — these should
@@ -411,6 +379,7 @@ final class HomeEventLogger {
     private static let powerPrimaryCategories: Set<String> = [
         "lightbulb", "outlet", "switch", "fan",
     ]
+
 
     private func matchesTrigger(
         _ trigger: HomeClawConfig.WebhookTrigger,

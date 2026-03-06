@@ -100,7 +100,7 @@ struct Config: ParsableCommand {
             var args: [String: String] = [:]
             if var url = webhookURL {
                 // Validate and auto-fix URLs with path suffixes that HomeClaw appends automatically
-                let suffixes = ["/hooks/wake", "/hooks/agent", "/hooks"]
+                let suffixes = ["/hooks/wake", "/hooks/agent", "/hooks/homeclaw", "/hooks"]
                 for suffix in suffixes where url.hasSuffix(suffix) {
                     let stripped = String(url.dropLast(suffix.count))
                     print("\u{26A0}\u{FE0F}  URL should be the base gateway URL (e.g. http://127.0.0.1:18789)")
@@ -216,8 +216,8 @@ struct Config: ParsableCommand {
             if whEnabled && !whURL.isEmpty {
                 print("  Webhook:       enabled")
                 print("    URL:         \(whURL)")
-                print("    Wake:        \(whURL)/hooks/wake")
-                print("    Agent:       \(whURL)/hooks/agent")
+                let endpoint = webhook["webhook_endpoint"] as? String ?? "/hooks/homeclaw"
+                print("    Endpoint:    \(whURL)\(endpoint)")
             } else {
                 print("  Webhook:       \(whEnabled ? "enabled" : "disabled")")
             }

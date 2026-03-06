@@ -375,7 +375,7 @@ final class SocketServer: @unchecked Sendable {
                     return encodeResponse(success: false, error: "Webhook URL is not configured")
                 }
                 let baseURL = webhook.url.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                guard let testURL = URL(string: baseURL + "/hooks/wake") else {
+                guard let testURL = URL(string: baseURL + HomeClawConfig.shared.effectiveEndpoint) else {
                     return encodeResponse(success: false, error: "Invalid webhook URL: \(baseURL)")
                 }
                 let testPayload: [String: Any] = [

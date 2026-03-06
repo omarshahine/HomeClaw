@@ -101,62 +101,93 @@ Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`,
 
 Use events to answer questions like "what changed recently?", "when was the front door last unlocked?", or "what scenes were triggered today?".
 
-## Webhook Setup
+## Webhook Integration
 
-HomeClaw pushes HomeKit events to [OpenClaw](https://docs.openclaw.ai/automation/webhook) via webhooks, enabling your AI assistant to react to real-world events — a door unlocking, a leak sensor triggering, or a scene activating.
+HomeClaw pushes HomeKit events to [OpenClaw](https://docs.openclaw.ai/automation/webhook) via webhooks, enabling a dedicated AI agent to observe, classify, and react to real-world events — a door unlocking, a leak sensor triggering, or a scene activating.
 
-### Two Endpoints: Wake vs Agent
+> **Known Issue:** OpenClaw 2026.3.1/2026.3.2 has a bug where `/hooks/wake` silently drops events ([#33271](https://github.com/openclaw/openclaw/issues/33271)). HomeClaw uses **mapped webhooks** (`/hooks/homeclaw`) which route through `hooks.mappings` and are **not affected**.
 
-| | `/hooks/wake` | `/hooks/agent` |
-|---|---|---|
-| **Purpose** | Notify the active session | Run an isolated AI agent turn |
-| **Payload** | `{"text": "...", "mode": "now"}` | `{"message": "...", "name": "...", "deliver": true}` |
-| **Session** | Dedicated `hook:homeclaw` session | Separate `hook:<uuid>` per event |
-| **Persistence** | Persistent session, accumulates events | Persisted in its own session |
-| **Timeout** | 10 seconds | 30 seconds (for LLM inference) |
-| **Use for** | Lights, scenes, temperature | Door unlocks, leak sensors, security |
+### Mapped Webhook Architecture
 
-**Default is wake.** Upgrade individual triggers to agent for events that need AI analysis.
+HomeClaw always POSTs to a single mapped endpoint: `/hooks/homeclaw` (configurable via `webhookEndpoint` in `config.json`). OpenClaw's `hooks.mappings` config resolves the `"homeclaw"` key and routes the event to the dedicated HomeClaw agent.
 
-**Security model:** Bearer token + network isolation. Both services on `127.0.0.1` (loopback) or within a Tailnet. Each request includes `X-Request-ID` (UUID) and `X-Event-Timestamp` (ISO8601) for idempotency.
+This means HomeClaw doesn't need to know about `agentId`, `channel`, `deliver`, `model`, or `sessionKey` — all routing intelligence lives in the OpenClaw config. HomeClaw just sends events; OpenClaw decides what to do with them.
+
+**Payload:** `{"text": "[label] event text", "mode": "now|next-heartbeat"}` with `Authorization: Bearer <token>`, `X-Request-ID` (UUID), and `X-Event-Timestamp` (ISO8601) headers.
 
 ### How Events Flow
 
 ```
 Home app / physical switch / Siri / manufacturer app
-        │
-        ▼
+        |
+        v
 HomeKit (HMAccessoryDelegate push notification)
-        │
-        ▼
+        |
+        v
 HomeClaw event logger (writes to events.jsonl)
-        │
-        ├── Battery event? ──► Logged to disk only (never sent via webhook)
-        │
-        ├── Trigger matches? ──► POST /hooks/wake or /hooks/agent
-        │
-        └── No trigger ──► Logged to disk only (no webhook sent)
+        |
+        +-- Battery event? --> Logged to disk only (never sent via webhook)
+        |
+        +-- Trigger matches? --> POST /hooks/homeclaw
+        |
+        +-- No trigger --> Logged to disk only (no webhook sent)
 
-        ▼  (trigger matched)
+        v  (trigger matched)
 OpenClaw gateway validates Bearer token
-        │
-        ├── /hooks/wake ──► hook:homeclaw session (dedicated, persistent)
-        └── /hooks/agent ──► Isolated agent turn in hook:<uuid> session
+        |
+        v
+hooks.mappings resolves "homeclaw"
+        |
+        v
+HomeClaw Agent (dedicated)
+        +-- Classifies: CRITICAL / NOTABLE / AMBIENT
+        +-- If CRITICAL/NOTABLE: a2a message to main agent (Lobster)
+        +-- If AMBIENT: log to agent memory only
 ```
 
 HomeClaw subscribes to HomeKit push notifications for all interesting characteristics. Events fire for changes from **any source** — Home app, physical switches, Siri, manufacturer apps, and the CLI.
 
-### End-to-End Setup
+### Dedicated HomeClaw Agent
 
-#### Step 1: Configure OpenClaw
+A dedicated HomeClaw agent receives all webhook events and acts as an intelligent filter between your smart home and your main AI assistant:
 
-Add the `hooks` block to `~/.openclaw/openclaw.json`:
+- **Event classification** — categorizes each event as CRITICAL (immediate alert), NOTABLE (worth reporting), or AMBIENT (log only)
+- **Pattern correlation** — correlates sequences of events (e.g., garage door + front door = arrival)
+- **Memory building** — learns your home's patterns over time (typical schedules, normal behaviors)
+- **Read-only** — the agent never controls devices, only observes and reports
+
+**Workspace files** live in `openclaw/agents/homeclaw/`:
+
+| File | Purpose |
+|------|---------|
+| `AGENTS.md` | Agent registration and capabilities |
+| `IDENTITY.md` | Agent persona and behavioral guidelines |
+| `SOUL.md` | Event classification rules and triage logic |
+| `TOOLS.md` | Available tools (read-only HomeKit queries via homeclaw-cli) |
+
+**Install the agent workspace:**
+
+```bash
+openclaw agents install homeclaw /path/to/openclaw/agents/homeclaw
+```
+
+### OpenClaw Configuration
+
+Add the `hooks` block with a `mappings` entry to `~/.openclaw/openclaw.json`:
 
 ```json
 "hooks": {
   "enabled": true,
   "token": "${HOMECLAW_WEBHOOK_TOKEN}",
-  "defaultSessionKey": "hook:homeclaw",
+  "mappings": {
+    "homeclaw": {
+      "agentId": "homeclaw",
+      "sessionKey": "hook:homeclaw",
+      "deliver": true,
+      "channel": "last",
+      "allowUnsafeExternalContent": true
+    }
+  },
   "internal": {
     "enabled": true,
     "entries": {
@@ -166,21 +197,47 @@ Add the `hooks` block to `~/.openclaw/openclaw.json`:
 }
 ```
 
-The `defaultSessionKey` routes all wake events to a dedicated `hook:homeclaw` session instead of the main session. This prevents HomeKit noise (every light toggle, motion sensor) from polluting the main conversation context. Agent triggers (`/hooks/agent`) still create isolated sessions.
+| Field | Purpose |
+|-------|---------|
+| `agentId` | Routes to the dedicated HomeClaw agent |
+| `sessionKey` | All events share a persistent `hook:homeclaw` session |
+| `deliver` | Agent responses are delivered to a messaging channel |
+| `channel` | `"last"` uses the most recent active channel |
+| `allowUnsafeExternalContent` | Permits HomeKit event text in agent prompts |
+
+The `mappings` approach replaces the old `defaultSessionKey` + per-trigger `action` model. All routing decisions live in OpenClaw config, not in HomeClaw triggers.
+
+### End-to-End Setup
+
+#### Step 1: Install the Agent Workspace
+
+```bash
+openclaw agents install homeclaw /path/to/openclaw/agents/homeclaw
+```
+
+Verify the agent is registered:
+
+```bash
+openclaw agents list
+```
+
+#### Step 2: Configure OpenClaw Hooks + Mappings
+
+Add the `hooks` block (shown above) to `~/.openclaw/openclaw.json`.
 
 Generate a token and add it to `~/.openclaw/.env`:
 
 ```bash
-# Generate
+# Generate a secure token
 openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
 
 # Add to .env
 echo 'HOMECLAW_WEBHOOK_TOKEN=<generated-token>' >> ~/.openclaw/.env
 ```
 
-The gateway hot-reloads `hooks.enabled` and `hooks.token`. Restart with `openclaw gateway restart` if `.env` wasn't loaded at process start.
+Restart the gateway: `openclaw gateway restart`
 
-#### Step 2: Configure HomeClaw
+#### Step 3: Configure HomeClaw Webhook
 
 ```bash
 homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
@@ -188,11 +245,13 @@ homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
                     --webhook-enabled true
 ```
 
-Or use HomeClaw Settings > Webhook (the Generate button creates a token — copy it to OpenClaw's `.env`).
+Or use HomeClaw Settings > Webhook. Toggle Enable, enter the base URL, and paste the token.
 
-#### Step 3: Create Triggers
+The `webhookEndpoint` defaults to `/hooks/homeclaw`. HomeClaw appends this to your base URL automatically.
 
-Open HomeClaw Settings > Webhook. Check the scenes and accessories you want to fire webhooks. Start with security accessories (locks, garage doors) and a few lights to verify.
+#### Step 4: Create Triggers
+
+Open HomeClaw Settings > Webhook. Check the scenes and accessories you want to fire webhooks. Start with security accessories (locks, garage doors, leak sensors) and a few lights to verify.
 
 Triggers can also be managed via the CLI:
 
@@ -206,7 +265,7 @@ homeclaw-cli triggers add --label "Garage Door" --accessory-id "<uuid>"
 # Add a trigger for a specific characteristic only
 homeclaw-cli triggers add --label "Mailbox Open" --accessory-id "<uuid>" --characteristic contact_state
 
-# Update a trigger
+# Update a trigger's delivery mode
 homeclaw-cli triggers update "<trigger-id>" --wake-mode now
 
 # Remove a trigger
@@ -215,7 +274,7 @@ homeclaw-cli triggers remove "<trigger-id>"
 
 > **Note:** Battery-related characteristics (`battery_level`, `low_battery`) are automatically excluded from webhooks. They are still logged to the event log and cached for status queries, but never fire webhook triggers.
 
-#### Step 4: Verify
+#### Step 5: Verify
 
 ```bash
 # Check webhook health
@@ -228,59 +287,70 @@ homeclaw-cli events --since 5m
 log show --predicate 'process == "HomeClaw" AND category == "webhook"' --last 5m --style compact
 ```
 
-Look for a `System:` line in the OpenClaw TUI.
+Look for a `System:` line in the OpenClaw TUI, or check that the HomeClaw agent session (`hook:homeclaw`) shows incoming events.
 
-### Upgrading Triggers to Agent Mode
+### Scenario Cookbook
 
-The Settings UI creates triggers with **wake** behavior. Upgrade specific triggers to **agent** mode via the CLI for smarter event handling:
+#### Arrival Detection (Garage + Front Door Sequence)
 
-```bash
-# Upgrade an existing trigger to agent mode
-homeclaw-cli triggers update "<trigger-uuid>" \
-  --action agent \
-  --agent-prompt "The front door was unlocked. Check recent activity and alert me if unexpected." \
-  --agent-name "HomeClaw Security" \
-  --agent-deliver true
-```
-
-Or create an agent trigger directly:
+Create triggers for both the garage door and front door. The HomeClaw agent correlates the sequence — garage opens, then front door unlocks within minutes — and reports an arrival to the main agent.
 
 ```bash
-homeclaw-cli triggers add \
-  --label "Front door unlocked" \
-  --accessory-id "<lock-uuid>" \
-  --characteristic lock_target_state \
-  --value unlocked \
-  --action agent \
-  --agent-prompt "The front door was unlocked. Analyze recent activity and determine if this is expected." \
-  --agent-name "HomeClaw Security" \
-  --agent-deliver
+homeclaw-cli triggers add --label "Garage Door" --accessory-id "<garage-uuid>"
+homeclaw-cli triggers add --label "Front Door" --accessory-id "<lock-uuid>" --characteristic lock_current_state
 ```
 
-**Tip:** Set `agent_deliver: true` on security triggers. This marks them as **critical** — they bypass the circuit breaker and always attempt delivery, even when the circuit is tripped from other failures.
+The agent sees both events in its persistent session and recognizes the arrival pattern.
 
-### Common Trigger Patterns
+#### Suspicious Unlock Alert (Door Unlocked at 2am)
 
-| Scenario | Action | wake_mode | agent_deliver | Why |
-|----------|--------|-----------|---------------|-----|
-| Door unlocked | `agent` | — | `true` | Security — AI analyzes, bypasses circuit breaker |
-| Garage door opened | `agent` | — | `true` | Security — AI analyzes, bypasses circuit breaker |
-| Leak sensor triggered | `agent` | — | `true` | Critical — AI should alert immediately |
-| Scene "Good Night" | `wake` | `now` | — | Informational — notify immediately |
-| Light toggled | `wake` | (default) | — | Ambient — batched with next heartbeat |
-| Temperature changed | `wake` | (default) | — | Ambient — batched with next heartbeat |
-| Motion detected | `wake` | (default) | — | Awareness — batched, no AI analysis |
+The HomeClaw agent classifies door unlocks by time of day. An unlock at 2am is CRITICAL; the same unlock at 6pm is NOTABLE. No special trigger config needed — the agent's classification logic handles it.
 
-### Tips
+```bash
+homeclaw-cli triggers add --label "Front Door" --accessory-id "<lock-uuid>" --characteristic lock_current_state --value unlocked
+```
 
-- **Default wake mode is `next-heartbeat`.** Wake triggers batch events into the next heartbeat cycle. Set `wake_mode: "now"` explicitly on triggers that need immediate delivery (e.g., scene triggers where you want instant feedback).
-- **Start with wake, promote to agent.** Get wake working first, then selectively upgrade security triggers. Agent calls are heavier (30s timeout, separate session, LLM inference cost).
-- **Use `agent_deliver: true` sparingly.** It marks triggers as circuit-breaker-critical. Reserve it for events that must never be silently dropped (door unlocks, leaks). Overusing it defeats the circuit breaker's protection.
-- **Triggers are additive.** Multiple triggers can match the same event (e.g., an accessory trigger + a characteristic trigger). Each matched trigger fires its own webhook.
-- **No catch-all.** Only events matching a configured trigger fire webhooks. Untriggered events are logged to disk but not pushed to the gateway.
-- **Scene triggers match by name or UUID.** Use scene UUID for precision, scene name for convenience (case-insensitive).
-- **Characteristic + value filtering.** A trigger with `characteristic: "lock_current_state"` and `value: "unlocked"` only fires on unlock, not on lock. Omit `value` to fire on any state change.
-- **Check `homeclaw-cli status --json`** for webhook health: `circuit_state`, `last_success`, `last_failure`, `total_dropped`.
+#### Water Leak Emergency
+
+Leak sensors should always fire immediately. The agent classifies any leak event as CRITICAL and sends an a2a alert to the main agent right away.
+
+```bash
+homeclaw-cli triggers add --label "Kitchen Leak" --accessory-id "<leak-uuid>" --characteristic leak_detected --wake-mode now
+```
+
+#### Mailbox Opened
+
+A contact sensor on the mailbox fires when opened. The agent classifies this as NOTABLE and reports it.
+
+```bash
+homeclaw-cli triggers add --label "Mailbox" --accessory-id "<mailbox-uuid>" --characteristic contact_state
+```
+
+#### Bedtime Pattern (Good Night Scene)
+
+Scene triggers capture when someone runs the Good Night scene. The agent logs it as AMBIENT and uses it to learn bedtime patterns over time.
+
+```bash
+homeclaw-cli triggers add --label "Good Night" --scene-name "Good Night" --wake-mode now
+```
+
+#### Daily Activity Summary
+
+The agent builds a daily summary from all events in its session. No special trigger config — just ensure your key accessories have triggers enabled. The agent can be prompted to summarize via a2a from the main agent.
+
+### Trigger Fields Reference
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `wake_mode` | string | `"next-heartbeat"` | `"now"` (immediate) or `"next-heartbeat"` (batched, default) |
+| `label` | string | — | Human-readable name shown in webhook payload |
+| `accessory_id` | string | — | UUID of the accessory to watch |
+| `characteristic` | string | — | Specific characteristic to filter (omit for all) |
+| `value` | string | — | Only fire when characteristic equals this value |
+| `scene_name` | string | — | Scene name to watch (alternative to accessory triggers) |
+| `critical` | bool | `false` | Bypasses circuit breaker when `true` |
+
+> **Deprecated fields (removed):** `action`, `agent_id`, `agent_prompt`, `agent_name`, `agent_deliver`. These are no longer needed — all routing is handled by OpenClaw's `hooks.mappings` config.
 
 ### Circuit Breaker
 
@@ -288,20 +358,21 @@ homeclaw-cli triggers add \
 |-------|-------|----------|----------|
 | Normal | — | All webhooks delivered | — |
 | Soft Open | 5 failures | Non-critical paused 5 min | Auto-resumes |
-| Hard Open | 3 soft trips | All non-critical stopped | Toggle webhook off→on in Settings |
+| Hard Open | 3 soft trips | All non-critical stopped | Toggle webhook off/on in Settings |
 
-Critical triggers (`agent_deliver: true`) always bypass.
+Critical triggers (`critical: true`) always bypass the circuit breaker.
 
-### Trigger Fields Reference
+### Tips
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `action` | string | `"wake"` | `"wake"` or `"agent"` — which endpoint receives the event |
-| `wake_mode` | string | `"next-heartbeat"` | `"now"` (immediate) or `"next-heartbeat"` (batched, default) |
-| `agent_prompt` | string | event text | Custom prompt for the agent (falls back to formatted event text) |
-| `agent_id` | string | — | Route to a specific OpenClaw agent by ID |
-| `agent_name` | string | `"HomeClaw"` | Human label shown in agent responses |
-| `agent_deliver` | bool | — | Send the agent's response to a messaging channel |
+- **Default delivery mode is `next-heartbeat`.** Events batch into the next heartbeat cycle. Set `wake_mode: "now"` on triggers that need immediate delivery (leak sensors, door locks, scene triggers).
+- **Start small.** Enable triggers for a few key accessories first. Verify events appear in the HomeClaw agent session before adding more.
+- **Use `critical: true` sparingly.** It bypasses the circuit breaker. Reserve it for events that must never be silently dropped (leaks, security events). Overusing it defeats the circuit breaker's protection.
+- **Triggers are additive.** Multiple triggers can match the same event (e.g., an accessory trigger + a characteristic trigger). Each matched trigger fires its own webhook.
+- **No catch-all.** Only events matching a configured trigger fire webhooks. Untriggered events are logged to disk but not pushed.
+- **Scene triggers match by name or UUID.** Use scene UUID for precision, scene name for convenience (case-insensitive).
+- **Characteristic + value filtering.** A trigger with `characteristic: "lock_current_state"` and `value: "unlocked"` only fires on unlock, not on lock. Omit `value` to fire on any state change.
+- **Check `homeclaw-cli status --json`** for webhook health: `circuit_state`, `last_success`, `last_failure`, `total_dropped`.
+- **The agent is read-only.** It observes and reports but never controls devices. All device control goes through the main agent or direct CLI commands.
 
 ## Agent-Friendly CLI
 

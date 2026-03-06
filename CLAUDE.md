@@ -144,7 +144,10 @@ Xcode automatic signing creates the required provisioning profile for the develo
 |---------|----------|---------|
 | Device filter | `~/Library/Application Support/HomeClaw/config.json` | `"accessoryFilterMode": "all"` |
 | Default home | `~/Library/Application Support/HomeClaw/config.json` | First home |
+| Webhook endpoint | `config.json` → `webhook.webhookEndpoint` | `"/hooks/homeclaw"` |
 | Socket path | App Group container or `/tmp/homeclaw.sock` | Auto-detected |
+
+**Mapped webhooks:** HomeClaw uses mapped webhooks (`/hooks/homeclaw`) instead of direct `/hooks/wake` or `/hooks/agent` calls. OpenClaw's `hooks.mappings` config routes events to a dedicated HomeClaw agent. See [openclaw/openclaw#33271](https://github.com/openclaw/openclaw/issues/33271) for the `/hooks/wake` bug that motivated this change.
 
 ## MCP Tools
 

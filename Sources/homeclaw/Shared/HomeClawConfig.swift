@@ -18,6 +18,7 @@ final class HomeClawConfig: @unchecked Sendable {
         var url: String
         var token: String
         var events: [String]?  // nil = all events; or subset of event type strings
+        var webhookEndpoint: String?  // default: "/hooks/homeclaw"
     }
 
     /// A webhook trigger rule. When an event matches the conditions, a webhook is fired.
@@ -107,7 +108,7 @@ final class HomeClawConfig: @unchecked Sendable {
         // Migrate v1 → v2: strip /hooks/wake or /hooks/agent suffix from webhook URL
         // so the stored URL is a base URL and endpoint paths are constructed in code.
         if (config.configVersion ?? 1) < 2, var webhook = config.webhook, !webhook.url.isEmpty {
-            let suffixes = ["/hooks/wake", "/hooks/agent"]
+            let suffixes = ["/hooks/wake", "/hooks/agent", "/hooks/homeclaw"]
             for suffix in suffixes where webhook.url.hasSuffix(suffix) {
                 webhook.url = String(webhook.url.dropLast(suffix.count))
                 break
@@ -166,6 +167,11 @@ final class HomeClawConfig: @unchecked Sendable {
 
     /// Whether temperatures should display in Fahrenheit.
     var useFahrenheit: Bool { temperatureUnit == "F" }
+
+    /// The effective webhook endpoint path (defaults to /hooks/homeclaw).
+    var effectiveEndpoint: String {
+        webhookConfig?.webhookEndpoint ?? "/hooks/homeclaw"
+    }
 
     /// Webhook configuration for pushing events to OpenClaw or other services.
     var webhookConfig: WebhookConfig? {
@@ -267,6 +273,7 @@ final class HomeClawConfig: @unchecked Sendable {
                 "enabled": webhook.enabled,
                 "url": webhook.url,
             ]
+            whDict["webhook_endpoint"] = effectiveEndpoint
             if let events = webhook.events, !events.isEmpty {
                 whDict["events"] = events
             }

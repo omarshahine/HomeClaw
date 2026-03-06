@@ -884,9 +884,8 @@ private struct WebhookSettingsView: View {
                 Text("Check an accessory or scene below to send a webhook when it changes.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                (Text("By default, events are batched with the next heartbeat. Tap ")
-                    + Text(Image(systemName: "bolt.fill")).foregroundColor(.orange)
-                    + Text(" to deliver immediately."))
+                (Text(Image(systemName: "bolt.fill")).foregroundColor(.orange)
+                    + Text(" = immediate delivery."))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("[OpenClaw webhook docs](https://docs.openclaw.ai/automation/webhook)")
@@ -1318,7 +1317,7 @@ private struct WebhookSettingsView: View {
             }
         )
 
-        // Load per-trigger wake modes keyed by scene ID, accessory ID, or compound key
+        // Load per-trigger wake modes
         for trigger in triggers {
             let mode = trigger.wakeMode ?? "next-heartbeat"
             if let sceneID = trigger.sceneID, !sceneID.isEmpty {
@@ -1408,12 +1407,12 @@ private struct WebhookSettingsView: View {
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            let existingEvents = HomeClawConfig.shared.webhookConfig?.events
+            let existing = HomeClawConfig.shared.webhookConfig
             HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
                 enabled: webhookEnabled,
                 url: webhookURL,
                 token: webhookToken,
-                events: existingEvents
+                events: existing?.events
             )
         }
     }

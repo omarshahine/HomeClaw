@@ -130,6 +130,9 @@ targets:
             cp "${OPENCLAW}/package.json" "${DEST}/"
             cp -R "${OPENCLAW}/src" "${DEST}/src"
             cp -R "${OPENCLAW}/skills" "${DEST}/skills"
+            if [ -d "${OPENCLAW}/agents" ]; then
+              cp -R "${OPENCLAW}/agents" "${DEST}/agents"
+            fi
           fi
         basedOnDependencyAnalysis: false
 
