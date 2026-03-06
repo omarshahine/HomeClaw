@@ -37,12 +37,10 @@ struct AboutSettingsView: View {
         VStack(spacing: 20) {
             Spacer()
 
-            if let uiImage = UIImage(named: "HomeClaw") {
-                Image(uiImage: uiImage)
-                    .resizable()
-                    .frame(width: 128, height: 128)
-                    .cornerRadius(24)
-            }
+            Image("HomeClaw")
+                .resizable()
+                .frame(width: 128, height: 128)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
 
             Text(AppConfig.appName)
                 .font(.largeTitle)
