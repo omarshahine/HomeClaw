@@ -280,6 +280,12 @@ enum CharacteristicMapper {
         "switch", "programmable_switch", "sensor",
     ]
 
+    /// Returns the service category for a single HMService type string (e.g. "lightbulb", "garage_door").
+    /// Returns nil for unknown or supplementary service types.
+    static func serviceCategory(for serviceType: String) -> String? {
+        serviceCategoryMap[serviceType]
+    }
+
     /// Returns the best category name for an accessory, falling back to service-based
     /// inference when the manufacturer-provided category is generic ("other").
     ///

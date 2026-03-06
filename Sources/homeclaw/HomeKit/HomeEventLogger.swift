@@ -54,6 +54,7 @@ final class HomeEventLogger {
         accessoryName: String,
         room: String?,
         service: String,
+        serviceType: String? = nil,
         characteristic: String,
         value: String,
         previousValue: String?,
@@ -72,6 +73,9 @@ final class HomeEventLogger {
             "characteristic": characteristic,
             "value": value,
         ]
+        if let serviceType {
+            event["service_type"] = serviceType
+        }
         if let previousValue {
             event["previous_value"] = previousValue
         }
@@ -336,6 +340,7 @@ final class HomeEventLogger {
         let scene = event["scene"] as? [String: Any]
         let sceneID = scene?["id"] as? String
         let sceneName = scene?["name"] as? String
+        let serviceCategory = event["service_type"] as? String
 
         var matched = false
         for trigger in triggers where trigger.enabled {
@@ -346,7 +351,8 @@ final class HomeEventLogger {
                 characteristic: characteristic,
                 value: value,
                 sceneID: sceneID,
-                sceneName: sceneName
+                sceneName: sceneName,
+                serviceCategory: serviceCategory
             ) else { continue }
 
             matched = true
@@ -400,6 +406,12 @@ final class HomeEventLogger {
         return payload
     }
 
+    /// Service categories where `power` is the primary state — these should
+    /// match `power` events even without an explicit characteristic filter.
+    private static let powerPrimaryCategories: Set<String> = [
+        "lightbulb", "outlet", "switch", "fan",
+    ]
+
     private func matchesTrigger(
         _ trigger: HomeClawConfig.WebhookTrigger,
         eventType: String,
@@ -407,7 +419,8 @@ final class HomeEventLogger {
         characteristic: String?,
         value: String?,
         sceneID: String?,
-        sceneName: String?
+        sceneName: String?,
+        serviceCategory: String? = nil
     ) -> Bool {
         // Scene trigger match
         if let triggerSceneID = trigger.sceneID, !triggerSceneID.isEmpty {
@@ -429,8 +442,9 @@ final class HomeEventLogger {
         }
 
         // Match characteristic + value (if specified)
-        if let triggerChar = trigger.characteristic, !triggerChar.isEmpty {
-            guard characteristic?.localizedCaseInsensitiveCompare(triggerChar) == .orderedSame else {
+        let hasCharFilter = trigger.characteristic != nil && !trigger.characteristic!.isEmpty
+        if hasCharFilter {
+            guard characteristic?.localizedCaseInsensitiveCompare(trigger.characteristic!) == .orderedSame else {
                 return false
             }
         }
@@ -440,9 +454,22 @@ final class HomeEventLogger {
             }
         }
 
+        // When a trigger has no characteristic filter, skip `power` events
+        // unless the service category is one where power IS the primary state
+        // (lights, outlets, switches, fans). For other service types (garage
+        // doors, locks, sensors), `power` is a secondary indicator (e.g. the
+        // built-in light on a garage door opener). Triggers that specifically
+        // want power events can set characteristic: "power".
+        if !hasCharFilter, characteristic == "power" {
+            let isPrimary = serviceCategory.map { Self.powerPrimaryCategories.contains($0) } ?? false
+            if !isPrimary {
+                return false
+            }
+        }
+
         // Must have at least one match condition
         let hasCondition = (trigger.accessoryID != nil && !trigger.accessoryID!.isEmpty)
-            || (trigger.characteristic != nil && !trigger.characteristic!.isEmpty)
+            || hasCharFilter
             || (trigger.value != nil && !trigger.value!.isEmpty)
         return hasCondition
     }

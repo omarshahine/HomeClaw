@@ -1133,12 +1133,16 @@ extension HomeKitManager: HMAccessoryDelegate {
             // Look up which home this accessory belongs to
             let home = findHome(for: accessory)
 
-            // Log the event
+            // Log the event — include the service category so trigger matching
+            // can distinguish primary vs secondary characteristics (e.g. `power`
+            // on a lightbulb service vs. a garage door opener service).
+            let serviceCategory = CharacteristicMapper.serviceCategory(for: service.serviceType)
             HomeEventLogger.shared.logCharacteristicChange(
                 accessoryID: accessoryID,
                 accessoryName: accessory.name,
                 room: accessory.room?.name,
                 service: service.name,
+                serviceType: serviceCategory,
                 characteristic: name,
                 value: value,
                 previousValue: previousValue,
