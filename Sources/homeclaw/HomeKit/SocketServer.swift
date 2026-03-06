@@ -359,8 +359,10 @@ final class SocketServer: @unchecked Sendable {
                 let url = (args["url"] as? String) ?? existing?.url ?? ""
                 let token = (args["token"] as? String) ?? existing?.token ?? ""
                 let events = (args["events"] as? [String]) ?? existing?.events
+                let endpoint = (args["webhook_endpoint"] as? String) ?? existing?.webhookEndpoint
                 HomeClawConfig.shared.webhookConfig = HomeClawConfig.WebhookConfig(
-                    enabled: enabled, url: url, token: token, events: events
+                    enabled: enabled, url: url, token: token, events: events,
+                    webhookEndpoint: endpoint
                 )
                 // Full reset (including counters) when re-enabling webhook
                 if enabled && WebhookCircuitBreaker.shared.state == .hardOpen {

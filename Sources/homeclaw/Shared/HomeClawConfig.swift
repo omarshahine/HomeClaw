@@ -46,15 +46,16 @@ final class HomeClawConfig: @unchecked Sendable {
         // Optional custom webhook message (falls back to auto-generated)
         var message: String?
 
-        // Routing — controls which OpenClaw endpoint receives the event
-        var action: String?            // "wake" (default) or "agent"
-        var wakeMode: String?          // "now" (default) or "next-heartbeat"
+        // Delivery options
+        var action: String?            // Deprecated (mapped webhooks handle routing)
+        var wakeMode: String?          // "now" or "next-heartbeat" (default)
 
-        // Agent-specific fields (only used when action == "agent")
-        var agentPrompt: String?       // Prompt for the agent (falls back to event text)
-        var agentId: String?           // Route to specific OpenClaw agent
-        var agentName: String?         // Human label (default: "HomeClaw")
-        var agentDeliver: Bool?        // Send agent response to messaging channel
+        // Legacy agent fields — retained for config compat, not used in delivery.
+        // Routing is now handled by OpenClaw's hooks.mappings config.
+        var agentPrompt: String?
+        var agentId: String?
+        var agentName: String?
+        var agentDeliver: Bool?        // Still used: marks trigger as critical for circuit breaker
 
         /// Creates a new trigger with a generated ID.
         static func create(label: String) -> WebhookTrigger {
@@ -107,16 +108,15 @@ final class HomeClawConfig: @unchecked Sendable {
 
         // Migrate v1 → v2: strip /hooks/wake or /hooks/agent suffix from webhook URL
         // so the stored URL is a base URL and endpoint paths are constructed in code.
-        if (config.configVersion ?? 1) < 2, var webhook = config.webhook, !webhook.url.isEmpty {
-            let suffixes = ["/hooks/wake", "/hooks/agent", "/hooks/homeclaw"]
-            for suffix in suffixes where webhook.url.hasSuffix(suffix) {
-                webhook.url = String(webhook.url.dropLast(suffix.count))
-                break
+        if (config.configVersion ?? 1) < 2 {
+            if var webhook = config.webhook, !webhook.url.isEmpty {
+                let suffixes = ["/hooks/wake", "/hooks/agent", "/hooks/homeclaw"]
+                for suffix in suffixes where webhook.url.hasSuffix(suffix) {
+                    webhook.url = String(webhook.url.dropLast(suffix.count))
+                    break
+                }
+                config.webhook = webhook
             }
-            config.webhook = webhook
-            config.configVersion = 2
-            save()
-        } else if config.configVersion == nil {
             config.configVersion = 2
             save()
         }
