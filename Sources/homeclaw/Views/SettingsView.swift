@@ -22,8 +22,54 @@ struct SettingsView: View {
                 IntegrationsSettingsView()
                 #endif
             }
+            Tab("About", systemImage: "info.circle") {
+                AboutSettingsView()
+            }
         }
         .tabViewStyle(.sidebarAdaptable)
+    }
+}
+
+// MARK: - About
+
+struct AboutSettingsView: View {
+    var body: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            if let uiImage = UIImage(named: "HomeClaw") {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .frame(width: 128, height: 128)
+                    .cornerRadius(24)
+            }
+
+            Text(AppConfig.appName)
+                .font(.largeTitle)
+                .fontWeight(.bold)
+
+            Text("Version \(AppConfig.version) (\(AppConfig.build))")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 12) {
+                Link(destination: URL(string: "https://github.com/omarshahine/HomeClaw")!) {
+                    Label("GitHub Repository", systemImage: "link")
+                }
+                Link(destination: URL(string: "https://github.com/omarshahine/HomeClaw/issues")!) {
+                    Label("Report an Issue", systemImage: "exclamationmark.bubble")
+                }
+            }
+            .font(.body)
+
+            Spacer()
+
+            Text("\u{00A9} Omar Shahine")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
