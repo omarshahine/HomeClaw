@@ -597,7 +597,7 @@ homeclaw-cli config --webhook-test
 
 You should see an HTTP 200 response. If it fails, check the token matches and the OpenClaw gateway is running.
 
-> **Note:** Test events don't update the delivery stats (total_delivered, last_http_status). Use a real event trigger to verify stats update.
+> **Note:** Test events update `total_delivered` and `last_http_status` in the circuit breaker stats. After running `--webhook-test`, check `homeclaw-cli config --json` to confirm the values were updated.
 
 #### 5. Create Triggers
 
