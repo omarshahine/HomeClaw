@@ -441,20 +441,21 @@ In **Settings > Webhook**, each enabled trigger shows a **Batched / Immediate** 
 
 ### Setup with AI Assistant
 
-Paste this prompt into **OpenClaw** or **Claude Code** to configure webhooks end-to-end:
+Paste this prompt into **OpenClaw** or **Claude Code** to configure webhooks end-to-end. The prompt is idempotent -- it verifies each step and skips anything already configured:
 
 > **Prerequisites:** HomeClaw must be installed and running (menu bar icon visible). If using Claude Code, the `homeclaw` plugin must be registered (`/plugin install homeclaw@homeclaw`). The `homeclaw-cli` binary must be in your PATH.
 >
-> Set up HomeClaw mapped webhooks to push HomeKit events to a dedicated HomeClaw agent on OpenClaw:
+> Set up HomeClaw mapped webhooks with a dedicated HomeClaw agent. **Verify each step first -- skip any that are already configured.**
 >
-> **1. Install the HomeClaw agent workspace:**
-> ```bash
-> openclaw agents install homeclaw /path/to/openclaw/agents/homeclaw
-> openclaw agents list   # verify it appears
-> ```
+> **1. HomeClaw agent workspace:**
+> - Check if `homeclaw` agent exists: `openclaw agents list`
+> - If missing, install from the bundled app: `openclaw agents install homeclaw /Applications/HomeClaw.app/Contents/Resources/openclaw/agents/homeclaw`
+> - Copy agent docs (IDENTITY/SOUL/AGENTS/TOOLS.md) from the app bundle to the local agent dir if newer
+> - Configure agent: model `claude-sonnet-4`, restricted tools (memory, sessions/a2a, read/write only -- no exec, no browser, no external services)
 >
-> **2. OpenClaw gateway config:**
-> Add a `hooks` block with `mappings` to `~/.openclaw/openclaw.json`:
+> **2. OpenClaw gateway hooks config:**
+> - Check `~/.openclaw/openclaw.json` for a `hooks.mappings.homeclaw` entry
+> - If missing, add:
 > ```json
 > "hooks": {
 >   "enabled": true,
@@ -467,52 +468,51 @@ Paste this prompt into **OpenClaw** or **Claude Code** to configure webhooks end
 >       "channel": "last",
 >       "allowUnsafeExternalContent": true
 >     }
->   },
->   "internal": { "enabled": true, "entries": { "audit-logger": { "enabled": true } } }
+>   }
 > }
 > ```
-> The `mappings` entry routes all `/hooks/homeclaw` events to the dedicated agent in a persistent session.
+> - Create a transform at `~/.openclaw/hooks/transforms/homeclaw-transform.js` to convert HomeClaw state-change payloads into agent messages
+> - Check `~/.openclaw/.env` for `HOMECLAW_WEBHOOK_TOKEN`. If missing, generate one: `openssl rand -base64 24 | tr '+/' '-_' | tr -d '='` and add it
+> - Remove any legacy `defaultSessionKey` entries that are no longer needed with dedicated mapping
+> - Restart gateway only if config changed: `openclaw gateway restart`
 >
-> Generate a secure token and add it to `~/.openclaw/.env`:
-> ```bash
-> openssl rand -base64 24 | tr '+/' '-_' | tr -d '='
-> echo 'HOMECLAW_WEBHOOK_TOKEN=<token>' >> ~/.openclaw/.env
-> ```
-> Restart the gateway: `openclaw gateway restart`
+> **3. HomeClaw webhook config:**
+> - Check current config: `homeclaw-cli config --json`
+> - Verify: `webhook.enabled` is true, `webhook.url` is `http://127.0.0.1:18789`, `webhook.token` matches the `HOMECLAW_WEBHOOK_TOKEN` from step 2, and `webhook_endpoint` is `/hooks/homeclaw`
+> - Fix any mismatches via HomeClaw Settings UI or CLI
+> - If circuit breaker shows old failures, reset it
 >
-> **3. HomeClaw config:**
-> Open **HomeClaw Settings > Webhook**. Toggle Enable, enter `http://127.0.0.1:18789` as the base URL, and paste the same token from step 2.
+> **4. End-to-end test:**
+> - Run `homeclaw-cli config --webhook-test` -- expect HTTP 200
+> - Verify circuit state is `closed` and `last_success` is recent
 >
-> Or use the CLI (note: **the CLI updates the running daemon only** -- it does not persist to `config.json`. Use the Settings UI or edit `~/Library/Application Support/HomeClaw/config.json` for persistent changes):
-> ```bash
-> homeclaw-cli config --webhook-url "http://127.0.0.1:18789" \
->                     --webhook-token "<same-token>" \
->                     --webhook-enabled true
-> ```
->
-> **4. Test the pipe:**
-> ```bash
-> homeclaw-cli config --webhook-test
-> ```
-> You should see an HTTP 200 response.
->
-> **5. Create triggers:**
-> Open **HomeClaw Settings > Webhook**. Check the scenes and accessories you want to generate webhook events. Start with security accessories (locks, garage doors, leak sensors) and a few lights to verify.
->
-> **6. Test end-to-end:**
-> Toggle a light from the Home app. Check that events appear in the HomeClaw agent session (`hook:homeclaw`). Verify `homeclaw-cli status --json` shows `circuit_state: closed` and a recent `last_success` timestamp.
+> Report what was already configured, what was changed, and the test result.
 
 ### Manual Setup
 
 <details>
 <summary>Step-by-step without an AI assistant</summary>
 
-#### 1. Install the Agent Workspace
+#### 1. Create the Agent Workspace
+
+The agent docs are bundled inside the HomeClaw app. Because the app bundle is read-only, you need a **local copy** for OpenClaw to use as the agent directory:
 
 ```bash
-openclaw agents install homeclaw /path/to/openclaw/agents/homeclaw
+# Create local agent dir with workspace
+mkdir -p ~/.openclaw/agents/homeclaw/{agent,workspace}
+
+# Copy agent docs from app bundle
+cp /Applications/HomeClaw.app/Contents/Resources/openclaw/agents/homeclaw/*.md \
+   ~/.openclaw/agents/homeclaw/agent/
+
+# Register the agent
+openclaw agents add homeclaw \
+  --agent-dir ~/.openclaw/agents/homeclaw/agent \
+  --workspace ~/.openclaw/agents/homeclaw/workspace
 openclaw agents list   # verify it appears
 ```
+
+> **Note:** `openclaw agents add` (not `install`) is the correct CLI command. The `--workspace` flag is required in non-interactive mode.
 
 #### 2. Configure OpenClaw
 
@@ -530,17 +530,38 @@ Add the `hooks` block with `mappings` to `~/.openclaw/openclaw.json`:
       "channel": "last",
       "allowUnsafeExternalContent": true
     }
-  },
-  "internal": {
-    "enabled": true,
-    "entries": {
-      "audit-logger": { "enabled": true }
-    }
   }
 }
 ```
 
 The `mappings` entry routes all `/hooks/homeclaw` POSTs to the dedicated HomeClaw agent in a persistent `hook:homeclaw` session.
+
+**Create a transform** to convert HomeClaw payloads into agent messages. The hook mapping requires a `message` field in the payload -- without a transform, payloads with only `text` + `mode` will get a 400 error:
+
+```bash
+mkdir -p ~/.openclaw/hooks/transforms
+cat > ~/.openclaw/hooks/transforms/homeclaw-transform.js << 'TRANSFORM'
+// Convert HomeClaw webhook payload {text, mode} into agent message format
+module.exports = function(payload) {
+  return {
+    message: payload.text || JSON.stringify(payload),
+    mode: payload.mode || "next-heartbeat"
+  };
+};
+TRANSFORM
+```
+
+Then reference the transform in the mapping:
+```json
+"homeclaw": {
+  "agentId": "homeclaw",
+  "sessionKey": "hook:homeclaw",
+  "deliver": true,
+  "channel": "last",
+  "allowUnsafeExternalContent": true,
+  "transform": "homeclaw-transform"
+}
+```
 
 Generate a token and add it to `~/.openclaw/.env`:
 
@@ -554,9 +575,11 @@ echo 'HOMECLAW_WEBHOOK_TOKEN=<your-generated-token>' >> ~/.openclaw/.env
 
 Restart the gateway: `openclaw gateway restart`
 
+> **Warning:** The gateway rewrites `openclaw.json` on restart. Verify your mapping and transform entries survived by checking the file after restart. If a newly-added mapping is stripped, restart a second time -- there may be a race condition with first-time mappings.
+
 #### 3. Configure HomeClaw
 
-**Option A -- GUI:** Open Settings > Webhook. Toggle Enable, enter `http://127.0.0.1:18789` as the base URL, paste the same token from step 2. Click Generate if you need a new token (then update OpenClaw's `.env` to match).
+**Option A -- GUI:** Open Settings > Webhook. Toggle Enable, enter `http://127.0.0.1:18789` as the base URL, paste the same token from step 2.
 
 **Option B -- CLI** (note: the CLI updates the running daemon only -- it does not persist to `config.json`. Use the Settings UI or edit the config file directly for persistent changes):
 
@@ -573,6 +596,8 @@ homeclaw-cli config --webhook-test
 ```
 
 You should see an HTTP 200 response. If it fails, check the token matches and the OpenClaw gateway is running.
+
+> **Note:** Test events don't update the delivery stats (total_delivered, last_http_status). Use a real event trigger to verify stats update.
 
 #### 5. Create Triggers
 

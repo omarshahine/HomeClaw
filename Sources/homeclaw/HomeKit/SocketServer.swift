@@ -399,6 +399,12 @@ final class SocketServer: @unchecked Sendable {
                     let (responseData, response) = try await URLSession.shared.data(for: testRequest)
                     let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
                     let responseBody = String(data: responseData.prefix(1024), encoding: .utf8) ?? ""
+                    // Update circuit breaker stats so test results are visible in status
+                    if httpStatus >= 400 {
+                        WebhookCircuitBreaker.shared.recordFailure(httpStatus: httpStatus)
+                    } else {
+                        WebhookCircuitBreaker.shared.recordSuccess(httpStatus: httpStatus)
+                    }
                     result = [
                         "url": testURL.absoluteString,
                         "status": httpStatus,
@@ -406,6 +412,7 @@ final class SocketServer: @unchecked Sendable {
                         "body": responseBody,
                     ] as [String: Any]
                 } catch {
+                    WebhookCircuitBreaker.shared.recordFailure()
                     result = [
                         "url": testURL.absoluteString,
                         "status": 0,

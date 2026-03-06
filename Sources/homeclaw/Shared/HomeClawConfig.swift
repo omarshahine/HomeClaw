@@ -273,6 +273,15 @@ final class HomeClawConfig: @unchecked Sendable {
                 "enabled": webhook.enabled,
                 "url": webhook.url,
             ]
+            // Show masked token for verification (first 4 + last 4 chars)
+            if !webhook.token.isEmpty {
+                let t = webhook.token
+                if t.count > 8 {
+                    whDict["token"] = "\(t.prefix(4))...\(t.suffix(4))"
+                } else {
+                    whDict["token"] = "****"
+                }
+            }
             whDict["webhook_endpoint"] = effectiveEndpoint
             if let events = webhook.events, !events.isEmpty {
                 whDict["events"] = events

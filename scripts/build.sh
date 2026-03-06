@@ -83,11 +83,19 @@ if [[ -z "$TEAM_ID" || "$TEAM_ID" == "YOUR_TEAM_ID" ]]; then
     exit 1
 fi
 
-# ─── Derive version from git ──────────────────────────────────────────
+# ─── Derive version ──────────────────────────────────────────────────
 
 GIT_TAG=$(git -C "$PROJECT_ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo "v0.0.1")
 MARKETING_VERSION="${GIT_TAG#v}"
-BUILD_NUMBER=$(git -C "$PROJECT_ROOT" rev-list --count HEAD)
+
+# Build number: read from .build-number (single source of truth).
+# The Xcode pre-build script increments this file on Release builds.
+BUILD_NUMBER_FILE="$PROJECT_ROOT/.build-number"
+if [[ -f "$BUILD_NUMBER_FILE" ]]; then
+    BUILD_NUMBER=$(cat "$BUILD_NUMBER_FILE")
+else
+    BUILD_NUMBER=$(git -C "$PROJECT_ROOT" rev-list --count HEAD)
+fi
 
 # ─── Derived paths ──────────────────────────────────────────────────
 
@@ -184,6 +192,10 @@ fi
 
 echo ""
 echo "$(bold "Output:") $APP_BUNDLE"
+# Re-read build number — Xcode pre-build script may have incremented it
+if [[ -f "$BUILD_NUMBER_FILE" ]]; then
+    BUILD_NUMBER=$(cat "$BUILD_NUMBER_FILE")
+fi
 echo "$(bold "Version:") $MARKETING_VERSION ($BUILD_NUMBER)"
 echo ""
 
