@@ -1,4 +1,5 @@
 ---
+name: homekit
 description: |
   Control HomeKit smart home accessories and view home events via homeclaw-cli.
   Use when the user asks to control lights, locks, thermostats, fans, blinds,
@@ -6,6 +7,19 @@ description: |
   Examples: "turn off the stairs lights", "lock the front door", "what's the temperature",
   "run the movie scene", "close the blinds", "is the garage door open",
   "what happened at home today", "when was the front door last unlocked"
+metadata:
+  openclaw:
+    emoji: house
+    os: ["darwin"]
+    homepage: https://github.com/omarshahine/HomeClaw
+    requires:
+      bins: ["homeclaw-cli"]
+    install:
+      - kind: download
+        id: homeclaw
+        label: "Install HomeClaw.app from TestFlight or build from source"
+        url: https://github.com/omarshahine/HomeClaw
+        bins: ["homeclaw-cli"]
 ---
 
 # HomeKit Control

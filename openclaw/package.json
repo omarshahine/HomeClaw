@@ -10,6 +10,8 @@
   "files": [
     "src/",
     "skills/",
+    "agents/",
+    "hooks/",
     "openclaw.plugin.json"
   ],
   "keywords": [

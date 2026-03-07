@@ -8,13 +8,16 @@
     "properties": {
       "binDir": {
         "type": "string",
-        "description": "Path to directory containing the homeclaw-cli binary"
+        "description": "Path to directory containing the homeclaw-cli binary",
+        "default": "/Applications/HomeClaw.app/Contents/MacOS"
       }
     }
   },
   "uiHints": {
     "binDir": {
-      "label": "CLI Binary Directory"
+      "label": "CLI Binary Directory",
+      "help": "Directory where homeclaw-cli is installed. Defaults to the HomeClaw.app bundle.",
+      "placeholder": "/Applications/HomeClaw.app/Contents/MacOS"
     }
   }
 }

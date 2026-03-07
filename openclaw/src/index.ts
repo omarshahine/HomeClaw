@@ -7,6 +7,16 @@
  * homeclaw-cli directly.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 export function register(api: any): void {
-  api.log?.('info', 'HomeClaw: registered (skill-only plugin)');
+  const binDir = api.config?.binDir ?? '/Applications/HomeClaw.app/Contents/MacOS';
+  const cliPath = join(binDir, 'homeclaw-cli');
+
+  if (!existsSync(cliPath)) {
+    api.log?.('warn', `HomeClaw: homeclaw-cli not found at ${cliPath}. Install HomeClaw.app or set binDir in plugin config.`);
+  } else {
+    api.log?.('info', `HomeClaw: registered (homeclaw-cli found at ${cliPath})`);
+  }
 }
