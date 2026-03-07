@@ -10,7 +10,20 @@ The `homeclaw` plugin provides HomeKit accessory control and event data. Events 
 |--------|---------|
 | `list` | List all HomeKit accessories and their current state |
 | `get` | Get details for a specific accessory |
-| `control` | Set accessory state (on/off, brightness, temperature, etc.) |
+| `search` | Find accessories by name, type, or room |
+| `device-map` | View device-to-friendly-name mapping |
+| `scenes` | List available HomeKit scenes |
+| `webhook-log` | Review recent webhook event log |
+
+### Prohibited Commands
+
+These commands modify HomeKit state and must NEVER be used by this agent:
+
+- `set` — changes accessory characteristic values
+- `trigger` — triggers a scene
+- `delete-scene` — deletes a scene
+- `import-scene` — imports a scene
+- `assign-rooms` — reassigns accessories to rooms
 
 ### Accessory Types You'll See
 

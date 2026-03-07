@@ -140,7 +140,6 @@ configure_webhooks() {
     node -e "
 const fs = require('fs');
 const configPath = '$config_file';
-const token = process.env.TOKEN;
 
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
@@ -160,9 +159,10 @@ config.hooks.mappings.homeclaw = {
 };
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-" 2>/dev/null
+" || { error "Failed to merge hooks config into openclaw.json"; exit 1; }
 
     ok "hooks.mappings.homeclaw merged into openclaw.json"
+    warn "allowUnsafeExternalContent=true set for local webhooks (127.0.0.1 only)"
 }
 
 # ─── Step 5 (continued): Configure HomeClaw ─────────────────────────
