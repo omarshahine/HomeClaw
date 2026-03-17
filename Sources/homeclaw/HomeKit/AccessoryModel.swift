@@ -164,6 +164,7 @@ enum AccessoryModel {
             ]
         }
         detail["actions"] = actions
+        detail["action_count"] = actions.count
         return detail
     }
 

@@ -20755,7 +20755,7 @@ var tools = [
         },
         home_id: {
           type: "string",
-          description: "Filter by home UUID (list action). Defaults to configured home if not specified."
+          description: "Filter by home UUID (list/get action). Defaults to configured home if not specified."
         },
         scene_id: {
           type: "string",
