@@ -277,6 +277,33 @@ final class HomeKitManager: NSObject, Observable {
         throw ControlError.accessoryNotFound("Scene not found: \(id)")
     }
 
+    func getScene(id: String, homeID: String? = nil) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+
+        // Try by UUID first
+        for home in targetHomes {
+            if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+                var detail = AccessoryModel.sceneDetail(actionSet)
+                detail["home_name"] = home.name
+                return detail
+            }
+        }
+
+        // Try by name
+        for home in targetHomes {
+            if let actionSet = home.actionSets.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
+            }) {
+                var detail = AccessoryModel.sceneDetail(actionSet)
+                detail["home_name"] = home.name
+                return detail
+            }
+        }
+
+        throw ControlError.accessoryNotFound("Scene not found: \(id)")
+    }
+
     // MARK: - Scene Management
 
     func deleteScene(name: String, homeName: String? = nil, dryRun: Bool = false) async throws -> [String: Any] {

@@ -10,6 +10,7 @@ struct HomeKitCLI: ParsableCommand {
             Get.self,
             Set.self,
             Scenes.self,
+            GetScene.self,
             Trigger.self,
             DeleteScene.self,
             ImportScene.self,

@@ -258,6 +258,12 @@ final class SocketServer: @unchecked Sendable {
             case "list_scenes":
                 result = await hk.listScenes(homeID: args["home_id"] as? String)
 
+            case "get_scene":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                result = try await hk.getScene(id: id, homeID: args["home_id"] as? String)
+
             case "trigger_scene":
                 guard let id = args["id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' argument")

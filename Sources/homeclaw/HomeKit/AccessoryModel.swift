@@ -149,6 +149,24 @@ enum AccessoryModel {
         ]
     }
 
+    /// Detailed view of a scene including all actions.
+    static func sceneDetail(_ actionSet: HMActionSet) -> [String: Any] {
+        var detail = sceneSummary(actionSet)
+        let actions: [[String: String]] = actionSet.actions.compactMap { action in
+            guard let writeAction = action as? HMCharacteristicWriteAction<NSCopying> else { return nil }
+            let characteristic = writeAction.characteristic
+            let accessory = characteristic.service?.accessory
+            return [
+                "accessory": accessory?.name ?? "Unknown",
+                "room": accessory?.room?.name ?? "Default Room",
+                "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
+                "value": "\(writeAction.targetValue)",
+            ]
+        }
+        detail["actions"] = actions
+        return detail
+    }
+
     // MARK: - Home App Display Name
 
     /// Service types where the Home app prefers the service name over the accessory name.

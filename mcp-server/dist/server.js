@@ -20744,14 +20744,14 @@ var tools = [
   },
   {
     name: "homekit_scenes",
-    description: "List or trigger HomeKit scenes (action sets). Defaults to configured home if home_id not specified.",
+    description: "List, get details of, or trigger HomeKit scenes (action sets). Defaults to configured home if home_id not specified.",
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["list", "trigger"],
-          description: "Action to perform. Default: list"
+          enum: ["list", "get", "trigger"],
+          description: 'Action to perform. Default: list. "get" returns all actions in the scene.'
         },
         home_id: {
           type: "string",
@@ -20759,7 +20759,7 @@ var tools = [
         },
         scene_id: {
           type: "string",
-          description: "Scene UUID or name (trigger action)"
+          description: "Scene UUID or name (get/trigger action)"
         }
       }
     }
@@ -20966,6 +20966,12 @@ async function handleScenes(args) {
       const socketArgs = {};
       if (args.home_id) socketArgs.home_id = args.home_id;
       return sendCommand("list_scenes", socketArgs);
+    }
+    case "get": {
+      if (!args.scene_id) throw new Error("scene_id is required for get action");
+      const socketArgs = { id: args.scene_id };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("get_scene", socketArgs);
     }
     case "trigger": {
       if (!args.scene_id) throw new Error("scene_id is required for trigger action");
