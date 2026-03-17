@@ -101,7 +101,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_status` | Check bridge connectivity and accessory count |
 | `homekit_accessories` | List, get details, search, or control accessories |
 | `homekit_rooms` | List rooms and their accessories |
-| `homekit_scenes` | List, trigger, import, or delete scenes |
+| `homekit_scenes` | List, get details, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
@@ -150,6 +150,7 @@ homeclaw-cli search "bedroom" --category lightbulb
 
 # Scenes
 homeclaw-cli scenes
+homeclaw-cli get-scene "Good Night" --json        # Full detail: all actions
 homeclaw-cli trigger "Good Night"
 
 # Scene management
@@ -309,7 +310,7 @@ HomeClaw supports the full range of HomeKit accessory categories:
 | **Sensors** | motion, contact, temperature, humidity, light level, battery (all read-only) |
 | **Doorbells** | ring detection via input_event (single/double/long press), motion (read-only) |
 | **Programmable Switches** | button press detection (single/double/long press) (read-only) |
-| **Scenes** | trigger by name or UUID, import from JSON, delete by name |
+| **Scenes** | trigger by name or UUID, inspect actions, import from JSON, delete by name |
 
 ### Scene Import Format
 
@@ -771,8 +772,8 @@ Sources/
     MacOSController.swift  NSStatusItem + NSMenu via iOS2Mac protocol
     Info.plist             NSPrincipalClass: MacOSController
   homeclaw-cli/            CLI tool (SPM executable + Xcode target)
-    Commands/              list, get, set, search, scenes, status, config, device-map, events,
-                           triggers, delete-scene, import-scene, assign-rooms
+    Commands/              list, get, set, search, scenes, get-scene, status, config, device-map,
+                           events, triggers, delete-scene, import-scene, assign-rooms
     SocketClient.swift     Direct socket communication
 Resources/                 Info.plist, entitlements, app icons
 scripts/

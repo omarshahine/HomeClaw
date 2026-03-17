@@ -70,7 +70,12 @@ homeclaw-cli set "<name-or-uuid>" target_position 100          # Blinds (0=close
 
 # Scenes
 homeclaw-cli scenes --json              # List all scenes
+homeclaw-cli get-scene "<name>" --json  # Full detail: all actions (accessory, room, characteristic, value)
 homeclaw-cli trigger "<scene-name>"     # Run a scene
+homeclaw-cli import-scene scene.json --dry-run   # Preview scene import
+homeclaw-cli import-scene scene.json              # Create scene from JSON
+homeclaw-cli delete-scene "<name>" --dry-run      # Preview deletion
+homeclaw-cli delete-scene "<name>"                # Delete a scene
 
 # Export to file (any format)
 homeclaw-cli device-map --format agent -o memory/homekit-device-map.json

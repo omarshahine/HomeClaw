@@ -23,15 +23,17 @@ HomeClaw exposes Apple HomeKit accessories via MCP tools. Use the `homekit_*` to
 
 ## MCP Tools
 
-The plugin registers 6 MCP tools.
+The plugin registers 8 MCP tools.
 
 | Tool | Description |
 |------|-------------|
 | `homekit_status` | Check bridge connectivity, home count, accessory count |
 | `homekit_accessories` | List, get details, search, or control accessories |
 | `homekit_rooms` | List rooms and their accessories |
-| `homekit_scenes` | List or trigger HomeKit scenes |
+| `homekit_scenes` | List, get details of, trigger, import, or delete scenes |
 | `homekit_device_map` | Get LLM-optimized device map with semantic types, aliases, and zone hierarchy |
+| `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
+| `homekit_webhook` | Manage webhook configuration: setup, test, reset circuit breaker, status |
 | `homekit_config` | View or update bridge configuration |
 
 ### homekit_device_map
@@ -78,8 +80,17 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 | Action | Required Params | Description |
 |--------|----------------|-------------|
-| `list` | — | List all scenes |
+| `list` | — | List all scenes with name, type, and action count |
+| `get` | `scene_id` | Get full scene detail including all actions (accessory, room, characteristic, target value) |
 | `trigger` | `scene_id` | Execute a scene by name or UUID |
+
+### homekit_events
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `since` | No | Duration shorthand (`1h`, `30m`, `2d`) or ISO 8601 timestamp |
+| `type` | No | Filter: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated` |
+| `limit` | No | Max events to return (default: 50) |
 
 ### homekit_config
 
@@ -122,6 +133,11 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 1. List scenes: `homekit_scenes` with `action: "list"`
 2. Trigger: `homekit_scenes` with `action: "trigger"`, `scene_id: "Movie Time"`
+
+### Inspect what a scene does
+
+1. Get scene detail: `homekit_scenes` with `action: "get"`, `scene_id: "Good night"`
+2. Response includes all actions: accessory name, room, characteristic, and target value
 
 ### List accessories by room
 

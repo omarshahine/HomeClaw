@@ -44,9 +44,11 @@ FILE="$PROJECT_ROOT/Resources/Info.plist"
 sed -i '' "/<key>CFBundleShortVersionString<\/key>/{ n; s/<string>[^<]*<\/string>/<string>$VERSION<\/string>/; }" "$FILE"
 update_file "$FILE" "Main bundle version"
 
-# 2. HomeClawHelper/Info.plist — CFBundleShortVersionString
+# 2. HomeClawHelper/Info.plist — CFBundleShortVersionString (optional, may not exist)
 FILE="$PROJECT_ROOT/Sources/HomeClawHelper/Info.plist"
-sed -i '' "/<key>CFBundleShortVersionString<\/key>/{ n; s/<string>[^<]*<\/string>/<string>$VERSION<\/string>/; }" "$FILE"
+if [[ -f "$FILE" ]]; then
+    sed -i '' "/<key>CFBundleShortVersionString<\/key>/{ n; s/<string>[^<]*<\/string>/<string>$VERSION<\/string>/; }" "$FILE"
+fi
 update_file "$FILE" "Helper bundle version"
 
 # 3. package.json (root)
