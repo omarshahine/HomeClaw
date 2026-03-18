@@ -15,6 +15,7 @@ struct HomeKitCLI: ParsableCommand {
             DeleteScene.self,
             ImportScene.self,
             AssignRooms.self,
+            Rename.self,
             Search.self,
             Status.self,
             Config.self,

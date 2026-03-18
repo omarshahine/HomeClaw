@@ -436,6 +436,45 @@ final class HomeKitManager: NSObject, Observable {
         ] as [String: Any]
     }
 
+    func renameAccessory(
+        id: String,
+        newName: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        guard let accessory = findAccessory(id: id, homeID: homeID) else {
+            throw ControlError.accessoryNotFound("Accessory not found: \(id)")
+        }
+
+        let oldName = accessory.name
+        let homeName = filteredHomes(homeID: homeID).first?.name ?? "?"
+
+        if dryRun {
+            return [
+                "old_name": oldName,
+                "new_name": newName,
+                "home": homeName,
+                "dry_run": true,
+            ] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            accessory.updateName(newName) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(homeName)] Renamed '\(oldName)' → '\(newName)'")
+        return [
+            "old_name": oldName,
+            "new_name": newName,
+            "home": homeName,
+            "dry_run": false,
+        ] as [String: Any]
+    }
+
     func importScene(
         name: String,
         homeName: String? = nil,

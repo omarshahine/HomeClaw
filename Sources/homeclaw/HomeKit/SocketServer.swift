@@ -541,6 +541,22 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: dryRun
                 )
 
+            case "rename":
+                guard let id = args["id"] as? String ?? args["accessory"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'accessory' argument")
+                }
+                guard let newName = args["name"] as? String ?? args["new_name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' or 'new_name' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool)
+                    ?? (args["dry_run"] as? String).map { $0 == "true" }
+                    ?? false
+                result = try await hk.renameAccessory(
+                    id: id, newName: newName,
+                    homeID: args["home_id"] as? String,
+                    dryRun: dryRun
+                )
+
             case "import_scene":
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")
