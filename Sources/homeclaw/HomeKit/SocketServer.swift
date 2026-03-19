@@ -557,6 +557,71 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: dryRun
                 )
 
+            case "create_room":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.createRoom(name: name, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "rename_room":
+                guard let roomID = args["id"] as? String ?? args["room"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'room' argument")
+                }
+                guard let newName = args["name"] as? String ?? args["new_name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' or 'new_name' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.renameRoom(roomID: roomID, newName: newName, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "remove_room":
+                guard let roomID = args["id"] as? String ?? args["room"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'room' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.removeRoom(roomID: roomID, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "remove_accessory":
+                guard let id = args["id"] as? String ?? args["accessory"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'accessory' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.removeAccessory(id: id, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "create_zone":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.createZone(name: name, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "remove_zone":
+                guard let zoneID = args["id"] as? String ?? args["zone"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'zone' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.removeZone(zoneID: zoneID, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "add_room_to_zone":
+                guard let roomID = args["room"] as? String ?? args["room_id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'room' or 'room_id' argument")
+                }
+                guard let zoneID = args["zone"] as? String ?? args["zone_id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'zone' or 'zone_id' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.addRoomToZone(roomID: roomID, zoneID: zoneID, homeID: args["home_id"] as? String, dryRun: dryRun)
+
+            case "remove_room_from_zone":
+                guard let roomID = args["room"] as? String ?? args["room_id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'room' or 'room_id' argument")
+                }
+                guard let zoneID = args["zone"] as? String ?? args["zone_id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'zone' or 'zone_id' argument")
+                }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
+                result = try await hk.removeRoomFromZone(roomID: roomID, zoneID: zoneID, homeID: args["home_id"] as? String, dryRun: dryRun)
+
             case "import_scene":
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")

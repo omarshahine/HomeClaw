@@ -475,6 +475,278 @@ final class HomeKitManager: NSObject, Observable {
         ] as [String: Any]
     }
 
+    // MARK: - Room Management
+
+    func createRoom(
+        name: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        if dryRun {
+            return ["dry_run": true, "name": name, "home": home.name] as [String: Any]
+        }
+
+        let room = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMRoom, Error>) in
+            home.addRoom(withName: name) { room, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let room { continuation.resume(returning: room) }
+                else { continuation.resume(throwing: ControlError.writeFailed("Failed to create room")) }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Created room: \(name)")
+        return ["name": room.name, "id": room.uniqueIdentifier.uuidString, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    func renameRoom(
+        roomID: String,
+        newName: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        guard let room = findRoom(id: roomID, in: home) else {
+            throw ControlError.accessoryNotFound("Room not found: \(roomID)")
+        }
+
+        let oldName = room.name
+        if dryRun {
+            return ["dry_run": true, "old_name": oldName, "new_name": newName, "home": home.name] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            room.updateName(newName) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Renamed room '\(oldName)' → '\(newName)'")
+        return ["old_name": oldName, "new_name": newName, "id": room.uniqueIdentifier.uuidString, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    func removeRoom(
+        roomID: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        guard let room = findRoom(id: roomID, in: home) else {
+            throw ControlError.accessoryNotFound("Room not found: \(roomID)")
+        }
+
+        let roomName = room.name
+        let accessoryCount = room.accessories.count
+        if dryRun {
+            return ["dry_run": true, "name": roomName, "accessory_count": accessoryCount, "home": home.name] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeRoom(room) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Removed room: \(roomName) (\(accessoryCount) accessories)")
+        return ["name": roomName, "accessory_count": accessoryCount, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    // MARK: - Accessory Removal
+
+    func removeAccessory(
+        id: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        guard let accessory = findAccessory(id: id, homeID: homeID) else {
+            throw ControlError.accessoryNotFound("Accessory not found: \(id)")
+        }
+
+        let homeName = filteredHomes(homeID: homeID).first?.name ?? "?"
+        guard let home = filteredHomes(homeID: homeID).first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        let accessoryName = accessory.name
+        let roomName = accessory.room?.name ?? "Default Room"
+        if dryRun {
+            return ["dry_run": true, "name": accessoryName, "room": roomName, "home": homeName] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeAccessory(accessory) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(homeName)] Removed accessory: \(accessoryName) from \(roomName)")
+        return ["name": accessoryName, "room": roomName, "home": homeName, "dry_run": false] as [String: Any]
+    }
+
+    // MARK: - Zone Management
+
+    func createZone(
+        name: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        if dryRun {
+            return ["dry_run": true, "name": name, "home": home.name] as [String: Any]
+        }
+
+        let zone = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMZone, Error>) in
+            home.addZone(withName: name) { zone, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let zone { continuation.resume(returning: zone) }
+                else { continuation.resume(throwing: ControlError.writeFailed("Failed to create zone")) }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Created zone: \(name)")
+        return ["name": zone.name, "id": zone.uniqueIdentifier.uuidString, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    func removeZone(
+        zoneID: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        guard let zone = findZone(id: zoneID, in: home) else {
+            throw ControlError.accessoryNotFound("Zone not found: \(zoneID)")
+        }
+
+        let zoneName = zone.name
+        let roomCount = zone.rooms.count
+        if dryRun {
+            return ["dry_run": true, "name": zoneName, "room_count": roomCount, "home": home.name] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeZone(zone) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Removed zone: \(zoneName) (\(roomCount) rooms)")
+        return ["name": zoneName, "room_count": roomCount, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    func addRoomToZone(
+        roomID: String,
+        zoneID: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        guard let room = findRoom(id: roomID, in: home) else {
+            throw ControlError.accessoryNotFound("Room not found: \(roomID)")
+        }
+        guard let zone = findZone(id: zoneID, in: home) else {
+            throw ControlError.accessoryNotFound("Zone not found: \(zoneID)")
+        }
+
+        if dryRun {
+            return ["dry_run": true, "room": room.name, "zone": zone.name, "home": home.name] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            zone.addRoom(room) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Added room '\(room.name)' to zone '\(zone.name)'")
+        return ["room": room.name, "zone": zone.name, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    func removeRoomFromZone(
+        roomID: String,
+        zoneID: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        guard let room = findRoom(id: roomID, in: home) else {
+            throw ControlError.accessoryNotFound("Room not found: \(roomID)")
+        }
+        guard let zone = findZone(id: zoneID, in: home) else {
+            throw ControlError.accessoryNotFound("Zone not found: \(zoneID)")
+        }
+
+        if dryRun {
+            return ["dry_run": true, "room": room.name, "zone": zone.name, "home": home.name] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            zone.removeRoom(room) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Removed room '\(room.name)' from zone '\(zone.name)'")
+        return ["room": room.name, "zone": zone.name, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    // MARK: - Private Helpers (Room/Zone lookup)
+
+    private func findRoom(id: String, in home: HMHome) -> HMRoom? {
+        if let room = home.rooms.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+            return room
+        }
+        return home.rooms.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
+
+    private func findZone(id: String, in home: HMHome) -> HMZone? {
+        if let zone = home.zones.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+            return zone
+        }
+        return home.zones.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
+
     func importScene(
         name: String,
         homeName: String? = nil,
