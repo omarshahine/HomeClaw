@@ -485,6 +485,7 @@ final class HomeKitManager: NSObject, Observable {
         return [
             "home": home.name,
             "accessory": accessory.name,
+            "id": accessory.uniqueIdentifier.uuidString,
             "status": "removed",
         ] as [String: Any]
     }
