@@ -20863,7 +20863,8 @@ var tools = [
       type: "object",
       properties: {
         id: { type: "string", description: "Accessory UUID or name" },
-        home_id: { type: "string", description: "Home UUID or name. Defaults to configured home." }
+        home_id: { type: "string", description: "Home UUID or name. Defaults to configured home." },
+        dry_run: { type: "boolean", description: "Preview without removing. Default: false" }
       },
       required: ["id"]
     }
@@ -21097,6 +21098,7 @@ async function handleRemoveAccessory(args) {
   if (!args.id) throw new Error("id is required");
   const socketArgs = { id: args.id };
   if (args.home_id) socketArgs.home = args.home_id;
+  if (args.dry_run) socketArgs.dry_run = true;
   return sendCommand("remove_accessory", socketArgs);
 }
 async function handleRename(args) {

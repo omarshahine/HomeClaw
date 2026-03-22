@@ -545,9 +545,11 @@ final class SocketServer: @unchecked Sendable {
                 guard let id = args["id"] as? String ?? args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' or 'name' argument")
                 }
+                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String == "true")
                 result = try await hk.removeAccessory(
                     homeName: args["home"] as? String,
-                    accessoryID: id
+                    accessoryID: id,
+                    dryRun: dryRun
                 )
 
             case "rename_accessory":

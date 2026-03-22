@@ -366,14 +366,15 @@ final class HomeKitManager: NSObject, Observable {
             // Support UUID-based matching (preferred) or name-based (fallback)
             let accessory: HMAccessory?
             let identifier: String
-            if let uuidStr = entry["uuid"],
-               let uuid = UUID(uuidString: uuidStr) {
-                accessory = home.accessories.first(where: { $0.uniqueIdentifier == uuid })
+            if let uuidStr = entry["uuid"] {
+                guard UUID(uuidString: uuidStr) != nil else {
+                    notFound.append(uuidStr)
+                    continue
+                }
+                accessory = findAccessoryByID(uuidStr, in: home)
                 identifier = uuidStr
             } else if let accessoryName = entry["accessory"] {
-                accessory = home.accessories.first(where: {
-                    $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
-                })
+                accessory = findAccessoryByID(accessoryName, in: home)
                 identifier = accessoryName
             } else {
                 skipped += 1
@@ -451,7 +452,8 @@ final class HomeKitManager: NSObject, Observable {
 
     func removeAccessory(
         homeName: String? = nil,
-        accessoryID: String
+        accessoryID: String,
+        dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
         let targetHomes = filteredHomes(homeID: homeName)
@@ -459,18 +461,18 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.accessoryNotFound("No home found")
         }
 
-        // Support UUID or name matching
-        let accessory: HMAccessory?
-        if let uuid = UUID(uuidString: accessoryID) {
-            accessory = home.accessories.first(where: { $0.uniqueIdentifier == uuid })
-        } else {
-            accessory = home.accessories.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(accessoryID) == .orderedSame
-            })
+        guard let accessory = findAccessoryByID(accessoryID, in: home) else {
+            throw ControlError.accessoryNotFound("Accessory not found: \(accessoryID)")
         }
 
-        guard let accessory else {
-            throw ControlError.accessoryNotFound("Accessory not found: \(accessoryID)")
+        if dryRun {
+            return [
+                "status": "would_remove",
+                "dry_run": true,
+                "home": home.name,
+                "accessory": accessory.name,
+                "id": accessory.uniqueIdentifier.uuidString,
+            ] as [String: Any]
         }
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -498,17 +500,7 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.accessoryNotFound("No home found")
         }
 
-        // Support UUID or name matching
-        let accessory: HMAccessory?
-        if let uuid = UUID(uuidString: accessoryID) {
-            accessory = home.accessories.first(where: { $0.uniqueIdentifier == uuid })
-        } else {
-            accessory = home.accessories.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(accessoryID) == .orderedSame
-            })
-        }
-
-        guard let accessory else {
+        guard let accessory = findAccessoryByID(accessoryID, in: home) else {
             throw ControlError.accessoryNotFound("Accessory not found: \(accessoryID)")
         }
 
@@ -627,6 +619,16 @@ final class HomeKitManager: NSObject, Observable {
     }
 
     // MARK: - Scene Management Helpers
+
+    /// Find an accessory by UUID string (preferred) or name (fallback) within a specific home.
+    private func findAccessoryByID(_ id: String, in home: HMHome) -> HMAccessory? {
+        if let uuid = UUID(uuidString: id) {
+            return home.accessories.first(where: { $0.uniqueIdentifier == uuid })
+        }
+        return home.accessories.first(where: {
+            $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
+        })
+    }
 
     /// Find an accessory by name and optional room within a specific home.
     private func findAccessoryByName(_ name: String, room roomName: String?, in home: HMHome) -> HMAccessory? {
