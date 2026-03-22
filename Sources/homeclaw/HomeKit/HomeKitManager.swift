@@ -358,17 +358,30 @@ final class HomeKitManager: NSObject, Observable {
         var details: [[String: String]] = []
 
         for entry in assignments {
-            guard let accessoryName = entry["accessory"],
-                  let targetRoomName = entry["room"]
-            else {
+            guard let targetRoomName = entry["room"] else {
                 skipped += 1
                 continue
             }
 
-            guard let accessory = home.accessories.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
-            }) else {
-                notFound.append(accessoryName)
+            // Support UUID-based matching (preferred) or name-based (fallback)
+            let accessory: HMAccessory?
+            let identifier: String
+            if let uuidStr = entry["uuid"],
+               let uuid = UUID(uuidString: uuidStr) {
+                accessory = home.accessories.first(where: { $0.uniqueIdentifier == uuid })
+                identifier = uuidStr
+            } else if let accessoryName = entry["accessory"] {
+                accessory = home.accessories.first(where: {
+                    $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
+                })
+                identifier = accessoryName
+            } else {
+                skipped += 1
+                continue
+            }
+
+            guard let accessory else {
+                notFound.append(identifier)
                 continue
             }
 
@@ -433,6 +446,85 @@ final class HomeKitManager: NSObject, Observable {
             "skipped": skipped,
             "not_found": notFound,
             "details": details,
+        ] as [String: Any]
+    }
+
+    func removeAccessory(
+        homeName: String? = nil,
+        accessoryID: String
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeName)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        // Support UUID or name matching
+        let accessory: HMAccessory?
+        if let uuid = UUID(uuidString: accessoryID) {
+            accessory = home.accessories.first(where: { $0.uniqueIdentifier == uuid })
+        } else {
+            accessory = home.accessories.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(accessoryID) == .orderedSame
+            })
+        }
+
+        guard let accessory else {
+            throw ControlError.accessoryNotFound("Accessory not found: \(accessoryID)")
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeAccessory(accessory) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        return [
+            "home": home.name,
+            "accessory": accessory.name,
+            "status": "removed",
+        ] as [String: Any]
+    }
+
+    func renameAccessory(
+        homeName: String? = nil,
+        accessoryID: String,
+        newName: String
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeName)
+        guard let home = targetHomes.first else {
+            throw ControlError.accessoryNotFound("No home found")
+        }
+
+        // Support UUID or name matching
+        let accessory: HMAccessory?
+        if let uuid = UUID(uuidString: accessoryID) {
+            accessory = home.accessories.first(where: { $0.uniqueIdentifier == uuid })
+        } else {
+            accessory = home.accessories.first(where: {
+                $0.name.localizedCaseInsensitiveCompare(accessoryID) == .orderedSame
+            })
+        }
+
+        guard let accessory else {
+            throw ControlError.accessoryNotFound("Accessory not found: \(accessoryID)")
+        }
+
+        let oldName = accessory.name
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            accessory.updateName(newName) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        return [
+            "home": home.name,
+            "accessory": newName,
+            "old_name": oldName,
+            "status": "renamed",
         ] as [String: Any]
     }
 

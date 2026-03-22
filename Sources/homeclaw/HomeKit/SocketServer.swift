@@ -541,6 +541,28 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: dryRun
                 )
 
+            case "remove_accessory":
+                guard let id = args["id"] as? String ?? args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'name' argument")
+                }
+                result = try await hk.removeAccessory(
+                    homeName: args["home"] as? String,
+                    accessoryID: id
+                )
+
+            case "rename_accessory":
+                guard let id = args["id"] as? String ?? args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'name' argument")
+                }
+                guard let newName = args["new_name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'new_name' argument")
+                }
+                result = try await hk.renameAccessory(
+                    homeName: args["home"] as? String,
+                    accessoryID: id,
+                    newName: newName
+                )
+
             case "import_scene":
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")

@@ -14,6 +14,9 @@ import {
   handleWebhook,
   handleConfig,
   handleEvents,
+  handleAssignRooms,
+  handleRemoveAccessory,
+  handleRename,
 } from '../lib/handlers/homekit.js';
 
 const server = new Server(
@@ -55,6 +58,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'homekit_events':
         result = await handleEvents(args);
+        break;
+      case 'homekit_assign_rooms':
+        result = await handleAssignRooms(args);
+        break;
+      case 'homekit_remove_accessory':
+        result = await handleRemoveAccessory(args);
+        break;
+      case 'homekit_rename':
+        result = await handleRename(args);
         break;
       default:
         return {

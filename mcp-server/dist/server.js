@@ -20832,6 +20832,56 @@ var tools = [
     }
   },
   {
+    name: "homekit_assign_rooms",
+    description: "Assign accessories to HomeKit rooms. Supports UUID-based matching (preferred for duplicate names) or name-based matching. Moves accessories between rooms, creating rooms if needed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        assignments: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              uuid: { type: "string", description: "Accessory UUID (preferred \u2014 avoids duplicate name issues)" },
+              accessory: { type: "string", description: "Accessory name (fallback, case-insensitive)" },
+              room: { type: "string", description: "Target room name (created if missing)" }
+            },
+            required: ["room"]
+          },
+          description: 'Array of assignments. Each must have "room" plus either "uuid" or "accessory".'
+        },
+        home_id: { type: "string", description: "Home UUID or name. Defaults to configured home." },
+        dry_run: { type: "boolean", description: "Preview without applying. Default: false" }
+      },
+      required: ["assignments"]
+    }
+  },
+  {
+    name: "homekit_remove_accessory",
+    description: "Remove an accessory from HomeKit. Accepts UUID or name.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Accessory UUID or name" },
+        home_id: { type: "string", description: "Home UUID or name. Defaults to configured home." }
+      },
+      required: ["id"]
+    }
+  },
+  {
+    name: "homekit_rename",
+    description: "Rename a HomeKit accessory. Accepts UUID or current name to identify the accessory.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Accessory UUID or current name" },
+        new_name: { type: "string", description: "New name for the accessory" },
+        home_id: { type: "string", description: "Home UUID or name. Defaults to configured home." }
+      },
+      required: ["id", "new_name"]
+    }
+  },
+  {
     name: "homekit_events",
     description: "Get recent HomeKit events \u2014 characteristic changes, scene triggers, and accessory control actions. Use to understand what happened recently in the home.",
     inputSchema: {
@@ -21032,6 +21082,30 @@ async function handleWebhook(args) {
       throw new Error(`Unknown webhook action: ${action}`);
   }
 }
+async function handleAssignRooms(args) {
+  if (!args.assignments || !Array.isArray(args.assignments) || args.assignments.length === 0) {
+    throw new Error("assignments array is required and must not be empty");
+  }
+  const socketArgs = {
+    assignments: args.assignments,
+    dry_run: args.dry_run || false
+  };
+  if (args.home_id) socketArgs.home = args.home_id;
+  return sendCommand("assign_rooms", socketArgs);
+}
+async function handleRemoveAccessory(args) {
+  if (!args.id) throw new Error("id is required");
+  const socketArgs = { id: args.id };
+  if (args.home_id) socketArgs.home = args.home_id;
+  return sendCommand("remove_accessory", socketArgs);
+}
+async function handleRename(args) {
+  if (!args.id) throw new Error("id is required");
+  if (!args.new_name) throw new Error("new_name is required");
+  const socketArgs = { id: args.id, new_name: args.new_name };
+  if (args.home_id) socketArgs.home = args.home_id;
+  return sendCommand("rename_accessory", socketArgs);
+}
 async function handleConfig(args) {
   const action = args.action || "get";
   switch (action) {
@@ -21093,6 +21167,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "homekit_events":
         result = await handleEvents(args);
+        break;
+      case "homekit_assign_rooms":
+        result = await handleAssignRooms(args);
+        break;
+      case "homekit_remove_accessory":
+        result = await handleRemoveAccessory(args);
+        break;
+      case "homekit_rename":
+        result = await handleRename(args);
         break;
       default:
         return {
