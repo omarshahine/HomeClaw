@@ -77,6 +77,18 @@ homeclaw-cli import-scene scene.json              # Create scene from JSON
 homeclaw-cli delete-scene "<name>" --dry-run      # Preview deletion
 homeclaw-cli delete-scene "<name>"                # Delete a scene
 
+# Management — rename, rooms, zones
+homeclaw-cli rename "<name-or-uuid>" "<new-name>"           # Rename accessory
+homeclaw-cli rename "<name-or-uuid>" "<new-name>" --dry-run # Preview rename
+homeclaw-cli rename-room "<name-or-uuid>" "<new-name>"      # Rename room
+homeclaw-cli create-room "<name>"                            # Create room
+homeclaw-cli remove-room "<name-or-uuid>"                    # Remove room
+homeclaw-cli remove-accessory "<name-or-uuid>"               # Remove accessory
+homeclaw-cli create-zone "<name>"                            # Create zone
+homeclaw-cli remove-zone "<name-or-uuid>"                    # Remove zone
+homeclaw-cli add-room-to-zone "<room>" "<zone>"              # Add room to zone
+homeclaw-cli remove-room-from-zone "<room>" "<zone>"         # Remove room from zone
+
 # Export to file (any format)
 homeclaw-cli device-map --format agent -o memory/homekit-device-map.json
 homeclaw-cli device-map --format md -o device-map.md

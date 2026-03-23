@@ -11,6 +11,7 @@ import {
   handleRooms,
   handleScenes,
   handleDeviceMap,
+  handleManage,
   handleWebhook,
   handleConfig,
   handleEvents,
@@ -46,6 +47,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case 'homekit_device_map':
         result = await handleDeviceMap(args);
+        break;
+      case 'homekit_manage':
+        result = await handleManage(args);
         break;
       case 'homekit_webhook':
         result = await handleWebhook(args);

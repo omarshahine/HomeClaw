@@ -27,16 +27,29 @@ struct AddRoomToZone: ParsableCommand {
         if let home { args["home_id"] = home }
 
         let response = try SocketClient.sendAny(command: "add_room_to_zone", args: args)
-        guard response.success else { throw ValidationError(response.error ?? "Unknown error") }
 
-        if shouldOutputJSON(json) { printJSON(response.data?.value); return }
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
 
-        guard let result = response.data?.value as? [String: Any] else { print("Done."); return }
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
         let isDryRun = result["dry_run"] as? Bool ?? false
         let roomName = result["room"] as? String ?? "?"
         let zoneName = result["zone"] as? String ?? "?"
 
-        if isDryRun { print("DRY RUN — would add '\(roomName)' to zone '\(zoneName)'") }
-        else { print("Added '\(roomName)' to zone '\(zoneName)'") }
+        if isDryRun {
+            print("DRY RUN — would add '\(roomName)' to zone '\(zoneName)'")
+        } else {
+            print("Added '\(roomName)' to zone '\(zoneName)'")
+        }
     }
 }

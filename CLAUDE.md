@@ -151,7 +151,7 @@ Xcode automatic signing creates the required provisioning profile for the develo
 
 ## MCP Tools
 
-The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, and search. Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
+The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, search, and home structure management (rename, rooms, zones). Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
 
 ## Concurrency Model
 

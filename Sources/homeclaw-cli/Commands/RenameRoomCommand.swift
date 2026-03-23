@@ -27,16 +27,29 @@ struct RenameRoom: ParsableCommand {
         if let home { args["home_id"] = home }
 
         let response = try SocketClient.sendAny(command: "rename_room", args: args)
-        guard response.success else { throw ValidationError(response.error ?? "Unknown error") }
 
-        if shouldOutputJSON(json) { printJSON(response.data?.value); return }
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
 
-        guard let result = response.data?.value as? [String: Any] else { print("Done."); return }
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
         let isDryRun = result["dry_run"] as? Bool ?? false
         let oldName = result["old_name"] as? String ?? "?"
         let renamedTo = result["new_name"] as? String ?? "?"
 
-        if isDryRun { print("DRY RUN — would rename '\(oldName)' → '\(renamedTo)'") }
-        else { print("Renamed '\(oldName)' → '\(renamedTo)'") }
+        if isDryRun {
+            print("DRY RUN — would rename '\(oldName)' → '\(renamedTo)'")
+        } else {
+            print("Renamed '\(oldName)' → '\(renamedTo)'")
+        }
     }
 }

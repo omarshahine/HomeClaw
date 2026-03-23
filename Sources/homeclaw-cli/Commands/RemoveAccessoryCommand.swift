@@ -24,16 +24,29 @@ struct RemoveAccessory: ParsableCommand {
         if let home { args["home_id"] = home }
 
         let response = try SocketClient.sendAny(command: "remove_accessory", args: args)
-        guard response.success else { throw ValidationError(response.error ?? "Unknown error") }
 
-        if shouldOutputJSON(json) { printJSON(response.data?.value); return }
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
 
-        guard let result = response.data?.value as? [String: Any] else { print("Done."); return }
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
         let isDryRun = result["dry_run"] as? Bool ?? false
         let name = result["name"] as? String ?? "?"
         let room = result["room"] as? String ?? "?"
 
-        if isDryRun { print("DRY RUN — would remove '\(name)' from \(room)") }
-        else { print("Removed '\(name)' from \(room)") }
+        if isDryRun {
+            print("DRY RUN — would remove '\(name)' from \(room)")
+        } else {
+            print("Removed '\(name)' from \(room)")
+        }
     }
 }

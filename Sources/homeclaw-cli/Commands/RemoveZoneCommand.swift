@@ -24,16 +24,29 @@ struct RemoveZone: ParsableCommand {
         if let home { args["home_id"] = home }
 
         let response = try SocketClient.sendAny(command: "remove_zone", args: args)
-        guard response.success else { throw ValidationError(response.error ?? "Unknown error") }
 
-        if shouldOutputJSON(json) { printJSON(response.data?.value); return }
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
 
-        guard let result = response.data?.value as? [String: Any] else { print("Done."); return }
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
         let isDryRun = result["dry_run"] as? Bool ?? false
         let zoneName = result["name"] as? String ?? "?"
         let roomCount = result["room_count"] as? Int ?? 0
 
-        if isDryRun { print("DRY RUN — would remove zone '\(zoneName)' (\(roomCount) rooms)") }
-        else { print("Removed zone '\(zoneName)' (\(roomCount) rooms unzoned)") }
+        if isDryRun {
+            print("DRY RUN — would remove zone '\(zoneName)' (\(roomCount) rooms)")
+        } else {
+            print("Removed zone '\(zoneName)' (\(roomCount) rooms unzoned)")
+        }
     }
 }

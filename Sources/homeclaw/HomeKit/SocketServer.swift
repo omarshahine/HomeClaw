@@ -12,6 +12,10 @@ final class SocketServer: @unchecked Sendable {
     private var acceptSource: DispatchSourceRead?
     private let queue = DispatchQueue(label: "com.shahine.homeclaw.socket", qos: .userInitiated)
 
+    private func parseBool(_ args: [String: Any], key: String, default defaultValue: Bool = false) -> Bool {
+        (args[key] as? Bool) ?? (args[key] as? String).map { $0 == "true" } ?? defaultValue
+    }
+
     /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources).
     func start() {
         let path = AppConfig.socketPath
@@ -242,14 +246,11 @@ final class SocketServer: @unchecked Sendable {
                 else {
                     return encodeResponse(success: false, error: "Missing id, characteristic, or value")
                 }
-                let dryRun = (args["dry_run"] as? Bool)
-                    ?? (args["dry_run"] as? String).map { $0 == "true" }
-                    ?? false
                 result = try await hk.controlAccessory(
                     id: id, characteristic: characteristic, value: value,
                     homeID: args["home_id"] as? String,
                     serviceType: args["service_type"] as? String,
-                    dryRun: dryRun
+                    dryRun: parseBool(args, key: "dry_run")
                 )
 
             case "list_rooms":
@@ -523,22 +524,20 @@ final class SocketServer: @unchecked Sendable {
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool)
-                    ?? (args["dry_run"] as? String).map { $0 == "true" }
-                    ?? false
-                result = try await hk.deleteScene(name: name, homeName: args["home"] as? String, dryRun: dryRun)
+                result = try await hk.deleteScene(
+                    name: name,
+                    homeName: args["home"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "assign_rooms":
                 guard let assignments = args["assignments"] as? [[String: String]] else {
                     return encodeResponse(success: false, error: "Missing 'assignments' array")
                 }
-                let dryRun = (args["dry_run"] as? Bool)
-                    ?? (args["dry_run"] as? String).map { $0 == "true" }
-                    ?? false
                 result = try await hk.assignRooms(
                     homeName: args["home"] as? String,
                     assignments: assignments,
-                    dryRun: dryRun
+                    dryRun: parseBool(args, key: "dry_run")
                 )
 
             case "rename":
@@ -548,21 +547,22 @@ final class SocketServer: @unchecked Sendable {
                 guard let newName = args["name"] as? String ?? args["new_name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' or 'new_name' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool)
-                    ?? (args["dry_run"] as? String).map { $0 == "true" }
-                    ?? false
                 result = try await hk.renameAccessory(
-                    id: id, newName: newName,
+                    id: id,
+                    newName: newName,
                     homeID: args["home_id"] as? String,
-                    dryRun: dryRun
+                    dryRun: parseBool(args, key: "dry_run")
                 )
 
             case "create_room":
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.createRoom(name: name, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.createRoom(
+                    name: name,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "rename_room":
                 guard let roomID = args["id"] as? String ?? args["room"] as? String else {
@@ -571,36 +571,52 @@ final class SocketServer: @unchecked Sendable {
                 guard let newName = args["name"] as? String ?? args["new_name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' or 'new_name' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.renameRoom(roomID: roomID, newName: newName, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.renameRoom(
+                    roomID: roomID,
+                    newName: newName,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "remove_room":
                 guard let roomID = args["id"] as? String ?? args["room"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' or 'room' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.removeRoom(roomID: roomID, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.removeRoom(
+                    roomID: roomID,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "remove_accessory":
                 guard let id = args["id"] as? String ?? args["accessory"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' or 'accessory' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.removeAccessory(id: id, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.removeAccessory(
+                    id: id,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "create_zone":
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.createZone(name: name, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.createZone(
+                    name: name,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "remove_zone":
                 guard let zoneID = args["id"] as? String ?? args["zone"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' or 'zone' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.removeZone(zoneID: zoneID, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.removeZone(
+                    zoneID: zoneID,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "add_room_to_zone":
                 guard let roomID = args["room"] as? String ?? args["room_id"] as? String else {
@@ -609,8 +625,12 @@ final class SocketServer: @unchecked Sendable {
                 guard let zoneID = args["zone"] as? String ?? args["zone_id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'zone' or 'zone_id' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.addRoomToZone(roomID: roomID, zoneID: zoneID, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.addRoomToZone(
+                    roomID: roomID,
+                    zoneID: zoneID,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "remove_room_from_zone":
                 guard let roomID = args["room"] as? String ?? args["room_id"] as? String else {
@@ -619,8 +639,12 @@ final class SocketServer: @unchecked Sendable {
                 guard let zoneID = args["zone"] as? String ?? args["zone_id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'zone' or 'zone_id' argument")
                 }
-                let dryRun = (args["dry_run"] as? Bool) ?? (args["dry_run"] as? String).map { $0 == "true" } ?? false
-                result = try await hk.removeRoomFromZone(roomID: roomID, zoneID: zoneID, homeID: args["home_id"] as? String, dryRun: dryRun)
+                result = try await hk.removeRoomFromZone(
+                    roomID: roomID,
+                    zoneID: zoneID,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
 
             case "import_scene":
                 guard let name = args["name"] as? String else {
@@ -629,14 +653,11 @@ final class SocketServer: @unchecked Sendable {
                 guard let actions = args["actions"] as? [[String: String]] else {
                     return encodeResponse(success: false, error: "Missing 'actions' array")
                 }
-                let dryRun = (args["dry_run"] as? Bool)
-                    ?? (args["dry_run"] as? String).map { $0 == "true" }
-                    ?? false
                 result = try await hk.importScene(
                     name: name,
                     homeName: args["home"] as? String,
                     actions: actions,
-                    dryRun: dryRun
+                    dryRun: parseBool(args, key: "dry_run")
                 )
 
             case "webhook_log":

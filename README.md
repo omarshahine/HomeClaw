@@ -103,6 +103,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_rooms` | List rooms and their accessories |
 | `homekit_scenes` | List, get details, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
+| `homekit_manage` | Manage home structure: rename accessories/rooms, create/remove rooms and zones, manage zone membership |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
 | `homekit_config` | View or update configuration (set active home, filtering) |
@@ -159,6 +160,18 @@ homeclaw-cli import-scene scene.json --dry-run   # Preview before creating
 homeclaw-cli import-scene scene.json              # Create scene from JSON
 homeclaw-cli assign-rooms rooms.json --dry-run    # Preview room assignments
 homeclaw-cli assign-rooms rooms.json              # Bulk-assign accessories to rooms
+
+# Home management
+homeclaw-cli rename "Front Door" "Front Door Lock"          # Rename accessory
+homeclaw-cli rename-room "Bedroom" "Primary Bedroom"        # Rename room
+homeclaw-cli create-room "Nursery"                          # Create room
+homeclaw-cli remove-room "Old Room"                         # Remove room
+homeclaw-cli remove-accessory "Broken Sensor"               # Remove accessory
+homeclaw-cli create-zone "Upstairs"                         # Create zone
+homeclaw-cli remove-zone "Old Zone"                         # Remove zone
+homeclaw-cli add-room-to-zone "Bedroom" "Upstairs"          # Add room to zone
+homeclaw-cli remove-room-from-zone "Bedroom" "Upstairs"     # Remove room from zone
+homeclaw-cli rename "Front Door" "New Name" --dry-run       # Preview any mutation
 
 # LLM-optimized device map
 homeclaw-cli device-map

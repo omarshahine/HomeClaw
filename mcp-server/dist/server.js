@@ -20778,6 +20778,59 @@ var tools = [
     }
   },
   {
+    name: "homekit_manage",
+    description: "Manage HomeKit structure: rename accessories, create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support --dry-run for safe previews.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: [
+            "rename",
+            "remove_accessory",
+            "create_room",
+            "rename_room",
+            "remove_room",
+            "create_zone",
+            "remove_zone",
+            "add_room_to_zone",
+            "remove_room_from_zone"
+          ],
+          description: "Management action to perform"
+        },
+        home_id: {
+          type: "string",
+          description: "Home UUID or name. Defaults to configured home."
+        },
+        id: {
+          type: "string",
+          description: "Accessory, room, or zone name/UUID (action-dependent)"
+        },
+        new_name: {
+          type: "string",
+          description: "New name for rename actions"
+        },
+        name: {
+          type: "string",
+          description: "Name for create actions (create_room, create_zone)"
+        },
+        room: {
+          type: "string",
+          description: "Room name/UUID (zone membership actions)"
+        },
+        zone: {
+          type: "string",
+          description: "Zone name/UUID (zone membership actions)"
+        },
+        dry_run: {
+          type: "boolean",
+          description: "Preview changes without applying (default: false)"
+        }
+      },
+      required: ["action"]
+    }
+  },
+  {
     name: "homekit_config",
     description: "View or update HomeClaw configuration. Set a default home, or configure device filtering to control which accessories are exposed.",
     inputSchema: {
@@ -21032,6 +21085,74 @@ async function handleWebhook(args) {
       throw new Error(`Unknown webhook action: ${action}`);
   }
 }
+async function handleManage(args) {
+  const action = args.action;
+  if (!action) throw new Error("action is required");
+  const dryRun = args.dry_run ?? false;
+  const homeID = args.home_id;
+  switch (action) {
+    case "rename": {
+      if (!args.id) throw new Error("id is required for rename");
+      if (!args.new_name) throw new Error("new_name is required for rename");
+      const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("rename", socketArgs);
+    }
+    case "remove_accessory": {
+      if (!args.id) throw new Error("id is required for remove_accessory");
+      const socketArgs = { id: args.id, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("remove_accessory", socketArgs);
+    }
+    case "create_room": {
+      if (!args.name) throw new Error("name is required for create_room");
+      const socketArgs = { name: args.name, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("create_room", socketArgs);
+    }
+    case "rename_room": {
+      if (!args.id) throw new Error("id is required for rename_room");
+      if (!args.new_name) throw new Error("new_name is required for rename_room");
+      const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("rename_room", socketArgs);
+    }
+    case "remove_room": {
+      if (!args.id) throw new Error("id is required for remove_room");
+      const socketArgs = { id: args.id, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("remove_room", socketArgs);
+    }
+    case "create_zone": {
+      if (!args.name) throw new Error("name is required for create_zone");
+      const socketArgs = { name: args.name, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("create_zone", socketArgs);
+    }
+    case "remove_zone": {
+      if (!args.id) throw new Error("id is required for remove_zone");
+      const socketArgs = { id: args.id, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("remove_zone", socketArgs);
+    }
+    case "add_room_to_zone": {
+      if (!args.room) throw new Error("room is required for add_room_to_zone");
+      if (!args.zone) throw new Error("zone is required for add_room_to_zone");
+      const socketArgs = { room: args.room, zone: args.zone, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("add_room_to_zone", socketArgs);
+    }
+    case "remove_room_from_zone": {
+      if (!args.room) throw new Error("room is required for remove_room_from_zone");
+      if (!args.zone) throw new Error("zone is required for remove_room_from_zone");
+      const socketArgs = { room: args.room, zone: args.zone, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("remove_room_from_zone", socketArgs);
+    }
+    default:
+      throw new Error(`Unknown manage action: ${action}`);
+  }
+}
 async function handleConfig(args) {
   const action = args.action || "get";
   switch (action) {
@@ -21084,6 +21205,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "homekit_device_map":
         result = await handleDeviceMap(args);
+        break;
+      case "homekit_manage":
+        result = await handleManage(args);
         break;
       case "homekit_webhook":
         result = await handleWebhook(args);
