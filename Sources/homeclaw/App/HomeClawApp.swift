@@ -506,7 +506,7 @@ class OnboardingSceneDelegate: UIResponder, UIWindowSceneDelegate {
                 // Close the backing NSWindow directly via ObjC runtime.
                 // requestSceneSessionDestruction is async and does not reliably
                 // dismiss the Catalyst window. Closing the NSWindow triggers
-                // sceneDidEnterBackground which handles session cleanup.
+                // sceneDidDisconnect which nils the window reference.
                 Self.closeNSKeyWindow()
                 self?.completionObserver = nil
             }
