@@ -20873,6 +20873,54 @@ var tools = [
     }
   },
   {
+    name: "homekit_automations",
+    description: "Manage HomeKit automations (event triggers). List existing automations, inspect their events and linked scenes, create button-press automations for programmable switches (single/double/long press, multi-button support via service_index), delete automations, or enable/disable them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "get", "create", "delete", "enable", "disable"],
+          description: "Action to perform. Default: list"
+        },
+        home_id: {
+          type: "string",
+          description: "Home UUID or name. Defaults to configured home."
+        },
+        id: {
+          type: "string",
+          description: "Automation UUID or name (get/delete/enable/disable actions)"
+        },
+        name: {
+          type: "string",
+          description: "Automation name (create action)"
+        },
+        accessory_id: {
+          type: "string",
+          description: "Button accessory UUID or name (create action)"
+        },
+        scene_id: {
+          type: "string",
+          description: "Scene UUID or name to trigger (create action)"
+        },
+        press_type: {
+          type: "number",
+          enum: [0, 1, 2],
+          description: "Button press type: 0=single (default), 1=double, 2=long press (create action)"
+        },
+        service_index: {
+          type: "number",
+          description: "Button index for multi-button accessories (1 or 2). Required when accessory has multiple buttons. (create action)"
+        },
+        dry_run: {
+          type: "boolean",
+          description: "Preview changes without applying (create/delete actions)"
+        }
+      },
+      required: ["action"]
+    }
+  },
+  {
     name: "homekit_webhook",
     description: "Manage webhook configuration for pushing HomeKit events to OpenClaw or other services. Actions: setup (configure URL, token, and enable in one step), test (send a test event and show the HTTP response), reset (reset the circuit breaker), status (show webhook health and delivery stats).",
     inputSchema: {
@@ -21055,6 +21103,56 @@ async function handleDeviceMap(args) {
   if (args.home_id) socketArgs.home_id = args.home_id;
   return sendCommand("device_map", socketArgs);
 }
+async function handleAutomations(args) {
+  const action = args.action || "list";
+  switch (action) {
+    case "list": {
+      const socketArgs = {};
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("list_automations", socketArgs);
+    }
+    case "get": {
+      if (!args.id) throw new Error("id is required for get action");
+      const socketArgs = { id: args.id };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("get_automation", socketArgs);
+    }
+    case "create": {
+      if (!args.name) throw new Error("name is required for create action");
+      if (!args.accessory_id) throw new Error("accessory_id is required for create action");
+      if (!args.scene_id) throw new Error("scene_id is required for create action");
+      const socketArgs = {
+        name: args.name,
+        accessory_id: args.accessory_id,
+        scene_id: args.scene_id,
+        press_type: String(args.press_type ?? 0)
+      };
+      if (args.service_index != null) socketArgs.service_index = String(args.service_index);
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.dry_run) socketArgs.dry_run = "true";
+      return sendCommand("create_automation", socketArgs);
+    }
+    case "delete": {
+      if (!args.id) throw new Error("id is required for delete action");
+      const socketArgs = { id: args.id };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.dry_run) socketArgs.dry_run = "true";
+      return sendCommand("delete_automation", socketArgs);
+    }
+    case "enable":
+    case "disable": {
+      if (!args.id) throw new Error("id is required for enable/disable action");
+      const socketArgs = {
+        id: args.id,
+        enabled: String(action === "enable")
+      };
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      return sendCommand("enable_automation", socketArgs);
+    }
+    default:
+      throw new Error(`Unknown automations action: ${action}`);
+  }
+}
 async function handleEvents(args) {
   const socketArgs = {};
   if (args.limit) socketArgs.limit = String(args.limit);
@@ -21230,6 +21328,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "homekit_manage":
         result = await handleManage(args);
+        break;
+      case "homekit_automations":
+        result = await handleAutomations(args);
         break;
       case "homekit_webhook":
         result = await handleWebhook(args);

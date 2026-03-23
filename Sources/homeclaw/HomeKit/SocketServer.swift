@@ -660,6 +660,64 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: parseBool(args, key: "dry_run")
                 )
 
+            case "list_automations":
+                result = await hk.listAutomations(homeID: args["home_id"] as? String)
+
+            case "get_automation":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                result = try await hk.getAutomation(
+                    id: id,
+                    homeID: args["home_id"] as? String
+                )
+
+            case "create_automation":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                guard let accessoryID = args["accessory_id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'accessory_id' argument")
+                }
+                guard let sceneID = args["scene_id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'scene_id' argument")
+                }
+                let pressType = (args["press_type"] as? Int)
+                    ?? (args["press_type"] as? String).flatMap(Int.init)
+                    ?? 0
+                let serviceIndex = (args["service_index"] as? Int)
+                    ?? (args["service_index"] as? String).flatMap(Int.init)
+                result = try await hk.createAutomation(
+                    name: name,
+                    accessoryID: accessoryID,
+                    pressType: pressType,
+                    sceneID: sceneID,
+                    serviceIndex: serviceIndex,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "delete_automation":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                result = try await hk.deleteAutomation(
+                    id: id,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "enable_automation":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                let enabled = parseBool(args, key: "enabled", default: true)
+                result = try await hk.enableAutomation(
+                    id: id,
+                    enabled: enabled,
+                    homeID: args["home_id"] as? String
+                )
+
             case "webhook_log":
                 let limit = (args["limit"] as? Int) ?? (args["limit"] as? String).flatMap(Int.init) ?? 50
                 let outcomeFilter: WebhookEventLogger.Outcome? = (args["outcome"] as? String).flatMap {

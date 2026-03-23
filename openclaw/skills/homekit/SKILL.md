@@ -95,6 +95,16 @@ homeclaw-cli remove-zone "<name-or-uuid>"                    # Remove zone
 homeclaw-cli add-room-to-zone "<room>" "<zone>"              # Add room to zone
 homeclaw-cli remove-room-from-zone "<room>" "<zone>"         # Remove room from zone
 
+# Automations (button programming)
+homeclaw-cli automations list --json                          # List all automations
+homeclaw-cli automations get "<name-or-uuid>" --json          # Detail view
+homeclaw-cli automations create --name "..." --accessory "<name-or-uuid>" --scene "<name-or-uuid>" --press single [--service-index N] [--dry-run]
+homeclaw-cli automations delete "<name-or-uuid>" [--dry-run]
+homeclaw-cli automations enable "<name-or-uuid>"
+homeclaw-cli automations disable "<name-or-uuid>"
+# Press types: single (0), double (1), long (2)
+# Use --service-index for multi-button accessories (e.g., Aqara double-rocker AR009)
+
 # Export to file (any format)
 homeclaw-cli device-map --format agent -o memory/homekit-device-map.json
 homeclaw-cli device-map --format md -o device-map.md

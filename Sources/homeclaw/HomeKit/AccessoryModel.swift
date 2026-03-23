@@ -168,6 +168,106 @@ enum AccessoryModel {
         return detail
     }
 
+    // MARK: - Automations (Event Triggers)
+
+    /// Summary of an automation (event trigger) for list views.
+    static func automationSummary(_ trigger: HMEventTrigger, homeName: String) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": trigger.name,
+            "enabled": trigger.isEnabled,
+            "home": homeName,
+            "scene_count": trigger.actionSets.count,
+            "scenes": trigger.actionSets.map { $0.name },
+        ]
+
+        // Build a human-readable event summary from the first characteristic event
+        if let event = trigger.events.first as? HMCharacteristicEvent<NSCopying>,
+           let accessory = event.characteristic.service?.accessory
+        {
+            let pressValue = (event.triggerValue as? NSNumber)?.intValue
+            let pressName = pressValue.map { pressTypeName($0) } ?? "any_press"
+            dict["event_summary"] = "\(accessory.name) \(pressName)"
+
+            var buttonInfo: [String: Any] = [
+                "accessory_id": accessory.uniqueIdentifier.uuidString,
+                "accessory_name": accessory.name,
+                "press_type": pressName,
+            ]
+            if let idx = serviceIndexForCharacteristic(event.characteristic) {
+                buttonInfo["service_index"] = idx
+            }
+            dict["button_info"] = buttonInfo
+        }
+
+        return dict
+    }
+
+    /// Detailed view of an automation including all events and linked scenes.
+    static func automationDetail(_ trigger: HMEventTrigger, homeName: String) -> [String: Any] {
+        var detail = automationSummary(trigger, homeName: homeName)
+
+        let events: [[String: Any]] = trigger.events.compactMap { event in
+            guard let charEvent = event as? HMCharacteristicEvent<NSCopying> else { return nil }
+            let characteristic = charEvent.characteristic
+            let accessory = characteristic.service?.accessory
+            let pressValue = (charEvent.triggerValue as? NSNumber)?.intValue
+
+            var eventDict: [String: Any] = [
+                "type": "characteristic",
+                "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
+            ]
+            if let accessory {
+                eventDict["accessory"] = accessory.name
+                eventDict["accessory_id"] = accessory.uniqueIdentifier.uuidString
+            }
+            if let service = characteristic.service {
+                eventDict["service_type"] = CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType
+            }
+            if let pressValue {
+                eventDict["trigger_value"] = pressValue
+                eventDict["press_type"] = pressTypeName(pressValue)
+            }
+            if let idx = serviceIndexForCharacteristic(characteristic) {
+                eventDict["service_index"] = idx
+            }
+            return eventDict
+        }
+        detail["events"] = events
+
+        let actionSets: [[String: Any]] = trigger.actionSets.map { actionSet in
+            [
+                "id": actionSet.uniqueIdentifier.uuidString,
+                "name": actionSet.name,
+                "action_count": actionSet.actions.count,
+            ]
+        }
+        detail["action_sets"] = actionSets
+
+        return detail
+    }
+
+    /// Maps press type integer to human-readable name.
+    static func pressTypeName(_ value: Int) -> String {
+        switch value {
+        case 0: "single_press"
+        case 1: "double_press"
+        case 2: "long_press"
+        default: "press_\(value)"
+        }
+    }
+
+    /// Reads the ServiceLabelIndex value from the same service as the given characteristic.
+    private static func serviceIndexForCharacteristic(_ characteristic: HMCharacteristic) -> Int? {
+        guard let service = characteristic.service else { return nil }
+        // ServiceLabelIndex type UUID: 000000CB-0000-1000-8000-0026BB765291
+        let labelIndexType = "000000CB-0000-1000-8000-0026BB765291"
+        guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
+              let value = indexChar.value as? NSNumber
+        else { return nil }
+        return value.intValue
+    }
+
     // MARK: - Home App Display Name
 
     /// Service types where the Home app prefers the service name over the accessory name.

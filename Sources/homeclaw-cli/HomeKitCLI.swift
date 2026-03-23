@@ -29,6 +29,7 @@ struct HomeKitCLI: ParsableCommand {
             Config.self,
             DeviceMapCmd.self,
             Events.self,
+            Automations.self,
             Triggers.self,
             WebhookLog.self,
         ],

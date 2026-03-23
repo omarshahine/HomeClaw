@@ -135,6 +135,8 @@ final class HomeKitManager: NSObject, Observable {
         case homeNotFound(String)
         case roomNotFound(String)
         case zoneNotFound(String)
+        case triggerNotFound(String)
+        case serviceNotFound(String)
 
         var errorDescription: String? {
             switch self {
@@ -149,6 +151,8 @@ final class HomeKitManager: NSObject, Observable {
             case .homeNotFound(let id): "Home not found: \(id)"
             case .roomNotFound(let id): "Room not found: \(id)"
             case .zoneNotFound(let id): "Zone not found: \(id)"
+            case .triggerNotFound(let id): "Automation not found: \(id)"
+            case .serviceNotFound(let detail): "Service not found: \(detail)"
             }
         }
     }
@@ -665,7 +669,267 @@ final class HomeKitManager: NSObject, Observable {
         return ["room": room.name, "zone": zone.name, "home": home.name, "dry_run": false] as [String: Any]
     }
 
+    // MARK: - Automations (HMEventTrigger)
+
+    func listAutomations(homeID: String? = nil) async -> [[String: Any]] {
+        await waitForReady()
+        let targetHomes = filteredHomes(homeID: homeID)
+        var results: [[String: Any]] = []
+        for home in targetHomes {
+            let eventTriggers = home.triggers.compactMap { $0 as? HMEventTrigger }
+            for trigger in eventTriggers {
+                results.append(AccessoryModel.automationSummary(trigger, homeName: home.name))
+            }
+        }
+        return results
+    }
+
+    func getAutomation(id: String, homeID: String? = nil) async throws -> [String: Any] {
+        await waitForReady()
+        let home = try resolveHome(homeID: homeID)
+        guard let trigger = findTrigger(id: id, in: home) else {
+            throw ControlError.triggerNotFound(id)
+        }
+        return AccessoryModel.automationDetail(trigger, homeName: home.name)
+    }
+
+    func createAutomation(
+        name: String,
+        accessoryID: String,
+        pressType: Int,
+        sceneID: String,
+        serviceIndex: Int? = nil,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let home = try resolveHome(homeID: homeID)
+
+        guard let accessory = findAccessory(id: accessoryID, homeID: homeID) else {
+            throw ControlError.accessoryNotFound(accessoryID)
+        }
+
+        let inputEventChar = try findInputEventCharacteristic(on: accessory, serviceIndex: serviceIndex)
+
+        // Find the scene (action set) by UUID-then-name
+        guard let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == sceneID })
+                ?? home.actionSets.first(where: { $0.name.localizedCaseInsensitiveCompare(sceneID) == .orderedSame })
+        else {
+            throw ControlError.accessoryNotFound("Scene not found: \(sceneID)")
+        }
+
+        let pressName = AccessoryModel.pressTypeName(pressType)
+        if dryRun {
+            var result: [String: Any] = [
+                "dry_run": true,
+                "name": name,
+                "home": home.name,
+                "accessory": accessory.name,
+                "press_type": pressName,
+                "scene": actionSet.name,
+            ]
+            if let serviceIndex { result["service_index"] = serviceIndex }
+            return result
+        }
+
+        // Create the event trigger
+        let event = HMCharacteristicEvent(
+            characteristic: inputEventChar,
+            triggerValue: NSNumber(value: pressType) as NSCopying
+        )
+        let trigger = HMEventTrigger(
+            name: name,
+            events: [event],
+            end: nil,
+            recurrences: nil,
+            predicate: nil
+        )
+
+        // Step 1: Add trigger to home
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.addTrigger(trigger) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        // Step 2: Link the scene
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                trigger.addActionSet(actionSet) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+        } catch {
+            // Cleanup: remove the orphaned trigger
+            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                home.removeTrigger(trigger) { err in
+                    if let err { continuation.resume(throwing: err) }
+                    else { continuation.resume() }
+                }
+            }
+            throw error
+        }
+
+        // Step 3: Enable the trigger
+        do {
+            try await homeKitAsync { trigger.enable(true, completionHandler: $0) }
+        } catch {
+            // Cleanup on enable failure
+            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                home.removeTrigger(trigger) { err in
+                    if let err { continuation.resume(throwing: err) }
+                    else { continuation.resume() }
+                }
+            }
+            throw error
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Created automation '\(name)': \(accessory.name) \(pressName) → \(actionSet.name)")
+        var result: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": name,
+            "home": home.name,
+            "accessory": accessory.name,
+            "press_type": pressName,
+            "scene": actionSet.name,
+            "enabled": true,
+            "dry_run": false,
+        ]
+        if let serviceIndex { result["service_index"] = serviceIndex }
+        return result
+    }
+
+    func deleteAutomation(
+        id: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let home = try resolveHome(homeID: homeID)
+        guard let trigger = findTrigger(id: id, in: home) else {
+            throw ControlError.triggerNotFound(id)
+        }
+
+        let triggerName = trigger.name
+        if dryRun {
+            return [
+                "dry_run": true,
+                "name": triggerName,
+                "home": home.name,
+                "scene_count": trigger.actionSets.count,
+            ] as [String: Any]
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeTrigger(trigger) { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Deleted automation '\(triggerName)'")
+        return ["name": triggerName, "home": home.name, "dry_run": false] as [String: Any]
+    }
+
+    func enableAutomation(
+        id: String,
+        enabled: Bool,
+        homeID: String? = nil
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let home = try resolveHome(homeID: homeID)
+        guard let trigger = findTrigger(id: id, in: home) else {
+            throw ControlError.triggerNotFound(id)
+        }
+
+        try await homeKitAsync { trigger.enable(enabled, completionHandler: $0) }
+
+        AppLogger.homekit.info("[\(home.name)] \(enabled ? "Enabled" : "Disabled") automation '\(trigger.name)'")
+        return [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": trigger.name,
+            "enabled": enabled,
+            "home": home.name,
+        ] as [String: Any]
+    }
+
     // MARK: - Private Helpers
+
+    private func findTrigger(id: String, in home: HMHome) -> HMEventTrigger? {
+        let eventTriggers = home.triggers.compactMap { $0 as? HMEventTrigger }
+        // UUID first
+        if let trigger = eventTriggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+            return trigger
+        }
+        // Name fallback
+        return eventTriggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
+
+    private func findInputEventCharacteristic(
+        on accessory: HMAccessory,
+        serviceIndex: Int?
+    ) throws -> HMCharacteristic {
+        // Find all StatelessProgrammableSwitch services
+        let switchServices = accessory.services.filter {
+            $0.serviceType == HMServiceTypeStatelessProgrammableSwitch
+        }
+
+        guard !switchServices.isEmpty else {
+            throw ControlError.serviceNotFound(
+                "'\(accessory.name)' has no programmable switch services"
+            )
+        }
+
+        let targetService: HMService
+        if let serviceIndex {
+            // Match by ServiceLabelIndex characteristic value
+            let labelIndexType = "000000CB-0000-1000-8000-0026BB765291"
+            guard let matched = switchServices.first(where: { service in
+                guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
+                      let value = indexChar.value as? NSNumber
+                else { return false }
+                return value.intValue == serviceIndex
+            }) else {
+                let available = switchServices.compactMap { service -> String? in
+                    guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
+                          let value = indexChar.value as? NSNumber
+                    else { return nil }
+                    return "\(value.intValue)"
+                }
+                throw ControlError.serviceNotFound(
+                    "No button with service_index \(serviceIndex) on '\(accessory.name)'. Available: \(available.joined(separator: ", "))"
+                )
+            }
+            targetService = matched
+        } else if switchServices.count == 1 {
+            targetService = switchServices[0]
+        } else {
+            // Multiple switch services, index required
+            let labelIndexType = "000000CB-0000-1000-8000-0026BB765291"
+            let indices = switchServices.compactMap { service -> String? in
+                guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
+                      let value = indexChar.value as? NSNumber
+                else { return nil }
+                return "\(value.intValue)"
+            }
+            throw ControlError.serviceNotFound(
+                "'\(accessory.name)' has \(switchServices.count) buttons. Specify --service-index (\(indices.joined(separator: ", ")))"
+            )
+        }
+
+        // Find the input_event characteristic on the selected service
+        guard let inputEvent = targetService.characteristics.first(where: {
+            $0.characteristicType == HMCharacteristicTypeInputEvent
+        }) else {
+            throw ControlError.characteristicNotFound(
+                "input_event not found on '\(accessory.name)' button service"
+            )
+        }
+
+        return inputEvent
+    }
 
     private func resolveHome(homeID: String?) throws -> HMHome {
         guard let home = filteredHomes(homeID: homeID).first else {

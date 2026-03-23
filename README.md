@@ -104,6 +104,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_scenes` | List, get details, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
 | `homekit_manage` | Manage home structure: rename accessories/rooms, create/remove rooms and zones, manage zone membership |
+| `homekit_automations` | Manage automations: list, create button-press triggers (single/double/long), link to scenes, enable/disable |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
 | `homekit_config` | View or update configuration (set active home, filtering) |
@@ -172,6 +173,18 @@ homeclaw-cli remove-zone "Old Zone"                         # Remove zone
 homeclaw-cli add-room-to-zone "Bedroom" "Upstairs"          # Add room to zone
 homeclaw-cli remove-room-from-zone "Bedroom" "Upstairs"     # Remove room from zone
 homeclaw-cli rename "Front Door" "New Name" --dry-run       # Preview any mutation
+
+# Automations (button programming)
+homeclaw-cli automations                                     # List all automations
+homeclaw-cli automations get "<name-or-uuid>"                # Detail view
+homeclaw-cli automations create --name "Gym Lights" \
+  --accessory "Gym Button" --scene "Gym On" --press single   # Program a button
+homeclaw-cli automations create --name "Open Blinds" \
+  --accessory "Blinds Button" --scene "Open" \
+  --service-index 1 --dry-run                                # Multi-button preview
+homeclaw-cli automations delete "<name-or-uuid>"             # Delete automation
+homeclaw-cli automations enable "<name-or-uuid>"             # Enable
+homeclaw-cli automations disable "<name-or-uuid>"            # Disable
 
 # LLM-optimized device map
 homeclaw-cli device-map
