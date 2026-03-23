@@ -7,7 +7,7 @@ struct AssignRooms: ParsableCommand {
         abstract: "Assign accessories to rooms from a JSON file"
     )
 
-    @Argument(help: "Path to JSON file with assignments array [{\"accessory\": \"...\", \"room\": \"...\"}]")
+    @Argument(help: "Path to JSON file with assignments array [{\"accessory\": \"...\", \"room\": \"...\"}] or [{\"uuid\": \"...\", \"room\": \"...\"}]")
     var file: String
 
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
@@ -26,7 +26,7 @@ struct AssignRooms: ParsableCommand {
         guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let assignments = parsed["assignments"] as? [[String: String]]
         else {
-            throw ValidationError("JSON file must contain an 'assignments' array of {\"accessory\": \"...\", \"room\": \"...\"} objects")
+            throw ValidationError("JSON file must contain an 'assignments' array of {\"accessory\": \"...\", \"room\": \"...\"} or {\"uuid\": \"...\", \"room\": \"...\"} objects")
         }
 
         var args: [String: Any] = [

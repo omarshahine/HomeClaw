@@ -340,12 +340,13 @@ The `import-scene` command accepts a JSON file defining a scene and its actions:
 }
 ```
 
-The `assign-rooms` command accepts a JSON file mapping accessories to rooms:
+The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan):
 
 ```json
 {
   "assignments": [
     {"accessory": "Kitchen Light", "room": "Kitchen"},
+    {"uuid": "790A359D-27A6-5738-A92E-F4380CC6BA07", "room": "Front Door"},
     {"accessory": "Desk Lamp", "room": "Office"}
   ]
 }

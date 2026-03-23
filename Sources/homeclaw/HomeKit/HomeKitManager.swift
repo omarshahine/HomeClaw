@@ -353,10 +353,7 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
-        let targetHomes = filteredHomes(homeID: homeName)
-        guard let home = targetHomes.first else {
-            throw ControlError.accessoryNotFound("No home found")
-        }
+        let home = try resolveHome(homeID: homeName)
 
         var assigned = 0
         var skipped = 0
@@ -364,17 +361,31 @@ final class HomeKitManager: NSObject, Observable {
         var details: [[String: String]] = []
 
         for entry in assignments {
-            guard let accessoryName = entry["accessory"],
-                  let targetRoomName = entry["room"]
-            else {
+            guard let targetRoomName = entry["room"] else {
                 skipped += 1
                 continue
             }
 
-            guard let accessory = home.accessories.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
-            }) else {
-                notFound.append(accessoryName)
+            // Support UUID-based matching (preferred) or name-based (fallback).
+            // UUID avoids ambiguity when multiple accessories share the same name
+            // (e.g., fan + light services from a ceiling fan).
+            let accessory: HMAccessory?
+            let identifier: String
+            if let uuidStr = entry["uuid"] {
+                accessory = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == uuidStr })
+                identifier = uuidStr
+            } else if let accessoryName = entry["accessory"] {
+                accessory = home.accessories.first(where: {
+                    $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
+                })
+                identifier = accessoryName
+            } else {
+                skipped += 1
+                continue
+            }
+
+            guard let accessory else {
+                notFound.append(identifier)
                 continue
             }
 
@@ -403,9 +414,7 @@ final class HomeKitManager: NSObject, Observable {
 
             // Find or create target room
             let room: HMRoom
-            if let existing = home.rooms.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(targetRoomName) == .orderedSame
-            }) {
+            if let existing = findRoom(id: targetRoomName, in: home) {
                 room = existing
             } else {
                 room = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMRoom, Error>) in
@@ -417,12 +426,7 @@ final class HomeKitManager: NSObject, Observable {
                 }
             }
 
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                home.assignAccessory(accessory, to: room) { error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume() }
-                }
-            }
+            try await homeKitAsync { home.assignAccessory(accessory, to: room, completionHandler: $0) }
 
             assigned += 1
             details.append([

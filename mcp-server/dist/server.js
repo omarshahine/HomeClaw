@@ -20779,7 +20779,7 @@ var tools = [
   },
   {
     name: "homekit_manage",
-    description: "Manage HomeKit structure: rename accessories, create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support --dry-run for safe previews.",
+    description: "Manage HomeKit structure: rename accessories, assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
     inputSchema: {
       type: "object",
       properties: {
@@ -20788,6 +20788,7 @@ var tools = [
           enum: [
             "rename",
             "remove_accessory",
+            "assign_rooms",
             "create_room",
             "rename_room",
             "remove_room",
@@ -20821,6 +20822,19 @@ var tools = [
         zone: {
           type: "string",
           description: "Zone name/UUID (zone membership actions)"
+        },
+        assignments: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              uuid: { type: "string", description: "Accessory UUID (preferred for duplicate names)" },
+              accessory: { type: "string", description: "Accessory name (fallback, case-insensitive)" },
+              room: { type: "string", description: "Target room name (created if missing)" }
+            },
+            required: ["room"]
+          },
+          description: 'Array of room assignments (assign_rooms action). Each must have "room" plus either "uuid" or "accessory".'
         },
         dry_run: {
           type: "boolean",
@@ -21097,6 +21111,14 @@ async function handleManage(args) {
       const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
       return sendCommand("rename", socketArgs);
+    }
+    case "assign_rooms": {
+      if (!args.assignments || !Array.isArray(args.assignments) || args.assignments.length === 0) {
+        throw new Error("assignments array is required for assign_rooms");
+      }
+      const socketArgs = { assignments: args.assignments, dry_run: dryRun };
+      if (homeID) socketArgs.home = homeID;
+      return sendCommand("assign_rooms", socketArgs);
     }
     case "remove_accessory": {
       if (!args.id) throw new Error("id is required for remove_accessory");
