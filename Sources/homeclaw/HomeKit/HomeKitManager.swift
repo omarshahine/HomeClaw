@@ -136,6 +136,7 @@ final class HomeKitManager: NSObject, Observable {
         case roomNotFound(String)
         case zoneNotFound(String)
         case triggerNotFound(String)
+        case sceneNotFound(String)
         case serviceNotFound(String)
 
         var errorDescription: String? {
@@ -152,6 +153,7 @@ final class HomeKitManager: NSObject, Observable {
             case .roomNotFound(let id): "Room not found: \(id)"
             case .zoneNotFound(let id): "Zone not found: \(id)"
             case .triggerNotFound(let id): "Automation not found: \(id)"
+            case .sceneNotFound(let id): "Scene not found: \(id)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
             }
         }
@@ -715,7 +717,7 @@ final class HomeKitManager: NSObject, Observable {
         guard let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == sceneID })
                 ?? home.actionSets.first(where: { $0.name.localizedCaseInsensitiveCompare(sceneID) == .orderedSame })
         else {
-            throw ControlError.accessoryNotFound("Scene not found: \(sceneID)")
+            throw ControlError.sceneNotFound(sceneID)
         }
 
         let pressName = AccessoryModel.pressTypeName(pressType)
@@ -885,7 +887,7 @@ final class HomeKitManager: NSObject, Observable {
         let targetService: HMService
         if let serviceIndex {
             // Match by ServiceLabelIndex characteristic value
-            let labelIndexType = "000000CB-0000-1000-8000-0026BB765291"
+            let labelIndexType = CharacteristicMapper.serviceLabelIndexType
             guard let matched = switchServices.first(where: { service in
                 guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
                       let value = indexChar.value as? NSNumber
@@ -907,7 +909,7 @@ final class HomeKitManager: NSObject, Observable {
             targetService = switchServices[0]
         } else {
             // Multiple switch services, index required
-            let labelIndexType = "000000CB-0000-1000-8000-0026BB765291"
+            let labelIndexType = CharacteristicMapper.serviceLabelIndexType
             let indices = switchServices.compactMap { service -> String? in
                 guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
                       let value = indexChar.value as? NSNumber

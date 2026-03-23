@@ -260,9 +260,7 @@ enum AccessoryModel {
     /// Reads the ServiceLabelIndex value from the same service as the given characteristic.
     private static func serviceIndexForCharacteristic(_ characteristic: HMCharacteristic) -> Int? {
         guard let service = characteristic.service else { return nil }
-        // ServiceLabelIndex type UUID: 000000CB-0000-1000-8000-0026BB765291
-        let labelIndexType = "000000CB-0000-1000-8000-0026BB765291"
-        guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
+        guard let indexChar = service.characteristics.first(where: { $0.characteristicType == CharacteristicMapper.serviceLabelIndexType }),
               let value = indexChar.value as? NSNumber
         else { return nil }
         return value.intValue

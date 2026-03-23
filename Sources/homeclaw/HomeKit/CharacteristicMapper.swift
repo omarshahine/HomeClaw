@@ -3,6 +3,9 @@ import HomeKit
 /// Maps HomeKit characteristic type UUIDs to human-readable names and provides
 /// value formatting for common characteristic types.
 enum CharacteristicMapper {
+    /// ServiceLabelIndex characteristic type UUID (used for multi-button accessory disambiguation).
+    static let serviceLabelIndexType = "000000CB-0000-1000-8000-0026BB765291"
+
     // MARK: - Characteristic Type Names
 
     private static let typeNames: [String: String] = [
