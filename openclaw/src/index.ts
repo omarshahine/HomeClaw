@@ -72,8 +72,9 @@ const TOOLS: ToolDef[] = [
 			),
 		}),
 		buildArgs: (params) => {
-			const args = ['device-map', '--format', String(params.format ?? 'agent')];
-			args.push('--json');
+			const fmt = String(params.format ?? 'agent');
+			const args = ['device-map', '--format', fmt];
+			if (fmt === 'json') args.push('--json');
 			return args;
 		},
 	},

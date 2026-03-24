@@ -41,6 +41,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.48",
     "openclaw": "^2026.3.23"
   },
   "devDependencies": {
