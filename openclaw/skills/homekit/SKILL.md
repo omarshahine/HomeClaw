@@ -41,7 +41,7 @@ homeclaw-cli device-map --format agent -o memory/homekit-device-map.json
 2. **Use `type` to disambiguate** — `lighting` devices support brightness; `power` devices are on/off only. A "Closet Light" with `type: power` cannot dim.
 3. If ambiguous, prefer the device in the most likely room (main living areas > bedrooms > outdoor)
 4. If still ambiguous, ask
-5. **Use UUIDs for control when names collide** — many devices share names (9 "Overhead" lights across rooms). Use `display_name` for reading, `id` for `set` commands
+5. **Always use UUIDs for write operations** — many devices share names (9 "Overhead" lights, multiple "Blinds"). Use `display_name` for reading, `id` (UUID) for `set`, `import-scene`, and `automations create` commands
 6. **Check `controls` before sending a command** — if `brightness` isn't in `controls`, don't try to set it
 7. **If no match found, refresh the cache first** — devices may have been added/renamed:
    ```bash
@@ -60,8 +60,8 @@ homeclaw-cli search "<query>" --json       # Search by name/room/category
 homeclaw-cli get "<name-or-uuid>" --json   # Full detail on one device
 homeclaw-cli list --room "Kitchen" --json  # All devices in a room
 
-# Control — use UUID when name is ambiguous
-homeclaw-cli set "<name-or-uuid>" power true           # On/off
+# Control — always use UUID for reliability
+homeclaw-cli set "<uuid>" power true                   # On/off
 homeclaw-cli set "<name-or-uuid>" brightness 50        # Lights (0-100)
 homeclaw-cli set "<name-or-uuid>" target_temperature 72 # Thermostat
 homeclaw-cli set "<name-or-uuid>" target_heating_cooling auto  # HVAC: off/heat/cool/auto
@@ -103,24 +103,24 @@ homeclaw-cli automations enable "<name-or-uuid>"
 homeclaw-cli automations disable "<name-or-uuid>"
 
 # Create with inline actions (creates a scene named after the automation)
-homeclaw-cli automations create --name "Button On" \
+# ALWAYS use UUIDs for target accessories to avoid name collisions
+homeclaw-cli automations create --name "Sarah's Room Open" \
   --accessory "Office Button" \
-  --action "Elgato Key Light:power:true" \
-  --action "Elgato Key Light:brightness:50" \
+  --action "BE21C139-413A-50F9-B97F-B9BDA06302A8:power:true" \
+  --action "52195C6F-6FAA-5E52-AA56-840A6605EEAA:target_position:100" \
   --press single --service-index 1
 
-# Create with a named scene (visible in Home app Scenes list)
+# Create with a named scene
 homeclaw-cli automations create --name "Movie Mode" \
   --accessory "Remote Button" \
   --scene "Movie Time" \
   --press single
 
 # Press types: single (0), double (1), long (2)
-# --action format: "accessory_name:property:value" (repeatable)
+# --action format: "UUID:property:value" (repeatable, UUID strongly preferred over names)
 # --scene and --action are mutually exclusive
 # Use --service-index for multi-button accessories (e.g., Aqara in fast mode)
-# Note: inline actions create a visible scene (Apple's Home app uses a private API
-# for hidden automation-only action sets; third-party apps cannot replicate this)
+# Note: inline actions create a visible scene (Apple uses a private API for hidden ones)
 
 # Export to file (any format)
 homeclaw-cli device-map --format agent -o memory/homekit-device-map.json

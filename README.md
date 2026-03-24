@@ -57,12 +57,12 @@ homeclaw-cli device-map --format agent
 HomeClaw can create HomeKit automations for programmable switches, something typically only possible through the Home app UI.
 
 ```bash
-# Inline actions (creates a scene named after the automation)
+# Inline actions — use UUIDs for target accessories to avoid name collisions
 homeclaw-cli automations create \
-  --name "Office Light On" \
+  --name "Sarah's Room Open" \
   --accessory "Office Button" \
-  --action "Key Light:power:true" \
-  --action "Key Light:brightness:50" \
+  --action "BE21C139-413A-50F9-B97F-B9BDA06302A8:power:true" \
+  --action "52195C6F-6FAA-5E52-AA56-840A6605EEAA:target_position:100" \
   --press single --service-index 1
 
 # Scene-based (triggers an existing scene)
@@ -74,10 +74,6 @@ homeclaw-cli automations create \
 
 # List all automations
 homeclaw-cli automations list
-
-# Preview before creating
-homeclaw-cli automations create --name "Test" --accessory "Button" \
-  --action "Light:power:true" --dry-run
 ```
 
 **Inline vs scene:** Use `--action` for simple button-to-device mappings. This creates a scene named after the automation. Use `--scene` to trigger an existing scene instead. Note: Apple's Home app uses a private API for hidden automation-only action sets; inline actions created via HomeClaw will appear as visible scenes in the Home app.

@@ -175,16 +175,16 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 ### Program a button (inline actions)
 
-Creates a scene named after the automation and links it to the button press:
+Creates a scene named after the automation and links it to the button press. **Always use UUIDs for target accessories** to avoid name collisions (many accessories share names like "Overhead" or "Blinds" across rooms).
 
 1. Find the button: `homekit_accessories` with `action: "search"`, `query: "Office Button"`
-2. Find the target device: `homekit_accessories` with `action: "search"`, `query: "Key Light"`
-3. Check button services: `homekit_accessories` with `action: "get"`, `accessory_id: "<button-uuid>"` to see how many buttons and what press types are supported (`input_event` max: 0=single only, 2=single+double+long)
-4. Create automation: `homekit_automations` with `action: "create"`, `name: "Button → Light On"`, `accessory_id: "<button-uuid>"`, `actions: [{accessory: "Key Light", property: "power", value: "true"}, {accessory: "Key Light", property: "brightness", value: "50"}]`, `press_type: 0`, `service_index: 1`
+2. Find target devices and note their UUIDs: `homekit_accessories` with `action: "list"`, `room: "Sarah's Bedroom"`
+3. Check button services: `homekit_accessories` with `action: "get"`, `accessory_id: "<button-uuid>"` to see how many buttons and press types (`input_event` max: 0=single only, 2=single+double+long)
+4. Create automation: `homekit_automations` with `action: "create"`, `name: "Room Open"`, `accessory_id: "<button-uuid>"`, `actions: [{accessory: "<light-uuid>", property: "power", value: "true"}, {accessory: "<blind-uuid>", property: "target_position", value: "100"}]`, `press_type: 0`, `service_index: 1`
 
 ### Program a button (with a named scene)
 
-Use this when the automation should trigger a scene that's also visible in the Home app Scenes tab and usable via Siri:
+Use when the automation should trigger an existing scene:
 
 1. Find the button and identify the scene
 2. Create automation: `homekit_automations` with `action: "create"`, `name: "Button → Movie Time"`, `accessory_id: "<button-uuid>"`, `scene_id: "Movie Time"`, `press_type: 0`

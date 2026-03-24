@@ -889,7 +889,8 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
-    /// Resolve action definitions to HomeKit accessory/characteristic/value tuples
+    /// Resolve action definitions to HomeKit accessory/characteristic/value tuples.
+    /// The `accessory` field accepts UUIDs (preferred) or names.
     private func resolveActions(
         _ actions: [[String: String]],
         in home: HMHome
@@ -897,16 +898,23 @@ final class HomeKitManager: NSObject, Observable {
         var resolved: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
 
         for action in actions {
-            guard let accessoryName = action["accessory"],
+            guard let accessoryID = action["accessory"],
                   let property = action["property"],
                   let valueStr = action["value"]
             else {
                 throw ControlError.writeFailed("Action missing required fields (accessory, property, value): \(action)")
             }
 
-            let roomName = action["room"]
-            guard let accessory = findAccessoryByName(accessoryName, room: roomName, in: home) else {
-                throw ControlError.accessoryNotFound(accessoryName + (roomName.map { " in \($0)" } ?? ""))
+            // Try UUID first, then name with optional room disambiguator
+            let accessory: HMAccessory
+            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == accessoryID }) {
+                accessory = found
+            } else {
+                let roomName = action["room"]
+                guard let found = findAccessoryByName(accessoryID, room: roomName, in: home) else {
+                    throw ControlError.accessoryNotFound(accessoryID + (action["room"].map { " in \($0)" } ?? ""))
+                }
+                accessory = found
             }
 
             guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
@@ -1100,7 +1108,7 @@ final class HomeKitManager: NSObject, Observable {
         var warnings: [String] = []
 
         for action in actions {
-            guard let accessoryName = action["accessory"],
+            guard let accessoryID = action["accessory"],
                   let property = action["property"],
                   let valueStr = action["value"]
             else {
@@ -1108,10 +1116,17 @@ final class HomeKitManager: NSObject, Observable {
                 continue
             }
 
-            let roomName = action["room"]
-            guard let accessory = findAccessoryByName(accessoryName, room: roomName, in: home) else {
-                warnings.append("Accessory not found: \(accessoryName)" + (roomName.map { " in \($0)" } ?? ""))
-                continue
+            // Try UUID first, then name with optional room disambiguator
+            let accessory: HMAccessory
+            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == accessoryID }) {
+                accessory = found
+            } else {
+                let roomName = action["room"]
+                guard let found = findAccessoryByName(accessoryID, room: roomName, in: home) else {
+                    warnings.append("Accessory not found: \(accessoryID)" + (roomName.map { " in \($0)" } ?? ""))
+                    continue
+                }
+                accessory = found
             }
 
             guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
@@ -1216,11 +1231,22 @@ final class HomeKitManager: NSObject, Observable {
     private func parseActionValue(_ raw: String, property: String) -> (NSCopying & NSObjectProtocol)? {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
 
-        // Boolean ON/OFF
-        switch trimmed.uppercased() {
-        case "ON", "TRUE", "1": return NSNumber(value: true)
-        case "OFF", "FALSE", "0": return NSNumber(value: false)
-        default: break
+        // Properties that are always numeric — never interpret "0"/"1" as boolean
+        let numericProperties: Set<String> = [
+            "target_position", "current_position", "brightness", "hue", "saturation",
+            "color_temperature", "target_temperature", "rotation_speed", "battery_level",
+        ]
+        let isNumericProperty = numericProperties.contains(property.lowercased())
+
+        // Boolean ON/OFF — but only for non-numeric properties
+        if !isNumericProperty {
+            switch trimmed.uppercased() {
+            case "ON", "TRUE": return NSNumber(value: true)
+            case "OFF", "FALSE": return NSNumber(value: false)
+            case "1": return NSNumber(value: true)
+            case "0": return NSNumber(value: false)
+            default: break
+            }
         }
 
         // Lock states
