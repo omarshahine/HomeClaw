@@ -62,11 +62,11 @@ homeclaw-cli list --room "Kitchen" --json  # All devices in a room
 
 # Control — always use UUID for reliability
 homeclaw-cli set "<uuid>" power true                   # On/off
-homeclaw-cli set "<name-or-uuid>" brightness 50        # Lights (0-100)
-homeclaw-cli set "<name-or-uuid>" target_temperature 72 # Thermostat
-homeclaw-cli set "<name-or-uuid>" target_heating_cooling auto  # HVAC: off/heat/cool/auto
-homeclaw-cli set "<name-or-uuid>" lock_target_state locked     # Locks: locked/unlocked
-homeclaw-cli set "<name-or-uuid>" target_position 100          # Blinds (0=closed, 100=open)
+homeclaw-cli set "<uuid>" brightness 50                # Lights (0-100)
+homeclaw-cli set "<uuid>" target_temperature 72        # Thermostat
+homeclaw-cli set "<uuid>" target_heating_cooling auto  # HVAC: off/heat/cool/auto
+homeclaw-cli set "<uuid>" lock_target_state locked     # Locks: locked/unlocked
+homeclaw-cli set "<uuid>" target_position 100          # Blinds (0=closed, 100=open)
 
 # Scenes
 homeclaw-cli scenes --json              # List all scenes

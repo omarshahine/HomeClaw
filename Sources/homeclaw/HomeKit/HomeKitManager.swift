@@ -907,7 +907,7 @@ final class HomeKitManager: NSObject, Observable {
 
             // Try UUID first, then name with optional room disambiguator
             let accessory: HMAccessory
-            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == accessoryID }) {
+            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(accessoryID) == .orderedSame }) {
                 accessory = found
             } else {
                 let roomName = action["room"]
@@ -1118,7 +1118,7 @@ final class HomeKitManager: NSObject, Observable {
 
             // Try UUID first, then name with optional room disambiguator
             let accessory: HMAccessory
-            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == accessoryID }) {
+            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(accessoryID) == .orderedSame }) {
                 accessory = found
             } else {
                 let roomName = action["room"]
@@ -1235,6 +1235,13 @@ final class HomeKitManager: NSObject, Observable {
         let numericProperties: Set<String> = [
             "target_position", "current_position", "brightness", "hue", "saturation",
             "color_temperature", "target_temperature", "rotation_speed", "battery_level",
+            "volume", "volume_control_type", "rotation_direction", "position_state",
+            "current_tilt_angle", "target_tilt_angle", "swing_mode",
+            "target_fan_state", "current_fan_state",
+            "current_heating_cooling", "target_heating_cooling",
+            "current_humidity", "target_humidity", "current_light_level",
+            "charging_state", "lock_current_state", "lock_target_state",
+            "current_door_state", "target_door_state", "contact_state",
         ]
         let isNumericProperty = numericProperties.contains(property.lowercased())
 
