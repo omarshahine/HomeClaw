@@ -151,7 +151,7 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, help: "Scene name or UUID to trigger (alternative to --action)")
     var scene: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene)")
+    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use the MCP actions array instead.")
     var action: [String] = []
 
     @Option(name: .long, help: "Press type: single, double, or long (default: single)")

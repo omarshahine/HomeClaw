@@ -726,6 +726,7 @@ final class HomeKitManager: NSObject, Observable {
             if dryRun {
                 var result: [String: Any] = [
                     "dry_run": true,
+                    "inline_actions": true,
                     "name": name,
                     "home": home.name,
                     "accessory": accessory.name,
