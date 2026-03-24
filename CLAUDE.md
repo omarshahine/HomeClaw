@@ -39,7 +39,7 @@ Sources/
     MacOSController.swift  # NSStatusItem + NSMenu
     Info.plist           # NSPrincipalClass: MacOSController
   homeclaw-cli/          # CLI tool (SPM executable + Xcode target)
-    Commands/            # list, get, set, search, scenes, status, config, device-map
+    Commands/            # list, get, set, search, scenes, automations, status, config, device-map
     Commands/_disabled/  # Preserved token command (not compiled)
     SocketClient.swift   # Direct socket communication
 Resources/               # Info.plist, entitlements, app icons
@@ -151,7 +151,16 @@ Xcode automatic signing creates the required provisioning profile for the develo
 
 ## MCP Tools
 
-The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, search, and home structure management (rename, rooms, zones). Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
+The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for home/room/accessory listing, accessory control, scene management, search, home structure management (rename, rooms, zones), and automation management. Tool schemas are defined in `lib/schemas.js` and handlers in `lib/handlers/homekit.js`.
+
+## Automations (Button Programming)
+
+HomeClaw can create HomeKit automations for programmable switches via the CLI, MCP tools, or socket API. Two creation modes:
+
+- **Inline actions** (`--action` / `actions` array): Creates a non-visible action set. This is the default, matching Home app behavior. Each action specifies an accessory, property, and value.
+- **Scene reference** (`--scene` / `scene_id`): Links to an existing named scene visible in the Home app.
+
+Implementation: `HomeKitManager.createAutomation()` creates an `HMEventTrigger` watching the button's `input_event` characteristic linked to an `HMActionSet`. The `resolveActions` helper reuses the same accessory/characteristic resolution as `importScene`. Multi-button accessories use `service_index` to target specific buttons (e.g., Aqara AR009 fast mode: Button 1 = index 1, Button 2 = index 2).
 
 ## Concurrency Model
 

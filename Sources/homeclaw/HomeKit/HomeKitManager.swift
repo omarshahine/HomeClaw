@@ -699,7 +699,8 @@ final class HomeKitManager: NSObject, Observable {
         name: String,
         accessoryID: String,
         pressType: Int,
-        sceneID: String,
+        sceneID: String? = nil,
+        actions: [[String: String]]? = nil,
         serviceIndex: Int? = nil,
         homeID: String? = nil,
         dryRun: Bool = false
@@ -712,26 +713,86 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         let inputEventChar = try findInputEventCharacteristic(on: accessory, serviceIndex: serviceIndex)
-
-        // Find the scene (action set) by UUID-then-name
-        guard let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == sceneID })
-                ?? home.actionSets.first(where: { $0.name.localizedCaseInsensitiveCompare(sceneID) == .orderedSame })
-        else {
-            throw ControlError.sceneNotFound(sceneID)
-        }
-
         let pressName = AccessoryModel.pressTypeName(pressType)
-        if dryRun {
-            var result: [String: Any] = [
-                "dry_run": true,
-                "name": name,
-                "home": home.name,
-                "accessory": accessory.name,
-                "press_type": pressName,
-                "scene": actionSet.name,
-            ]
-            if let serviceIndex { result["service_index"] = serviceIndex }
-            return result
+
+        // Resolve the action set: either find an existing scene or create an inline one
+        let actionSet: HMActionSet
+        let isInlineActionSet: Bool
+
+        if let actions, !actions.isEmpty {
+            // Create an inline action set (like the Home app does for non-scene automations)
+            let resolvedActions = try resolveActions(actions, in: home)
+
+            if dryRun {
+                var result: [String: Any] = [
+                    "dry_run": true,
+                    "name": name,
+                    "home": home.name,
+                    "accessory": accessory.name,
+                    "press_type": pressName,
+                    "action_count": resolvedActions.count,
+                    "actions": resolvedActions.map { action in
+                        [
+                            "accessory": action.accessory.name,
+                            "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
+                            "value": "\(action.value)",
+                        ] as [String: String]
+                    },
+                ]
+                if let serviceIndex { result["service_index"] = serviceIndex }
+                return result
+            }
+
+            // Create an action set with a UUID-based name (not user-visible in Home app)
+            let inlineSetName = UUID().uuidString
+            let newActionSet = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMActionSet, Error>) in
+                home.addActionSet(withName: inlineSetName) { actionSet, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else if let actionSet { continuation.resume(returning: actionSet) }
+                    else { continuation.resume(throwing: ControlError.writeFailed("Failed to create action set")) }
+                }
+            }
+
+            for resolved in resolvedActions {
+                let writeAction = HMCharacteristicWriteAction(
+                    characteristic: resolved.characteristic,
+                    targetValue: resolved.value as! NSCopying & NSObjectProtocol
+                )
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    newActionSet.addAction(writeAction) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+            }
+
+            actionSet = newActionSet
+            isInlineActionSet = true
+        } else if let sceneID {
+            // Find an existing scene by UUID-then-name
+            guard let existingSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == sceneID })
+                    ?? home.actionSets.first(where: { $0.name.localizedCaseInsensitiveCompare(sceneID) == .orderedSame })
+            else {
+                throw ControlError.sceneNotFound(sceneID)
+            }
+
+            if dryRun {
+                var result: [String: Any] = [
+                    "dry_run": true,
+                    "name": name,
+                    "home": home.name,
+                    "accessory": accessory.name,
+                    "press_type": pressName,
+                    "scene": existingSet.name,
+                ]
+                if let serviceIndex { result["service_index"] = serviceIndex }
+                return result
+            }
+
+            actionSet = existingSet
+            isInlineActionSet = false
+        } else {
+            throw ControlError.writeFailed("Either 'scene_id' or 'actions' must be provided")
         }
 
         // Create the event trigger
@@ -755,7 +816,7 @@ final class HomeKitManager: NSObject, Observable {
             }
         }
 
-        // Step 2: Link the scene
+        // Step 2: Link the action set
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 trigger.addActionSet(actionSet) { error in
@@ -764,7 +825,15 @@ final class HomeKitManager: NSObject, Observable {
                 }
             }
         } catch {
-            // Cleanup: remove the orphaned trigger
+            // Cleanup: remove the orphaned trigger (and inline action set if we created one)
+            if isInlineActionSet {
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeActionSet(actionSet) { err in
+                        if let err { continuation.resume(throwing: err) }
+                        else { continuation.resume() }
+                    }
+                }
+            }
             try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 home.removeTrigger(trigger) { err in
                     if let err { continuation.resume(throwing: err) }
@@ -779,6 +848,14 @@ final class HomeKitManager: NSObject, Observable {
             try await homeKitAsync { trigger.enable(true, completionHandler: $0) }
         } catch {
             // Cleanup on enable failure
+            if isInlineActionSet {
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeActionSet(actionSet) { err in
+                        if let err { continuation.resume(throwing: err) }
+                        else { continuation.resume() }
+                    }
+                }
+            }
             try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 home.removeTrigger(trigger) { err in
                     if let err { continuation.resume(throwing: err) }
@@ -788,19 +865,59 @@ final class HomeKitManager: NSObject, Observable {
             throw error
         }
 
-        AppLogger.homekit.info("[\(home.name)] Created automation '\(name)': \(accessory.name) \(pressName) → \(actionSet.name)")
+        let actionLabel = isInlineActionSet ? "\(actionSet.actions.count) inline action(s)" : actionSet.name
+        AppLogger.homekit.info("[\(home.name)] Created automation '\(name)': \(accessory.name) \(pressName) → \(actionLabel)")
         var result: [String: Any] = [
             "id": trigger.uniqueIdentifier.uuidString,
             "name": name,
             "home": home.name,
             "accessory": accessory.name,
             "press_type": pressName,
-            "scene": actionSet.name,
             "enabled": true,
             "dry_run": false,
+            "action_count": actionSet.actions.count,
         ]
+        if isInlineActionSet {
+            result["inline_actions"] = true
+        } else {
+            result["scene"] = actionSet.name
+        }
         if let serviceIndex { result["service_index"] = serviceIndex }
         return result
+    }
+
+    /// Resolve action definitions to HomeKit accessory/characteristic/value tuples
+    private func resolveActions(
+        _ actions: [[String: String]],
+        in home: HMHome
+    ) throws -> [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] {
+        var resolved: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
+
+        for action in actions {
+            guard let accessoryName = action["accessory"],
+                  let property = action["property"],
+                  let valueStr = action["value"]
+            else {
+                throw ControlError.writeFailed("Action missing required fields (accessory, property, value): \(action)")
+            }
+
+            let roomName = action["room"]
+            guard let accessory = findAccessoryByName(accessoryName, room: roomName, in: home) else {
+                throw ControlError.accessoryNotFound(accessoryName + (roomName.map { " in \($0)" } ?? ""))
+            }
+
+            guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
+                throw ControlError.writeFailed("Characteristic '\(property)' not found on \(accessory.name)")
+            }
+
+            guard let parsedValue = parseActionValue(valueStr, property: property) else {
+                throw ControlError.writeFailed("Cannot parse value '\(valueStr)' for \(property) on \(accessory.name)")
+            }
+
+            resolved.append((accessory, characteristic, parsedValue))
+        }
+
+        return resolved
     }
 
     func deleteAutomation(

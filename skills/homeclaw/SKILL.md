@@ -33,6 +33,7 @@ The plugin registers 8 MCP tools.
 | `homekit_scenes` | List, get details of, trigger, import, or delete scenes |
 | `homekit_device_map` | Get LLM-optimized device map with semantic types, aliases, and zone hierarchy |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
+| `homekit_automations` | Manage automations: list, create (inline actions or scene), delete, enable/disable |
 | `homekit_webhook` | Manage webhook configuration: setup, test, reset circuit breaker, status |
 | `homekit_config` | View or update bridge configuration |
 
@@ -92,6 +93,31 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 | `type` | No | Filter: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated` |
 | `limit` | No | Max events to return (default: 50) |
 
+### homekit_automations
+
+| Action | Required Params | Description |
+|--------|----------------|-------------|
+| `list` | — | List all automations with event summaries and linked scenes |
+| `get` | `id` | Detail view with events, action sets, and button info |
+| `create` | `name`, `accessory_id`, plus `actions` or `scene_id` | Create a button-press automation (see below) |
+| `delete` | `id` | Delete an automation |
+| `enable` | `id` | Enable a disabled automation |
+| `disable` | `id` | Disable an automation without deleting |
+
+**Create parameters:**
+
+| Param | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Human-readable automation name |
+| `accessory_id` | Yes | Button accessory UUID or name |
+| `actions` | One of | Inline actions array (default, no visible scene). Each entry: `{accessory, property, value}` |
+| `scene_id` | One of | Existing scene UUID or name to trigger |
+| `press_type` | No | 0=single (default), 1=double, 2=long press |
+| `service_index` | No | Button index for multi-button accessories (1 or 2) |
+| `dry_run` | No | Preview without creating |
+
+**Inline actions vs scenes:** The Home app defaults to inline actions (no visible scene). Use `actions` for simple button-to-device mappings. Use `scene_id` when the automation should trigger a shared scene that's also usable from the Scenes tab or Siri.
+
 ### homekit_config
 
 | Action | Required Params | Description |
@@ -146,6 +172,31 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 ### Switch active home
 
 1. Configure: `homekit_config` with `action: "set"`, `default_home_id: "My Home"`
+
+### Program a button (inline actions, no visible scene)
+
+This is the default behavior, matching how the Home app creates automations:
+
+1. Find the button: `homekit_accessories` with `action: "search"`, `query: "Office Button"`
+2. Find the target device: `homekit_accessories` with `action: "search"`, `query: "Key Light"`
+3. Check button services: `homekit_accessories` with `action: "get"`, `accessory_id: "<button-uuid>"` to see how many buttons and what press types are supported (`input_event` max: 0=single only, 2=single+double+long)
+4. Create automation: `homekit_automations` with `action: "create"`, `name: "Button → Light On"`, `accessory_id: "<button-uuid>"`, `actions: [{accessory: "Key Light", property: "power", value: "true"}, {accessory: "Key Light", property: "brightness", value: "50"}]`, `press_type: 0`, `service_index: 1`
+
+### Program a button (with a named scene)
+
+Use this when the automation should trigger a scene that's also visible in the Home app Scenes tab and usable via Siri:
+
+1. Find the button and identify the scene
+2. Create automation: `homekit_automations` with `action: "create"`, `name: "Button → Movie Time"`, `accessory_id: "<button-uuid>"`, `scene_id: "Movie Time"`, `press_type: 0`
+
+### Button modes and service_index
+
+Programmable switches (Aqara, Hue, etc.) may operate in different modes:
+
+- **Fast mode**: Multiple buttons (e.g., Button 1 and Button 2), each single-press only. Fires instantly with no delay. Identified by `input_event` metadata `max: 0` on each service.
+- **Multi-event mode**: One button with single, double, and long press. Adds ~300ms delay to detect press type. Identified by `input_event` metadata `max: 2`.
+
+Use `--service-index` (CLI) or `service_index` (MCP) to target a specific button in fast mode. The mode itself is configured in the manufacturer's app (e.g., Aqara Home), not via HomeKit.
 
 ## Error Handling
 

@@ -148,8 +148,11 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, help: "Button accessory name or UUID")
     var accessory: String
 
-    @Option(name: .long, help: "Scene name or UUID to trigger")
-    var scene: String
+    @Option(name: .long, help: "Scene name or UUID to trigger (alternative to --action)")
+    var scene: String?
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene)")
+    var action: [String] = []
 
     @Option(name: .long, help: "Press type: single, double, or long (default: single)")
     var press: String = "single"
@@ -167,6 +170,10 @@ struct CreateAutomation: ParsableCommand {
     var json = false
 
     func run() throws {
+        guard scene != nil || !action.isEmpty else {
+            throw ValidationError("Either --scene or --action is required")
+        }
+
         let pressType: Int
         switch press.lowercased() {
         case "single", "0": pressType = 0
@@ -178,10 +185,29 @@ struct CreateAutomation: ParsableCommand {
         var args: [String: Any] = [
             "name": name,
             "accessory_id": accessory,
-            "scene_id": scene,
             "press_type": pressType,
             "dry_run": dryRun,
         ]
+
+        if let scene {
+            args["scene_id"] = scene
+        } else {
+            // Parse inline actions from "accessory:property:value" format
+            var parsedActions: [[String: String]] = []
+            for actionStr in action {
+                let parts = actionStr.split(separator: ":", maxSplits: 2).map(String.init)
+                guard parts.count == 3 else {
+                    throw ValidationError("Invalid action format '\(actionStr)'. Use 'accessory:property:value'")
+                }
+                parsedActions.append([
+                    "accessory": parts[0],
+                    "property": parts[1],
+                    "value": parts[2],
+                ])
+            }
+            args["actions"] = parsedActions
+        }
+
         if let serviceIndex { args["service_index"] = serviceIndex }
         if let home { args["home_id"] = home }
 
@@ -205,15 +231,32 @@ struct CreateAutomation: ParsableCommand {
         let autoName = result["name"] as? String ?? name
         let accessoryName = result["accessory"] as? String ?? "?"
         let pressName = result["press_type"] as? String ?? "?"
-        let sceneName = result["scene"] as? String ?? "?"
+        let actionCount = result["action_count"] as? Int
+        let isInline = result["inline_actions"] as? Bool ?? false
 
         if isDryRun {
             print("DRY RUN — would create automation '\(autoName)'")
             print("  Button: \(accessoryName) (\(pressName))")
-            print("  Scene: \(sceneName)")
+            if isInline, let actions = result["actions"] as? [[String: String]] {
+                print("  Actions:")
+                for a in actions {
+                    let acc = a["accessory"] ?? "?"
+                    let char = a["characteristic"] ?? "?"
+                    let val = a["value"] ?? "?"
+                    print("    \(acc): \(char) = \(val)")
+                }
+            } else if let sceneName = result["scene"] as? String {
+                print("  Scene: \(sceneName)")
+            }
         } else {
-            print("Created automation '\(autoName)'")
-            print("  \(accessoryName) \(pressName) → \(sceneName)")
+            if isInline {
+                print("Created automation '\(autoName)' with \(actionCount ?? 0) inline action(s)")
+                print("  \(accessoryName) \(pressName) → \(actionCount ?? 0) action(s)")
+            } else {
+                let sceneName = result["scene"] as? String ?? "?"
+                print("Created automation '\(autoName)'")
+                print("  \(accessoryName) \(pressName) → \(sceneName)")
+            }
         }
     }
 }

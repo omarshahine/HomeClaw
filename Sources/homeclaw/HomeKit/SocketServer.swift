@@ -679,8 +679,10 @@ final class SocketServer: @unchecked Sendable {
                 guard let accessoryID = args["accessory_id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'accessory_id' argument")
                 }
-                guard let sceneID = args["scene_id"] as? String else {
-                    return encodeResponse(success: false, error: "Missing 'scene_id' argument")
+                let sceneID = args["scene_id"] as? String
+                let actions = args["actions"] as? [[String: String]]
+                guard sceneID != nil || (actions != nil && !actions!.isEmpty) else {
+                    return encodeResponse(success: false, error: "Either 'scene_id' or 'actions' array is required")
                 }
                 let pressType = (args["press_type"] as? Int)
                     ?? (args["press_type"] as? String).flatMap(Int.init)
@@ -692,6 +694,7 @@ final class SocketServer: @unchecked Sendable {
                     accessoryID: accessoryID,
                     pressType: pressType,
                     sceneID: sceneID,
+                    actions: actions,
                     serviceIndex: serviceIndex,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")

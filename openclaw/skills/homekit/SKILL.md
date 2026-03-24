@@ -98,12 +98,27 @@ homeclaw-cli remove-room-from-zone "<room>" "<zone>"         # Remove room from 
 # Automations (button programming)
 homeclaw-cli automations list --json                          # List all automations
 homeclaw-cli automations get "<name-or-uuid>" --json          # Detail view
-homeclaw-cli automations create --name "..." --accessory "<name-or-uuid>" --scene "<name-or-uuid>" --press single [--service-index N] [--dry-run]
 homeclaw-cli automations delete "<name-or-uuid>" [--dry-run]
 homeclaw-cli automations enable "<name-or-uuid>"
 homeclaw-cli automations disable "<name-or-uuid>"
+
+# Create with inline actions (default, no visible scene created — matches Home app behavior)
+homeclaw-cli automations create --name "Button On" \
+  --accessory "Office Button" \
+  --action "Elgato Key Light:power:true" \
+  --action "Elgato Key Light:brightness:50" \
+  --press single --service-index 1
+
+# Create with a named scene (visible in Home app Scenes list)
+homeclaw-cli automations create --name "Movie Mode" \
+  --accessory "Remote Button" \
+  --scene "Movie Time" \
+  --press single
+
 # Press types: single (0), double (1), long (2)
-# Use --service-index for multi-button accessories (e.g., Aqara double-rocker AR009)
+# --action format: "accessory_name:property:value" (repeatable)
+# --scene and --action are mutually exclusive
+# Use --service-index for multi-button accessories (e.g., Aqara in fast mode)
 
 # Export to file (any format)
 homeclaw-cli device-map --format agent -o memory/homekit-device-map.json

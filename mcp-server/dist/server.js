@@ -20117,6 +20117,147 @@ var ExperimentalServerTasks = class {
     return this._server.requestStream(request, resultSchema, options);
   }
   /**
+   * Sends a sampling request and returns an AsyncGenerator that yields response messages.
+   * The generator is guaranteed to end with either a 'result' or 'error' message.
+   *
+   * For task-augmented requests, yields 'taskCreated' and 'taskStatus' messages
+   * before the final result.
+   *
+   * @example
+   * ```typescript
+   * const stream = server.experimental.tasks.createMessageStream({
+   *     messages: [{ role: 'user', content: { type: 'text', text: 'Hello' } }],
+   *     maxTokens: 100
+   * }, {
+   *     onprogress: (progress) => {
+   *         // Handle streaming tokens via progress notifications
+   *         console.log('Progress:', progress.message);
+   *     }
+   * });
+   *
+   * for await (const message of stream) {
+   *     switch (message.type) {
+   *         case 'taskCreated':
+   *             console.log('Task created:', message.task.taskId);
+   *             break;
+   *         case 'taskStatus':
+   *             console.log('Task status:', message.task.status);
+   *             break;
+   *         case 'result':
+   *             console.log('Final result:', message.result);
+   *             break;
+   *         case 'error':
+   *             console.error('Error:', message.error);
+   *             break;
+   *     }
+   * }
+   * ```
+   *
+   * @param params - The sampling request parameters
+   * @param options - Optional request options (timeout, signal, task creation params, onprogress, etc.)
+   * @returns AsyncGenerator that yields ResponseMessage objects
+   *
+   * @experimental
+   */
+  createMessageStream(params, options) {
+    const clientCapabilities = this._server.getClientCapabilities();
+    if ((params.tools || params.toolChoice) && !clientCapabilities?.sampling?.tools) {
+      throw new Error("Client does not support sampling tools capability.");
+    }
+    if (params.messages.length > 0) {
+      const lastMessage = params.messages[params.messages.length - 1];
+      const lastContent = Array.isArray(lastMessage.content) ? lastMessage.content : [lastMessage.content];
+      const hasToolResults = lastContent.some((c) => c.type === "tool_result");
+      const previousMessage = params.messages.length > 1 ? params.messages[params.messages.length - 2] : void 0;
+      const previousContent = previousMessage ? Array.isArray(previousMessage.content) ? previousMessage.content : [previousMessage.content] : [];
+      const hasPreviousToolUse = previousContent.some((c) => c.type === "tool_use");
+      if (hasToolResults) {
+        if (lastContent.some((c) => c.type !== "tool_result")) {
+          throw new Error("The last message must contain only tool_result content if any is present");
+        }
+        if (!hasPreviousToolUse) {
+          throw new Error("tool_result blocks are not matching any tool_use from the previous message");
+        }
+      }
+      if (hasPreviousToolUse) {
+        const toolUseIds = new Set(previousContent.filter((c) => c.type === "tool_use").map((c) => c.id));
+        const toolResultIds = new Set(lastContent.filter((c) => c.type === "tool_result").map((c) => c.toolUseId));
+        if (toolUseIds.size !== toolResultIds.size || ![...toolUseIds].every((id) => toolResultIds.has(id))) {
+          throw new Error("ids of tool_result blocks and tool_use blocks from previous message do not match");
+        }
+      }
+    }
+    return this.requestStream({
+      method: "sampling/createMessage",
+      params
+    }, CreateMessageResultSchema, options);
+  }
+  /**
+   * Sends an elicitation request and returns an AsyncGenerator that yields response messages.
+   * The generator is guaranteed to end with either a 'result' or 'error' message.
+   *
+   * For task-augmented requests (especially URL-based elicitation), yields 'taskCreated'
+   * and 'taskStatus' messages before the final result.
+   *
+   * @example
+   * ```typescript
+   * const stream = server.experimental.tasks.elicitInputStream({
+   *     mode: 'url',
+   *     message: 'Please authenticate',
+   *     elicitationId: 'auth-123',
+   *     url: 'https://example.com/auth'
+   * }, {
+   *     task: { ttl: 300000 } // Task-augmented for long-running auth flow
+   * });
+   *
+   * for await (const message of stream) {
+   *     switch (message.type) {
+   *         case 'taskCreated':
+   *             console.log('Task created:', message.task.taskId);
+   *             break;
+   *         case 'taskStatus':
+   *             console.log('Task status:', message.task.status);
+   *             break;
+   *         case 'result':
+   *             console.log('User action:', message.result.action);
+   *             break;
+   *         case 'error':
+   *             console.error('Error:', message.error);
+   *             break;
+   *     }
+   * }
+   * ```
+   *
+   * @param params - The elicitation request parameters
+   * @param options - Optional request options (timeout, signal, task creation params, etc.)
+   * @returns AsyncGenerator that yields ResponseMessage objects
+   *
+   * @experimental
+   */
+  elicitInputStream(params, options) {
+    const clientCapabilities = this._server.getClientCapabilities();
+    const mode = params.mode ?? "form";
+    switch (mode) {
+      case "url": {
+        if (!clientCapabilities?.elicitation?.url) {
+          throw new Error("Client does not support url elicitation.");
+        }
+        break;
+      }
+      case "form": {
+        if (!clientCapabilities?.elicitation?.form) {
+          throw new Error("Client does not support form elicitation.");
+        }
+        break;
+      }
+    }
+    const normalizedParams = mode === "form" && params.mode === void 0 ? { ...params, mode: "form" } : params;
+    return this.requestStream({
+      method: "elicitation/create",
+      params: normalizedParams
+    }, ElicitResultSchema, options);
+  }
+  /**
    * Gets the current status of a task.
    *
    * @param taskId - The task identifier
@@ -20874,7 +21015,7 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: "Manage HomeKit automations (event triggers). List existing automations, inspect their events and linked scenes, create button-press automations for programmable switches (single/double/long press, multi-button support via service_index), delete automations, or enable/disable them.",
+    description: "Manage HomeKit automations (event triggers). List existing automations, inspect their events and linked scenes, create button-press automations for programmable switches (single/double/long press, multi-button support via service_index) with either a scene reference or inline actions, delete automations, or enable/disable them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -20901,7 +21042,21 @@ var tools = [
         },
         scene_id: {
           type: "string",
-          description: "Scene UUID or name to trigger (create action)"
+          description: "Scene UUID or name to trigger (create action). Alternative to actions."
+        },
+        actions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              accessory: { type: "string", description: "Target accessory name" },
+              property: { type: "string", description: "Characteristic to set (e.g., power, brightness, color_temperature)" },
+              value: { type: "string", description: 'Target value as string (e.g., "true", "50", "344")' },
+              room: { type: "string", description: "Room name for disambiguation (optional)" }
+            },
+            required: ["accessory", "property", "value"]
+          },
+          description: "Inline actions for the automation (create action). Alternative to scene_id. Creates a non-visible action set (like the Home app default). Each action sets one characteristic on one accessory."
         },
         press_type: {
           type: "number",
@@ -21120,13 +21275,16 @@ async function handleAutomations(args) {
     case "create": {
       if (!args.name) throw new Error("name is required for create action");
       if (!args.accessory_id) throw new Error("accessory_id is required for create action");
-      if (!args.scene_id) throw new Error("scene_id is required for create action");
+      if (!args.scene_id && (!args.actions || args.actions.length === 0)) {
+        throw new Error("Either scene_id or actions array is required for create action");
+      }
       const socketArgs = {
         name: args.name,
         accessory_id: args.accessory_id,
-        scene_id: args.scene_id,
         press_type: String(args.press_type ?? 0)
       };
+      if (args.scene_id) socketArgs.scene_id = args.scene_id;
+      if (args.actions) socketArgs.actions = args.actions;
       if (args.service_index != null) socketArgs.service_index = String(args.service_index);
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run) socketArgs.dry_run = "true";
