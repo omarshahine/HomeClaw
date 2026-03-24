@@ -157,7 +157,7 @@ The stdio MCP server (`mcp-server/`) wraps `homeclaw-cli` and exposes tools for 
 
 HomeClaw can create HomeKit automations for programmable switches via the CLI, MCP tools, or socket API. Two creation modes:
 
-- **Inline actions** (`--action` / `actions` array): Creates a non-visible action set. This is the default, matching Home app behavior. Each action specifies an accessory, property, and value.
+- **Inline actions** (`--action` / `actions` array): Creates a scene named after the automation. Each action specifies an accessory, property, and value. Note: the Home app uses a private API for hidden automation-only action sets; our action sets are always visible as scenes.
 - **Scene reference** (`--scene` / `scene_id`): Links to an existing named scene visible in the Home app.
 
 Implementation: `HomeKitManager.createAutomation()` creates an `HMEventTrigger` watching the button's `input_event` characteristic linked to an `HMActionSet`. The `resolveActions` helper reuses the same accessory/characteristic resolution as `importScene`. Multi-button accessories use `service_index` to target specific buttons (e.g., Aqara AR009 fast mode: Button 1 = index 1, Button 2 = index 2).

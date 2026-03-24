@@ -102,7 +102,7 @@ homeclaw-cli automations delete "<name-or-uuid>" [--dry-run]
 homeclaw-cli automations enable "<name-or-uuid>"
 homeclaw-cli automations disable "<name-or-uuid>"
 
-# Create with inline actions (default, no visible scene created — matches Home app behavior)
+# Create with inline actions (creates a scene named after the automation)
 homeclaw-cli automations create --name "Button On" \
   --accessory "Office Button" \
   --action "Elgato Key Light:power:true" \
@@ -119,6 +119,8 @@ homeclaw-cli automations create --name "Movie Mode" \
 # --action format: "accessory_name:property:value" (repeatable)
 # --scene and --action are mutually exclusive
 # Use --service-index for multi-button accessories (e.g., Aqara in fast mode)
+# Note: inline actions create a visible scene (Apple's Home app uses a private API
+# for hidden automation-only action sets; third-party apps cannot replicate this)
 
 # Export to file (any format)
 homeclaw-cli device-map --format agent -o memory/homekit-device-map.json

@@ -744,8 +744,10 @@ final class HomeKitManager: NSObject, Observable {
                 return result
             }
 
-            // Create an action set with a UUID-based name (not user-visible in Home app)
-            let inlineSetName = UUID().uuidString
+            // Action sets created via the public API are always visible in the Home app
+            // (Apple uses a private API for hidden automation-only action sets).
+            // Use the automation name so the scene tile is recognizable.
+            let inlineSetName = name
             let newActionSet = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMActionSet, Error>) in
                 home.addActionSet(withName: inlineSetName) { actionSet, error in
                     if let error { continuation.resume(throwing: error) }

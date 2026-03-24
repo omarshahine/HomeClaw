@@ -57,7 +57,7 @@ homeclaw-cli device-map --format agent
 HomeClaw can create HomeKit automations for programmable switches, something typically only possible through the Home app UI.
 
 ```bash
-# Inline actions (default, no visible scene -- matches Home app behavior)
+# Inline actions (creates a scene named after the automation)
 homeclaw-cli automations create \
   --name "Office Light On" \
   --accessory "Office Button" \
@@ -65,7 +65,7 @@ homeclaw-cli automations create \
   --action "Key Light:brightness:50" \
   --press single --service-index 1
 
-# Scene-based (triggers a visible, reusable scene)
+# Scene-based (triggers an existing scene)
 homeclaw-cli automations create \
   --name "Movie Mode" \
   --accessory "Remote Button" \
@@ -80,7 +80,7 @@ homeclaw-cli automations create --name "Test" --accessory "Button" \
   --action "Light:power:true" --dry-run
 ```
 
-**Inline vs scene:** The Home app defaults to inline actions (no visible scene). Use `--action` for simple button-to-device mappings. Use `--scene` when the automation should trigger a shared scene that's also usable from the Scenes tab or Siri.
+**Inline vs scene:** Use `--action` for simple button-to-device mappings. This creates a scene named after the automation. Use `--scene` to trigger an existing scene instead. Note: Apple's Home app uses a private API for hidden automation-only action sets; inline actions created via HomeClaw will appear as visible scenes in the Home app.
 
 **Button modes:** Some buttons (like Aqara AR009) support fast mode (2 buttons, single press each, instant response) or multi-event mode (1 button, single/double/long press, ~300ms delay). Use `--service-index` to target a specific button in fast mode.
 

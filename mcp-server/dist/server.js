@@ -21056,7 +21056,7 @@ var tools = [
             },
             required: ["accessory", "property", "value"]
           },
-          description: "Inline actions for the automation (create action). Alternative to scene_id. Creates a non-visible action set (like the Home app default). Each action sets one characteristic on one accessory."
+          description: "Inline actions for the automation (create action). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
         },
         press_type: {
           type: "number",

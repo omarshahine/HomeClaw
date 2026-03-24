@@ -116,7 +116,7 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 | `service_index` | No | Button index for multi-button accessories (1 or 2) |
 | `dry_run` | No | Preview without creating |
 
-**Inline actions vs scenes:** The Home app defaults to inline actions (no visible scene). Use `actions` for simple button-to-device mappings. Use `scene_id` when the automation should trigger a shared scene that's also usable from the Scenes tab or Siri.
+**Inline actions vs scenes:** Use `actions` for simple button-to-device mappings (creates a scene named after the automation). Use `scene_id` to trigger an existing shared scene. Note: Apple's Home app uses a private API for hidden automation-only action sets; inline actions created via HomeClaw will appear as visible scenes.
 
 ### homekit_config
 
@@ -173,9 +173,9 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 
 1. Configure: `homekit_config` with `action: "set"`, `default_home_id: "My Home"`
 
-### Program a button (inline actions, no visible scene)
+### Program a button (inline actions)
 
-This is the default behavior, matching how the Home app creates automations:
+Creates a scene named after the automation and links it to the button press:
 
 1. Find the button: `homekit_accessories` with `action: "search"`, `query: "Office Button"`
 2. Find the target device: `homekit_accessories` with `action: "search"`, `query: "Key Light"`
