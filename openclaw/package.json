@@ -36,5 +36,15 @@
   "publishConfig": {
     "access": "public"
   },
-  "os": ["darwin"]
+  "os": ["darwin"],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "openclaw": "^2026.3.23"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3"
+  }
 }
