@@ -147,11 +147,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         }
         #endif
 
-        // Initialize HomeKit directly (no IPC needed)
-        Task { @MainActor in
-            _ = HomeKitManager.shared
-            AppLogger.homekit.info("HomeKit manager initialized, waiting for homes...")
-        }
+        // HomeKitManager.shared.start() is called from HeadlessSceneDelegate
+        // after the first scene connects. Creating HMHomeManager before a
+        // window exists causes a TCC privacy violation crash on macOS 26.4+.
+        _ = HomeKitManager.shared
 
         // Start socket server for CLI and MCP clients
         SocketServer.shared.start()
@@ -625,6 +624,11 @@ class HeadlessSceneDelegate: UIResponder, UIWindowSceneDelegate {
         #endif
 
         AppLogger.app.info("Default scene connected (headless)")
+
+        // Start HomeKit now that a scene exists to host the TCC consent dialog.
+        // Creating HMHomeManager before this point crashes on macOS 26.4+ with
+        // __TCC_CRASHING_DUE_TO_PRIVACY_VIOLATION__.
+        HomeKitManager.shared.start()
     }
 
     #if targetEnvironment(macCatalyst)

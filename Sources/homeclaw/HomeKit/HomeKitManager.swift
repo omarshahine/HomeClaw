@@ -6,7 +6,7 @@ import HomeKit
 final class HomeKitManager: NSObject, Observable {
     static let shared = HomeKitManager()
 
-    private let homeManager = HMHomeManager()
+    private var homeManager: HMHomeManager?
     private var homesReady = false
     private var pendingContinuations: [CheckedContinuation<Void, Never>] = []
 
@@ -18,7 +18,18 @@ final class HomeKitManager: NSObject, Observable {
 
     override private init() {
         super.init()
-        homeManager.delegate = self
+    }
+
+    /// Create the HMHomeManager and begin HomeKit discovery.
+    /// Call this after the first scene is connected so macOS can host
+    /// the TCC consent dialog. On macOS 26.4+, creating HMHomeManager
+    /// before a window exists causes a TCC privacy violation crash.
+    func start() {
+        guard homeManager == nil else { return }
+        let manager = HMHomeManager()
+        manager.delegate = self
+        homeManager = manager
+        AppLogger.homekit.info("HMHomeManager created, waiting for homes...")
     }
 
     // MARK: - Readiness
