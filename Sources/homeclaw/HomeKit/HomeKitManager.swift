@@ -37,6 +37,9 @@ final class HomeKitManager: NSObject, Observable {
     /// Waits until HomeKit has delivered the initial set of homes.
     func waitForReady() async {
         if homesReady { return }
+        if homeManager == nil {
+            AppLogger.homekit.warning("waitForReady() called before start() — HomeKit not yet initialised")
+        }
         await withCheckedContinuation { continuation in
             pendingContinuations.append(continuation)
         }

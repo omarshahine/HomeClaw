@@ -150,7 +150,6 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         // HomeKitManager.shared.start() is called from HeadlessSceneDelegate
         // after the first scene connects. Creating HMHomeManager before a
         // window exists causes a TCC privacy violation crash on macOS 26.4+.
-        _ = HomeKitManager.shared
 
         // Start socket server for CLI and MCP clients
         SocketServer.shared.start()
