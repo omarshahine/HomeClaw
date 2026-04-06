@@ -65,6 +65,11 @@ enum CharacteristicMapper {
         typeNames[characteristicType] ?? characteristicType
     }
 
+    /// Returns the HMCharacteristicType UUID for a human-readable snake_case name.
+    static func characteristicType(forName name: String) -> String? {
+        typeNames.first(where: { $0.value == name })?.key
+    }
+
     // MARK: - Writable Characteristics
 
     /// Characteristic types that can be written to (controlled).

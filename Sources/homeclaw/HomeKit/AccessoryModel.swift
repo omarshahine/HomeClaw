@@ -185,19 +185,37 @@ enum AccessoryModel {
         if let event = trigger.events.first as? HMCharacteristicEvent<NSCopying>,
            let accessory = event.characteristic.service?.accessory
         {
-            let pressValue = (event.triggerValue as? NSNumber)?.intValue
-            let pressName = pressValue.map { pressTypeName($0) } ?? "any_press"
-            dict["event_summary"] = "\(accessory.name) \(pressName)"
+            let charType = event.characteristic.characteristicType
+            let isButton = charType == HMCharacteristicTypeInputEvent
 
-            var buttonInfo: [String: Any] = [
-                "accessory_id": accessory.uniqueIdentifier.uuidString,
-                "accessory_name": accessory.name,
-                "press_type": pressName,
-            ]
-            if let idx = serviceIndexForCharacteristic(event.characteristic) {
-                buttonInfo["service_index"] = idx
+            if isButton {
+                let pressValue = (event.triggerValue as? NSNumber)?.intValue
+                let pressName = pressValue.map { pressTypeName($0) } ?? "any_press"
+                dict["event_summary"] = "\(accessory.name) \(pressName)"
+                dict["trigger_type"] = "button"
+
+                var buttonInfo: [String: Any] = [
+                    "accessory_id": accessory.uniqueIdentifier.uuidString,
+                    "accessory_name": accessory.name,
+                    "press_type": pressName,
+                ]
+                if let idx = serviceIndexForCharacteristic(event.characteristic) {
+                    buttonInfo["service_index"] = idx
+                }
+                dict["button_info"] = buttonInfo
+            } else {
+                let charName = CharacteristicMapper.name(for: charType)
+                let formattedValue = CharacteristicMapper.formatValue(event.triggerValue, for: charType)
+                dict["event_summary"] = "\(accessory.name) \(charName) = \(formattedValue)"
+                dict["trigger_type"] = "characteristic"
+
+                dict["trigger_info"] = [
+                    "accessory_id": accessory.uniqueIdentifier.uuidString,
+                    "accessory_name": accessory.name,
+                    "characteristic": charName,
+                    "trigger_value": formattedValue,
+                ] as [String: Any]
             }
-            dict["button_info"] = buttonInfo
         }
 
         return dict
@@ -210,12 +228,14 @@ enum AccessoryModel {
         let events: [[String: Any]] = trigger.events.compactMap { event in
             guard let charEvent = event as? HMCharacteristicEvent<NSCopying> else { return nil }
             let characteristic = charEvent.characteristic
+            let charType = characteristic.characteristicType
             let accessory = characteristic.service?.accessory
-            let pressValue = (charEvent.triggerValue as? NSNumber)?.intValue
+            let isButton = charType == HMCharacteristicTypeInputEvent
 
             var eventDict: [String: Any] = [
                 "type": "characteristic",
-                "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
+                "characteristic": CharacteristicMapper.name(for: charType),
+                "trigger_type": isButton ? "button" : "characteristic",
             ]
             if let accessory {
                 eventDict["accessory"] = accessory.name
@@ -224,9 +244,15 @@ enum AccessoryModel {
             if let service = characteristic.service {
                 eventDict["service_type"] = CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType
             }
-            if let pressValue {
-                eventDict["trigger_value"] = pressValue
-                eventDict["press_type"] = pressTypeName(pressValue)
+            if isButton {
+                let pressValue = (charEvent.triggerValue as? NSNumber)?.intValue
+                if let pressValue {
+                    eventDict["trigger_value"] = pressValue
+                    eventDict["press_type"] = pressTypeName(pressValue)
+                }
+            } else {
+                let formattedValue = CharacteristicMapper.formatValue(charEvent.triggerValue, for: charType)
+                eventDict["trigger_value"] = formattedValue
             }
             if let idx = serviceIndexForCharacteristic(characteristic) {
                 eventDict["service_index"] = idx

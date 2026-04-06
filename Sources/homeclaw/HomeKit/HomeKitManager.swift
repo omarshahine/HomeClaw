@@ -712,7 +712,9 @@ final class HomeKitManager: NSObject, Observable {
     func createAutomation(
         name: String,
         accessoryID: String,
-        pressType: Int,
+        pressType: Int = 0,
+        characteristic: String? = nil,
+        triggerValue: String? = nil,
         sceneID: String? = nil,
         actions: [[String: String]]? = nil,
         serviceIndex: Int? = nil,
@@ -726,8 +728,32 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.accessoryNotFound(accessoryID)
         }
 
-        let inputEventChar = try findInputEventCharacteristic(on: accessory, serviceIndex: serviceIndex)
-        let pressName = AccessoryModel.pressTypeName(pressType)
+        // Resolve the trigger characteristic and value based on trigger mode
+        let triggerChar: HMCharacteristic
+        let triggerNSValue: NSCopying
+        let isButtonTrigger: Bool
+        let triggerLabel: String
+
+        if let characteristic {
+            // Generic characteristic trigger (motion, contact, occupancy, etc.)
+            triggerChar = try findTriggerCharacteristic(on: accessory, characteristicName: characteristic)
+            guard let triggerValue else {
+                throw ControlError.writeFailed("'trigger_value' is required when 'characteristic' is specified")
+            }
+            guard let parsed = CharacteristicMapper.parseValue(triggerValue, for: triggerChar) else {
+                throw ControlError.writeFailed("Cannot parse trigger value '\(triggerValue)' for characteristic '\(characteristic)'")
+            }
+            triggerNSValue = parsed as! NSCopying
+            isButtonTrigger = false
+            let formattedValue = CharacteristicMapper.formatValue(parsed, for: triggerChar.characteristicType)
+            triggerLabel = "\(characteristic) = \(formattedValue)"
+        } else {
+            // Button press trigger (existing path)
+            triggerChar = try findInputEventCharacteristic(on: accessory, serviceIndex: serviceIndex)
+            triggerNSValue = NSNumber(value: pressType) as NSCopying
+            isButtonTrigger = true
+            triggerLabel = AccessoryModel.pressTypeName(pressType)
+        }
 
         // Resolve the action set: either find an existing scene or create an inline one
         let actionSet: HMActionSet
@@ -744,7 +770,7 @@ final class HomeKitManager: NSObject, Observable {
                     "name": name,
                     "home": home.name,
                     "accessory": accessory.name,
-                    "press_type": pressName,
+                    "trigger_type": isButtonTrigger ? "button" : "characteristic",
                     "action_count": resolvedActions.count,
                     "actions": resolvedActions.map { action in
                         [
@@ -754,7 +780,13 @@ final class HomeKitManager: NSObject, Observable {
                         ] as [String: String]
                     },
                 ]
-                if let serviceIndex { result["service_index"] = serviceIndex }
+                if isButtonTrigger {
+                    result["press_type"] = triggerLabel
+                    if let serviceIndex { result["service_index"] = serviceIndex }
+                } else {
+                    result["characteristic"] = characteristic
+                    result["trigger_value"] = triggerValue
+                }
                 return result
             }
 
@@ -799,10 +831,16 @@ final class HomeKitManager: NSObject, Observable {
                     "name": name,
                     "home": home.name,
                     "accessory": accessory.name,
-                    "press_type": pressName,
+                    "trigger_type": isButtonTrigger ? "button" : "characteristic",
                     "scene": existingSet.name,
                 ]
-                if let serviceIndex { result["service_index"] = serviceIndex }
+                if isButtonTrigger {
+                    result["press_type"] = triggerLabel
+                    if let serviceIndex { result["service_index"] = serviceIndex }
+                } else {
+                    result["characteristic"] = characteristic
+                    result["trigger_value"] = triggerValue
+                }
                 return result
             }
 
@@ -814,8 +852,8 @@ final class HomeKitManager: NSObject, Observable {
 
         // Create the event trigger
         let event = HMCharacteristicEvent(
-            characteristic: inputEventChar,
-            triggerValue: NSNumber(value: pressType) as NSCopying
+            characteristic: triggerChar,
+            triggerValue: triggerNSValue
         )
         let trigger = HMEventTrigger(
             name: name,
@@ -883,23 +921,29 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         let actionLabel = isInlineActionSet ? "\(actionSet.actions.count) inline action(s)" : actionSet.name
-        AppLogger.homekit.info("[\(home.name)] Created automation '\(name)': \(accessory.name) \(pressName) → \(actionLabel)")
+        AppLogger.homekit.info("[\(home.name)] Created automation '\(name)': \(accessory.name) \(triggerLabel) → \(actionLabel)")
         var result: [String: Any] = [
             "id": trigger.uniqueIdentifier.uuidString,
             "name": name,
             "home": home.name,
             "accessory": accessory.name,
-            "press_type": pressName,
+            "trigger_type": isButtonTrigger ? "button" : "characteristic",
             "enabled": true,
             "dry_run": false,
             "action_count": actionSet.actions.count,
         ]
+        if isButtonTrigger {
+            result["press_type"] = triggerLabel
+            if let serviceIndex { result["service_index"] = serviceIndex }
+        } else {
+            result["characteristic"] = characteristic
+            result["trigger_value"] = triggerValue
+        }
         if isInlineActionSet {
             result["inline_actions"] = true
         } else {
             result["scene"] = actionSet.name
         }
-        if let serviceIndex { result["service_index"] = serviceIndex }
         return result
     }
 
@@ -1073,6 +1117,24 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         return inputEvent
+    }
+
+    /// Finds a characteristic by its human-readable name on any service of the accessory.
+    private func findTriggerCharacteristic(
+        on accessory: HMAccessory,
+        characteristicName: String
+    ) throws -> HMCharacteristic {
+        guard let charType = CharacteristicMapper.characteristicType(forName: characteristicName) else {
+            throw ControlError.characteristicNotFound("Unknown characteristic: '\(characteristicName)'")
+        }
+        for service in accessory.services {
+            if let char = service.characteristics.first(where: { $0.characteristicType == charType }) {
+                return char
+            }
+        }
+        throw ControlError.characteristicNotFound(
+            "'\(accessory.name)' has no '\(characteristicName)' characteristic"
+        )
     }
 
     private func resolveHome(homeID: String?) throws -> HMHome {

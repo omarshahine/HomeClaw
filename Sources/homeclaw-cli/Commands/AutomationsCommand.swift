@@ -139,13 +139,13 @@ struct GetAutomation: ParsableCommand {
 struct CreateAutomation: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "create",
-        abstract: "Create a button press automation"
+        abstract: "Create an automation triggered by a characteristic change (button press, motion, contact, occupancy, etc.)"
     )
 
     @Option(name: .long, help: "Name for the automation")
     var name: String
 
-    @Option(name: .long, help: "Button accessory name or UUID")
+    @Option(name: .long, help: "Trigger accessory name or UUID")
     var accessory: String
 
     @Option(name: .long, help: "Scene name or UUID to trigger (alternative to --action)")
@@ -154,10 +154,16 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use the MCP actions array instead.")
     var action: [String] = []
 
-    @Option(name: .long, help: "Press type: single, double, or long (default: single)")
+    @Option(name: .long, help: "Press type: single, double, or long (default: single). For button triggers only; mutually exclusive with --characteristic.")
     var press: String = "single"
 
-    @Option(name: .long, help: "Button index for multi-button accessories (e.g., 1 or 2)")
+    @Option(name: .long, help: "Characteristic to trigger on (e.g., motion_detected, contact_state, occupancy_detected). Mutually exclusive with --press.")
+    var characteristic: String?
+
+    @Option(name: .long, help: "Value that triggers the automation (e.g., true, false, 1, 0). Required when --characteristic is set.")
+    var triggerValue: String?
+
+    @Option(name: .long, help: "Button index for multi-button accessories (e.g., 1 or 2). For button triggers only.")
     var serviceIndex: Int?
 
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
@@ -174,20 +180,33 @@ struct CreateAutomation: ParsableCommand {
             throw ValidationError("Either --scene or --action is required")
         }
 
-        let pressType: Int
-        switch press.lowercased() {
-        case "single", "0": pressType = 0
-        case "double", "1": pressType = 1
-        case "long", "2": pressType = 2
-        default: throw ValidationError("Invalid press type '\(press)'. Use: single, double, or long")
-        }
-
         var args: [String: Any] = [
             "name": name,
             "accessory_id": accessory,
-            "press_type": pressType,
             "dry_run": dryRun,
         ]
+
+        if let characteristic {
+            // Generic characteristic trigger mode
+            guard press == "single" else {
+                throw ValidationError("--press and --characteristic are mutually exclusive")
+            }
+            guard let triggerValue else {
+                throw ValidationError("--trigger-value is required when --characteristic is set")
+            }
+            args["characteristic"] = characteristic
+            args["trigger_value"] = triggerValue
+        } else {
+            // Button press trigger mode
+            let pressType: Int
+            switch press.lowercased() {
+            case "single", "0": pressType = 0
+            case "double", "1": pressType = 1
+            case "long", "2": pressType = 2
+            default: throw ValidationError("Invalid press type '\(press)'. Use: single, double, or long")
+            }
+            args["press_type"] = pressType
+        }
 
         if let scene {
             args["scene_id"] = scene
@@ -230,13 +249,23 @@ struct CreateAutomation: ParsableCommand {
         let isDryRun = result["dry_run"] as? Bool ?? false
         let autoName = result["name"] as? String ?? name
         let accessoryName = result["accessory"] as? String ?? "?"
-        let pressName = result["press_type"] as? String ?? "?"
+        let triggerType = result["trigger_type"] as? String ?? "button"
         let actionCount = result["action_count"] as? Int
         let isInline = result["inline_actions"] as? Bool ?? false
 
+        let triggerDescription: String
+        if triggerType == "button" {
+            let pressName = result["press_type"] as? String ?? "?"
+            triggerDescription = "\(accessoryName) \(pressName)"
+        } else {
+            let charName = result["characteristic"] as? String ?? "?"
+            let charValue = result["trigger_value"] as? String ?? "?"
+            triggerDescription = "\(accessoryName) \(charName) = \(charValue)"
+        }
+
         if isDryRun {
             print("DRY RUN — would create automation '\(autoName)'")
-            print("  Button: \(accessoryName) (\(pressName))")
+            print("  Trigger: \(triggerDescription)")
             if isInline, let actions = result["actions"] as? [[String: String]] {
                 print("  Actions:")
                 for a in actions {
@@ -251,11 +280,11 @@ struct CreateAutomation: ParsableCommand {
         } else {
             if isInline {
                 print("Created automation '\(autoName)' with \(actionCount ?? 0) inline action(s)")
-                print("  \(accessoryName) \(pressName) → \(actionCount ?? 0) action(s)")
+                print("  \(triggerDescription) → \(actionCount ?? 0) action(s)")
             } else {
                 let sceneName = result["scene"] as? String ?? "?"
                 print("Created automation '\(autoName)'")
-                print("  \(accessoryName) \(pressName) → \(sceneName)")
+                print("  \(triggerDescription) → \(sceneName)")
             }
         }
     }

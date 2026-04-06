@@ -684,6 +684,8 @@ final class SocketServer: @unchecked Sendable {
                 guard sceneID != nil || (actions != nil && !actions!.isEmpty) else {
                     return encodeResponse(success: false, error: "Either 'scene_id' or 'actions' array is required")
                 }
+                let characteristic = args["characteristic"] as? String
+                let triggerValue = args["trigger_value"] as? String
                 let pressType = (args["press_type"] as? Int)
                     ?? (args["press_type"] as? String).flatMap(Int.init)
                     ?? 0
@@ -693,6 +695,8 @@ final class SocketServer: @unchecked Sendable {
                     name: name,
                     accessoryID: accessoryID,
                     pressType: pressType,
+                    characteristic: characteristic,
+                    triggerValue: triggerValue,
                     sceneID: sceneID,
                     actions: actions,
                     serviceIndex: serviceIndex,

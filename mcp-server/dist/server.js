@@ -21015,7 +21015,7 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: "Manage HomeKit automations (event triggers). List existing automations, inspect their events and linked scenes, create button-press automations for programmable switches (single/double/long press, multi-button support via service_index) with either a scene reference or inline actions, delete automations, or enable/disable them.",
+    description: "Manage HomeKit automations (event triggers). List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) with either a scene reference or inline actions, delete automations, or enable/disable them. For button triggers use press_type; for other triggers use characteristic + trigger_value.",
     inputSchema: {
       type: "object",
       properties: {
@@ -21038,7 +21038,7 @@ var tools = [
         },
         accessory_id: {
           type: "string",
-          description: "Button accessory UUID or name (create action)"
+          description: "Trigger accessory UUID or name (create action)"
         },
         scene_id: {
           type: "string",
@@ -21061,11 +21061,19 @@ var tools = [
         press_type: {
           type: "number",
           enum: [0, 1, 2],
-          description: "Button press type: 0=single (default), 1=double, 2=long press (create action)"
+          description: "Button press type: 0=single (default), 1=double, 2=long press. For button triggers only; mutually exclusive with characteristic. (create action)"
+        },
+        characteristic: {
+          type: "string",
+          description: "Characteristic name to trigger on (e.g., motion_detected, contact_state, occupancy_detected, current_temperature). Alternative to press_type for non-button triggers. (create action)"
+        },
+        trigger_value: {
+          type: "string",
+          description: 'Value that triggers the automation (e.g., "true", "false", "1", "0"). Required when characteristic is set. Uses exact value matching. (create action)'
         },
         service_index: {
           type: "number",
-          description: "Button index for multi-button accessories (1 or 2). Required when accessory has multiple buttons. (create action)"
+          description: "Button index for multi-button accessories (1 or 2). For button triggers only. (create action)"
         },
         dry_run: {
           type: "boolean",
@@ -21280,9 +21288,14 @@ async function handleAutomations(args) {
       }
       const socketArgs = {
         name: args.name,
-        accessory_id: args.accessory_id,
-        press_type: String(args.press_type ?? 0)
+        accessory_id: args.accessory_id
       };
+      if (args.characteristic) {
+        socketArgs.characteristic = args.characteristic;
+        if (args.trigger_value != null) socketArgs.trigger_value = args.trigger_value;
+      } else {
+        socketArgs.press_type = String(args.press_type ?? 0);
+      }
       if (args.scene_id) socketArgs.scene_id = args.scene_id;
       if (args.actions) socketArgs.actions = args.actions;
       if (args.service_index != null) socketArgs.service_index = String(args.service_index);
