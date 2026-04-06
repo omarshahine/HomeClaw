@@ -740,10 +740,11 @@ final class HomeKitManager: NSObject, Observable {
             guard let triggerValue else {
                 throw ControlError.writeFailed("'trigger_value' is required when 'characteristic' is specified")
             }
-            guard let parsed = CharacteristicMapper.parseValue(triggerValue, for: triggerChar) else {
+            guard let parsed = CharacteristicMapper.parseValue(triggerValue, for: triggerChar),
+                  let nsCopying = (parsed as AnyObject) as? NSCopying else {
                 throw ControlError.writeFailed("Cannot parse trigger value '\(triggerValue)' for characteristic '\(characteristic)'")
             }
-            triggerNSValue = parsed as! NSCopying
+            triggerNSValue = nsCopying
             isButtonTrigger = false
             let formattedValue = CharacteristicMapper.formatValue(parsed, for: triggerChar.characteristicType)
             triggerLabel = "\(characteristic) = \(formattedValue)"
