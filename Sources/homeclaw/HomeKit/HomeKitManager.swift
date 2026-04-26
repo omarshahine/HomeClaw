@@ -152,6 +152,7 @@ final class HomeKitManager: NSObject, Observable {
         case triggerNotFound(String)
         case sceneNotFound(String)
         case serviceNotFound(String)
+        case invalidArgument(String)
 
         var errorDescription: String? {
             switch self {
@@ -169,6 +170,7 @@ final class HomeKitManager: NSObject, Observable {
             case .triggerNotFound(let id): "Automation not found: \(id)"
             case .sceneNotFound(let id): "Scene not found: \(id)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
+            case .invalidArgument(let detail): "Invalid argument: \(detail)"
             }
         }
     }
@@ -1078,6 +1080,16 @@ final class HomeKitManager: NSObject, Observable {
             "warnings": warnings,
         ]
 
+        // Refuse operations that would leave the trigger with zero scenes attached.
+        // HomeKit doesn't define behavior for an empty actionSets collection — the
+        // trigger fires but does nothing, and may become hard to manage in the Home
+        // app. Callers wanting to retire a trigger should delete it instead.
+        let resultingCount = trigger.actionSets.count + resolvedAdd.count - resolvedRemove.count
+        guard resultingCount > 0 else {
+            throw ControlError.invalidArgument(
+                "Operation would leave trigger '\(trigger.name)' with no attached scenes. Delete the automation instead, or attach a replacement scene.")
+        }
+
         if dryRun {
             var dry = summary
             dry["dry_run"] = true
@@ -1449,7 +1461,45 @@ final class HomeKitManager: NSObject, Observable {
             ] as [String: Any]
         }
 
-        let existingActions = Array(actionSet.actions)
+        // Refuse to wipe a scene when caller asked for actions but every one
+        // failed to resolve. (Empty input is a legitimate clear-all request.)
+        if !actions.isEmpty && resolvedActions.isEmpty {
+            throw ControlError.invalidArgument(
+                "All \(actions.count) action(s) failed to resolve; scene '\(actionSet.name)' not modified.")
+        }
+
+        // Add new actions BEFORE removing the old ones. If `addAction` throws
+        // partway through, the original actions are still attached, so the
+        // scene retains its prior behavior (and the partial adds will trigger
+        // alongside the originals — redundant but not destructive). We then
+        // best-effort clean up any partial adds before propagating the error.
+        var addedActions: [HMAction] = []
+        do {
+            for resolved in resolvedActions {
+                let writeAction = HMCharacteristicWriteAction(
+                    characteristic: resolved.characteristic,
+                    targetValue: resolved.value as! NSCopying & NSObjectProtocol
+                )
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    actionSet.addAction(writeAction) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+                addedActions.append(writeAction)
+            }
+        } catch {
+            // Roll back the partial adds so the scene returns to its prior state.
+            for action in addedActions {
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    actionSet.removeAction(action) { _ in continuation.resume() }
+                }
+            }
+            throw error
+        }
+        let addedCount = addedActions.count
+
+        let existingActions = actionSet.actions.subtracting(addedActions)
         for action in existingActions {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 actionSet.removeAction(action) { error in
@@ -1460,23 +1510,8 @@ final class HomeKitManager: NSObject, Observable {
         }
         let removedCount = existingActions.count
 
-        var addedCount = 0
-        for resolved in resolvedActions {
-            let writeAction = HMCharacteristicWriteAction(
-                characteristic: resolved.characteristic,
-                targetValue: resolved.value as! NSCopying & NSObjectProtocol
-            )
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                actionSet.addAction(writeAction) { error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume() }
-                }
-            }
-            addedCount += 1
-        }
-
         AppLogger.homekit.info(
-            "[\(home.name)] Updated scene '\(actionSet.name)': removed \(removedCount), added \(addedCount)")
+            "[\(home.name)] Updated scene '\(actionSet.name)': added \(addedCount), removed \(removedCount)")
 
         return [
             "updated": true,
