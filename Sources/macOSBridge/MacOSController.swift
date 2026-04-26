@@ -209,22 +209,28 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        // Scenes
-        if !scenes.isEmpty {
+        // Classify scenes by room scope.
+        // - Built-ins (wake_up/sleep/leave/arrive) → always home-level (Apple intent)
+        // - Multi-room or unscoped scenes → home-level
+        // - Single-room scenes → nested under that room's section
+        var homeLevelScenes: [[String: Any]] = []
+        var roomScenes: [String: [[String: Any]]] = [:]
+        for scene in scenes {
+            let type = scene["type"] as? String ?? "user_defined"
+            let sceneRooms = scene["rooms"] as? [String] ?? []
+            if type != "user_defined" || sceneRooms.count != 1 {
+                homeLevelScenes.append(scene)
+            } else {
+                let room = sceneRooms[0]
+                roomScenes[room, default: []].append(scene)
+            }
+        }
+
+        // Top "Scenes" section: home-level only
+        if !homeLevelScenes.isEmpty {
             addSectionHeader("Scenes", to: menu)
-            for scene in scenes {
-                let name = scene["name"] as? String ?? "?"
-                let id = scene["id"] as? String ?? ""
-                let type = scene["type"] as? String ?? "user_defined"
-                let item = NSMenuItem(
-                    title: name, action: #selector(triggerScene(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = id
-                item.image = NSImage(
-                    systemSymbolName: symbolForSceneType(type),
-                    accessibilityDescription: nil)
-                item.indentationLevel = 1
-                menu.addItem(item)
+            for scene in homeLevelScenes {
+                addSceneItem(scene, to: menu)
             }
             menu.addItem(.separator())
         }
@@ -236,9 +242,11 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         for room in rooms {
             let roomName = room["name"] as? String ?? "?"
             let accessories = room["accessories"] as? [[String: Any]] ?? []
+            let scenesHere = roomScenes[roomName] ?? []
 
-            // Skip rooms where no accessory will actually be displayed
-            guard accessories.contains(where: { isAccessoryVisible($0) }) else { continue }
+            // Skip rooms where nothing will be displayed
+            let hasVisibleAccessory = accessories.contains(where: { isAccessoryVisible($0) })
+            guard hasVisibleAccessory || !scenesHere.isEmpty else { continue }
 
             menu.addItem(.separator())
 
@@ -258,7 +266,26 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             for accessory in accessories {
                 addAccessoryItem(accessory, to: menu)
             }
+
+            for scene in scenesHere {
+                addSceneItem(scene, to: menu)
+            }
         }
+    }
+
+    private func addSceneItem(_ scene: [String: Any], to menu: NSMenu) {
+        let name = scene["name"] as? String ?? "?"
+        let id = scene["id"] as? String ?? ""
+        let type = scene["type"] as? String ?? "user_defined"
+        let item = NSMenuItem(
+            title: name, action: #selector(triggerScene(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = id
+        item.image = NSImage(
+            systemSymbolName: symbolForSceneType(type),
+            accessibilityDescription: nil)
+        item.indentationLevel = 1
+        menu.addItem(item)
     }
 
     private func addSectionHeader(_ title: String, to menu: NSMenu) {

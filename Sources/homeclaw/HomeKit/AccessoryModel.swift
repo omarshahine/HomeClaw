@@ -140,12 +140,22 @@ enum AccessoryModel {
     }
 
     /// Summary of a scene (action set).
+    /// Includes the distinct rooms touched by the scene's actions, so callers
+    /// can decide whether the scene is room-scoped or home-scoped.
     static func sceneSummary(_ actionSet: HMActionSet) -> [String: Any] {
-        [
+        var rooms = Set<String>()
+        for action in actionSet.actions {
+            guard let write = action as? HMCharacteristicWriteAction<NSCopying> else { continue }
+            if let room = write.characteristic.service?.accessory?.room?.name {
+                rooms.insert(room)
+            }
+        }
+        return [
             "id": actionSet.uniqueIdentifier.uuidString,
             "name": actionSet.name,
             "action_count": actionSet.actions.count,
             "type": actionSetType(actionSet),
+            "rooms": Array(rooms).sorted(),
         ]
     }
 
