@@ -12,6 +12,7 @@ struct Automations: ParsableCommand {
             DeleteAutomation.self,
             EnableAutomation.self,
             DisableAutomation.self,
+            RewireAutomation.self,
         ],
         defaultSubcommand: ListAutomations.self
     )
@@ -404,6 +405,88 @@ struct DisableAutomation: ParsableCommand {
             print("Disabled automation '\(name)'")
         } else {
             print("Automation disabled.")
+        }
+    }
+}
+
+// MARK: - Rewire (mutate attached scenes in place)
+
+struct RewireAutomation: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "rewire",
+        abstract:
+            "Add or remove scenes attached to an existing automation in place (preserves trigger UUID)"
+    )
+
+    @Argument(help: "Automation name or UUID")
+    var id: String
+
+    @Option(name: .long, parsing: .singleValue, help: "Scene name or UUID to attach (repeatable)")
+    var addScene: [String] = []
+
+    @Option(
+        name: .long, parsing: .singleValue, help: "Scene name or UUID to detach (repeatable)")
+    var removeScene: [String] = []
+
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
+    @Flag(name: .long, help: "Preview without modifying the automation")
+    var dryRun = false
+
+    @Flag(name: .long, help: "Output raw JSON")
+    var json = false
+
+    func run() throws {
+        guard !addScene.isEmpty || !removeScene.isEmpty else {
+            throw ValidationError("Provide at least one --add-scene or --remove-scene")
+        }
+
+        var args: [String: Any] = [
+            "id": id,
+            "add_scenes": addScene,
+            "remove_scenes": removeScene,
+            "dry_run": dryRun,
+        ]
+        if let home { args["home_id"] = home }
+
+        let response = try SocketClient.sendAny(command: "update_automation", args: args)
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
+
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
+        let isDryRun = result["dry_run"] as? Bool ?? false
+        let autoName = result["name"] as? String ?? id
+        let before = (result["before"] as? [String]) ?? []
+        let toAdd = (result["to_add"] as? [String]) ?? []
+        let toRemove = (result["to_remove"] as? [String]) ?? []
+        let warnings = (result["warnings"] as? [String]) ?? []
+
+        if isDryRun {
+            print("DRY RUN — \(autoName)")
+            print("  Currently attached: \(before.joined(separator: ", "))")
+            print("  Would add:    \(toAdd.joined(separator: ", "))")
+            print("  Would remove: \(toRemove.joined(separator: ", "))")
+        } else {
+            let after = (result["after"] as? [String]) ?? []
+            print("Rewired '\(autoName)'")
+            print("  Before: \(before.joined(separator: ", "))")
+            print("  After:  \(after.joined(separator: ", "))")
+        }
+
+        if !warnings.isEmpty {
+            print("\nWarnings:")
+            for w in warnings { print("  ⚠ \(w)") }
         }
     }
 }

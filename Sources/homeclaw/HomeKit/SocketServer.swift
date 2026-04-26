@@ -660,6 +660,20 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: parseBool(args, key: "dry_run")
                 )
 
+            case "update_scene":
+                guard let nameOrID = (args["id"] as? String) ?? (args["name"] as? String) else {
+                    return encodeResponse(success: false, error: "Missing 'name' or 'id' argument")
+                }
+                guard let actions = args["actions"] as? [[String: String]] else {
+                    return encodeResponse(success: false, error: "Missing 'actions' array")
+                }
+                result = try await hk.updateScene(
+                    nameOrID: nameOrID,
+                    homeName: args["home"] as? String,
+                    actions: actions,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
             case "list_automations":
                 result = await hk.listAutomations(homeID: args["home_id"] as? String)
 
@@ -710,6 +724,23 @@ final class SocketServer: @unchecked Sendable {
                 }
                 result = try await hk.deleteAutomation(
                     id: id,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "update_automation":
+                guard let id = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                let addList = (args["add_scenes"] as? [String]) ?? []
+                let removeList = (args["remove_scenes"] as? [String]) ?? []
+                if addList.isEmpty && removeList.isEmpty {
+                    return encodeResponse(success: false, error: "Provide at least one of 'add_scenes' or 'remove_scenes'")
+                }
+                result = try await hk.updateAutomationActionSets(
+                    id: id,
+                    addSceneIDs: addList,
+                    removeSceneIDs: removeList,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
                 )
