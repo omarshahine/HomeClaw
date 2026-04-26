@@ -1468,6 +1468,14 @@ final class HomeKitManager: NSObject, Observable {
                 "All \(actions.count) action(s) failed to resolve; scene '\(actionSet.name)' not modified.")
         }
 
+        // Snapshot the pre-existing actions BEFORE any mutation. Used to drive
+        // the remove loop below. We can't rely on `actionSet.actions.subtracting(addedActions)`
+        // post-add because HomeKit may wrap/replace the HMAction we provide
+        // before storing it; the reference we hold in `addedActions` may not
+        // match the one in `actionSet.actions` by identity, and HMAction is
+        // hashed/equated as NSObject (reference equality).
+        let oldActions = Array(actionSet.actions)
+
         // Add new actions BEFORE removing the old ones. If `addAction` throws
         // partway through, the original actions are still attached, so the
         // scene retains its prior behavior (and the partial adds will trigger
@@ -1499,8 +1507,8 @@ final class HomeKitManager: NSObject, Observable {
         }
         let addedCount = addedActions.count
 
-        let existingActions = actionSet.actions.subtracting(addedActions)
-        for action in existingActions {
+        // Remove only the pre-snapshotted originals.
+        for action in oldActions {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 actionSet.removeAction(action) { error in
                     if let error { continuation.resume(throwing: error) }
@@ -1508,7 +1516,7 @@ final class HomeKitManager: NSObject, Observable {
                 }
             }
         }
-        let removedCount = existingActions.count
+        let removedCount = oldActions.count
 
         AppLogger.homekit.info(
             "[\(home.name)] Updated scene '\(actionSet.name)': added \(addedCount), removed \(removedCount)")
