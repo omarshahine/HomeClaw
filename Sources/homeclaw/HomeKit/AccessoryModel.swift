@@ -178,7 +178,55 @@ enum AccessoryModel {
         return detail
     }
 
-    // MARK: - Automations (Event Triggers)
+    // MARK: - Automations (Triggers)
+
+    /// Dispatch summary by trigger subclass. Routes HMEventTrigger to `automationSummary`,
+    /// HMTimerTrigger to `timerTriggerSummary`, and returns a minimal placeholder for any
+    /// other HMTrigger subclass so unknown triggers are still visible to callers.
+    static func triggerSummary(_ trigger: HMTrigger, homeName: String) -> [String: Any] {
+        if let event = trigger as? HMEventTrigger {
+            return automationSummary(event, homeName: homeName)
+        }
+        if let timer = trigger as? HMTimerTrigger {
+            return timerTriggerSummary(timer, homeName: homeName)
+        }
+        return [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": trigger.name,
+            "enabled": trigger.isEnabled,
+            "home": homeName,
+            "trigger_type": "unknown",
+        ]
+    }
+
+    /// Summary of a time-based timer trigger (Apple Home native time automation,
+    /// created via the iOS Home app).
+    static func timerTriggerSummary(_ trigger: HMTimerTrigger, homeName: String) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": trigger.name,
+            "enabled": trigger.isEnabled,
+            "home": homeName,
+            "trigger_type": "timer",
+            "scene_count": trigger.actionSets.count,
+            "scenes": trigger.actionSets.map { $0.name },
+        ]
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let timeOfDay = formatter.string(from: trigger.fireDate)
+        var summary = "at \(timeOfDay)"
+        if let recurrence = trigger.recurrence {
+            if let day = recurrence.day, day == 1 { summary += " daily" }
+            else if let weekday = recurrence.weekday {
+                let names = ["", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+                if (1...7).contains(weekday) { summary += " on \(names[weekday])s" }
+            }
+        }
+        dict["event_summary"] = summary
+        dict["fire_time"] = timeOfDay
+        dict["fire_date"] = ISO8601DateFormatter().string(from: trigger.fireDate)
+        return dict
+    }
 
     /// Summary of an automation (event trigger) for list views.
     static func automationSummary(_ trigger: HMEventTrigger, homeName: String) -> [String: Any] {
@@ -191,7 +239,7 @@ enum AccessoryModel {
             "scenes": trigger.actionSets.map { $0.name },
         ]
 
-        // Build a human-readable event summary from the first characteristic event
+        // Build a human-readable event summary from the first event.
         if let event = trigger.events.first as? HMCharacteristicEvent<NSCopying>,
            let accessory = event.characteristic.service?.accessory
         {
@@ -227,8 +275,43 @@ enum AccessoryModel {
                 ] as [String: Any]
             }
         }
+        // Calendar event (HH:MM time-of-day on an HMEventTrigger).
+        else if let calEvent = trigger.events.first as? HMCalendarEvent {
+            let dc = calEvent.fireDateComponents
+            if let hour = dc.hour, let minute = dc.minute {
+                dict["event_summary"] = String(format: "at %02d:%02d", hour, minute)
+                dict["fire_time"] = String(format: "%02d:%02d", hour, minute)
+            }
+            dict["trigger_type"] = "calendar"
+        }
+        // Significant-time event (sunrise/sunset).
+        else if let sigEvent = trigger.events.first as? HMSignificantTimeEvent {
+            let label = sigEvent.significantEvent == .sunrise ? "sunrise" : "sunset"
+            var summary = "at \(label)"
+            if let off = sigEvent.offset, let m = off.minute, m != 0 {
+                summary += m > 0 ? "+\(m)m" : "\(m)m"
+            }
+            dict["event_summary"] = summary
+            dict["trigger_type"] = "significant_time"
+        }
+
+        // Surface auto-off duration (HMDurationEvent in endEvents).
+        if let durationEvent = trigger.endEvents.compactMap({ $0 as? HMDurationEvent }).first {
+            let seconds = Int(durationEvent.duration)
+            dict["duration_seconds"] = seconds
+            if let existing = dict["event_summary"] as? String {
+                dict["event_summary"] = existing + " (off after \(formatDuration(seconds)))"
+            }
+        }
 
         return dict
+    }
+
+    /// Format a duration in seconds as a compact string (e.g. "5m", "2h", "30s").
+    private static func formatDuration(_ seconds: Int) -> String {
+        if seconds % 3600 == 0 { return "\(seconds / 3600)h" }
+        if seconds % 60 == 0 { return "\(seconds / 60)m" }
+        return "\(seconds)s"
     }
 
     /// Detailed view of an automation including all events and linked scenes.

@@ -694,9 +694,10 @@ final class HomeKitManager: NSObject, Observable {
         let targetHomes = filteredHomes(homeID: homeID)
         var results: [[String: Any]] = []
         for home in targetHomes {
-            let eventTriggers = home.triggers.compactMap { $0 as? HMEventTrigger }
-            for trigger in eventTriggers {
-                results.append(AccessoryModel.automationSummary(trigger, homeName: home.name))
+            // Iterate all triggers (event, timer, and any other HMTrigger subclass)
+            // so HMTimerTrigger automations created via the iOS Home app are visible.
+            for trigger in home.triggers {
+                results.append(AccessoryModel.triggerSummary(trigger, homeName: home.name))
             }
         }
         return results
@@ -705,10 +706,13 @@ final class HomeKitManager: NSObject, Observable {
     func getAutomation(id: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
         let home = try resolveHome(homeID: homeID)
-        guard let trigger = findTrigger(id: id, in: home) else {
-            throw ControlError.triggerNotFound(id)
+        if let trigger = findEventTrigger(id: id, in: home) {
+            return AccessoryModel.automationDetail(trigger, homeName: home.name)
         }
-        return AccessoryModel.automationDetail(trigger, homeName: home.name)
+        if let timer = findTimerTrigger(id: id, in: home) {
+            return AccessoryModel.timerTriggerSummary(timer, homeName: home.name)
+        }
+        throw ControlError.triggerNotFound(id)
     }
 
     func createAutomation(
@@ -999,17 +1003,20 @@ final class HomeKitManager: NSObject, Observable {
     ) async throws -> [String: Any] {
         await waitForReady()
         let home = try resolveHome(homeID: homeID)
-        guard let trigger = findTrigger(id: id, in: home) else {
+        // Use findAnyTrigger so HMTimerTrigger (Apple Home native time automations)
+        // can also be deleted, not just HMEventTrigger.
+        guard let trigger = findAnyTrigger(id: id, in: home) else {
             throw ControlError.triggerNotFound(id)
         }
 
         let triggerName = trigger.name
+        let sceneCount = trigger.actionSets.count
         if dryRun {
             return [
                 "dry_run": true,
                 "name": triggerName,
                 "home": home.name,
-                "scene_count": trigger.actionSets.count,
+                "scene_count": sceneCount,
             ] as [String: Any]
         }
 
@@ -1130,7 +1137,8 @@ final class HomeKitManager: NSObject, Observable {
     ) async throws -> [String: Any] {
         await waitForReady()
         let home = try resolveHome(homeID: homeID)
-        guard let trigger = findTrigger(id: id, in: home) else {
+        // Use findAnyTrigger so HMTimerTrigger automations can also be enabled/disabled.
+        guard let trigger = findAnyTrigger(id: id, in: home) else {
             throw ControlError.triggerNotFound(id)
         }
 
@@ -1148,13 +1156,34 @@ final class HomeKitManager: NSObject, Observable {
     // MARK: - Private Helpers
 
     private func findTrigger(id: String, in home: HMHome) -> HMEventTrigger? {
+        findEventTrigger(id: id, in: home)
+    }
+
+    /// Lookup an HMEventTrigger by UUID or name (case-insensitive).
+    private func findEventTrigger(id: String, in home: HMHome) -> HMEventTrigger? {
         let eventTriggers = home.triggers.compactMap { $0 as? HMEventTrigger }
-        // UUID first
         if let trigger = eventTriggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
             return trigger
         }
-        // Name fallback
         return eventTriggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
+
+    /// Lookup an HMTimerTrigger (Apple Home native time automation) by UUID or name.
+    private func findTimerTrigger(id: String, in home: HMHome) -> HMTimerTrigger? {
+        let timerTriggers = home.triggers.compactMap { $0 as? HMTimerTrigger }
+        if let trigger = timerTriggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+            return trigger
+        }
+        return timerTriggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
+
+    /// Lookup any HMTrigger subclass by UUID or name. Used for delete/enable/disable
+    /// where the operation works on the abstract HMTrigger API regardless of subtype.
+    private func findAnyTrigger(id: String, in home: HMHome) -> HMTrigger? {
+        if let trigger = home.triggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+            return trigger
+        }
+        return home.triggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
     }
 
     private func findInputEventCharacteristic(
