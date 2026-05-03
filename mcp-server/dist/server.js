@@ -21075,6 +21075,11 @@ var tools = [
           type: "number",
           description: "Button index for multi-button accessories (1 or 2). For button triggers only. (create action)"
         },
+        weekdays: {
+          type: "array",
+          items: { type: "number", enum: [1, 2, 3, 4, 5, 6, 7] },
+          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, the automation fires every day. iOS 15+ marks time-conditional automations without weekday gating as "unreliable", so pass weekdays explicitly when combining with time-of-day conditions. (create action)'
+        },
         dry_run: {
           type: "boolean",
           description: "Preview changes without applying (create/delete actions)"
@@ -21300,6 +21305,9 @@ async function handleAutomations(args) {
       if (args.scene_id) socketArgs.scene_id = args.scene_id;
       if (args.actions) socketArgs.actions = args.actions;
       if (args.service_index != null) socketArgs.service_index = String(args.service_index);
+      if (Array.isArray(args.weekdays) && args.weekdays.length > 0) {
+        socketArgs.weekdays = args.weekdays;
+      }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run) socketArgs.dry_run = "true";
       return sendCommand("create_automation", socketArgs);

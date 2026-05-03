@@ -720,6 +720,7 @@ final class HomeKitManager: NSObject, Observable {
         sceneID: String? = nil,
         actions: [[String: String]]? = nil,
         serviceIndex: Int? = nil,
+        weekdays: [Int] = [],
         homeID: String? = nil,
         dryRun: Bool = false
     ) async throws -> [String: Any] {
@@ -790,6 +791,7 @@ final class HomeKitManager: NSObject, Observable {
                     result["characteristic"] = characteristic
                     result["trigger_value"] = triggerValue
                 }
+                if !weekdays.isEmpty { result["weekdays"] = weekdays }
                 return result
             }
 
@@ -844,6 +846,7 @@ final class HomeKitManager: NSObject, Observable {
                     result["characteristic"] = characteristic
                     result["trigger_value"] = triggerValue
                 }
+                if !weekdays.isEmpty { result["weekdays"] = weekdays }
                 return result
             }
 
@@ -871,6 +874,38 @@ final class HomeKitManager: NSObject, Observable {
             home.addTrigger(trigger) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
+            }
+        }
+
+        // Step 1b: Apply weekday predicate (iOS 15+ marks time-conditional automations
+        // without weekday gating as "unreliable"; explicit weekdays are the workaround).
+        // The OR of per-day predicates is AND'd with the trigger's existing predicate.
+        if !weekdays.isEmpty {
+            let dayPredicates: [NSPredicate] = weekdays.map { weekday in
+                var dc = DateComponents()
+                dc.weekday = weekday
+                return HMEventTrigger.predicateForEvaluatingTrigger(occurringOn: dc)
+            }
+            let weekdayPredicate: NSPredicate = dayPredicates.count == 1
+                ? dayPredicates[0]
+                : NSCompoundPredicate(orPredicateWithSubpredicates: dayPredicates)
+            let combinedPredicate: NSPredicate
+            if let existing = trigger.predicate {
+                combinedPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [existing, weekdayPredicate])
+            } else {
+                combinedPredicate = weekdayPredicate
+            }
+            do {
+                try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
+            } catch {
+                // Cleanup orphaned trigger on predicate failure
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeTrigger(trigger) { err in
+                        if let err { continuation.resume(throwing: err) }
+                        else { continuation.resume() }
+                    }
+                }
+                throw error
             }
         }
 
@@ -946,6 +981,9 @@ final class HomeKitManager: NSObject, Observable {
             result["inline_actions"] = true
         } else {
             result["scene"] = actionSet.name
+        }
+        if !weekdays.isEmpty {
+            result["weekdays"] = weekdays
         }
         return result
     }

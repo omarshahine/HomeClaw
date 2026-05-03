@@ -705,6 +705,9 @@ final class SocketServer: @unchecked Sendable {
                     ?? 0
                 let serviceIndex = (args["service_index"] as? Int)
                     ?? (args["service_index"] as? String).flatMap(Int.init)
+                let weekdays = (args["weekdays"] as? [Int])
+                    ?? (args["weekdays"] as? [String])?.compactMap(Int.init)
+                    ?? []
                 result = try await hk.createAutomation(
                     name: name,
                     accessoryID: accessoryID,
@@ -714,6 +717,7 @@ final class SocketServer: @unchecked Sendable {
                     sceneID: sceneID,
                     actions: actions,
                     serviceIndex: serviceIndex,
+                    weekdays: weekdays,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
                 )
