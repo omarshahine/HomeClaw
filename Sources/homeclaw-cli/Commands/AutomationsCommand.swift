@@ -234,15 +234,23 @@ struct CreateAutomation: ParsableCommand {
         if let serviceIndex { args["service_index"] = serviceIndex }
 
         if let days {
-            let dayMap = ["sun": 1, "mon": 2, "tue": 3, "wed": 4, "thu": 5, "fri": 6, "sat": 7]
+            let dayMap: [String: Int] = [
+                "sun": 1, "sunday": 1,
+                "mon": 2, "monday": 2,
+                "tue": 3, "tuesday": 3,
+                "wed": 4, "wednesday": 4,
+                "thu": 5, "thursday": 5,
+                "fri": 6, "friday": 6,
+                "sat": 7, "saturday": 7,
+            ]
             var weekdays: [Int] = []
             for raw in days.split(separator: ",") {
                 let key = raw.trimmingCharacters(in: .whitespaces).lowercased()
-                if let n = dayMap[String(key.prefix(3))] { weekdays.append(n) }
+                if let n = dayMap[key] { weekdays.append(n) }
                 else if let n = Int(key), (1...7).contains(n) { weekdays.append(n) }
                 else { throw ValidationError("Invalid day '\(raw)'. Use mon/tue/wed/thu/fri/sat/sun or 1-7 (1=Sun)") }
             }
-            args["weekdays"] = weekdays
+            args["weekdays"] = Array(Swift.Set(weekdays)).sorted()
         }
 
         if let home { args["home_id"] = home }
