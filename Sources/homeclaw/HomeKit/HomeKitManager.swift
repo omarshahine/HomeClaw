@@ -710,7 +710,7 @@ final class HomeKitManager: NSObject, Observable {
             return AccessoryModel.automationDetail(trigger, homeName: home.name)
         }
         if let timer = findTimerTrigger(id: id, in: home) {
-            return AccessoryModel.timerTriggerSummary(timer, homeName: home.name)
+            return AccessoryModel.timerTriggerDetail(timer, homeName: home.name)
         }
         throw ControlError.triggerNotFound(id)
     }

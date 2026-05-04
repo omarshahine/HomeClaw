@@ -228,6 +228,53 @@ enum AccessoryModel {
         return dict
     }
 
+    /// Detailed view of a timer trigger including full scene/action breakdown,
+    /// matching the richness of `automationDetail` for HMEventTriggers.
+    static func timerTriggerDetail(_ trigger: HMTimerTrigger, homeName: String) -> [String: Any] {
+        var detail = timerTriggerSummary(trigger, homeName: homeName)
+
+        let actionSets: [[String: Any]] = trigger.actionSets.map { actionSet in
+            let actions: [[String: String]] = actionSet.actions.compactMap { action in
+                guard let writeAction = action as? HMCharacteristicWriteAction<NSCopying> else { return nil }
+                let characteristic = writeAction.characteristic
+                let accessory = characteristic.service?.accessory
+                return [
+                    "accessory": accessory?.name ?? "Unknown",
+                    "room": accessory?.room?.name ?? "Default Room",
+                    "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
+                    "value": "\(writeAction.targetValue)",
+                ]
+            }
+            return [
+                "id": actionSet.uniqueIdentifier.uuidString,
+                "name": actionSet.name,
+                "action_count": actionSet.actions.count,
+                "actions": actions,
+            ]
+        }
+        detail["action_sets"] = actionSets
+
+        // Surface unparsed recurrence DateComponents for callers that want raw access.
+        // (Partial decoding lives in `timerTriggerSummary`'s event_summary.)
+        if let recurrence = trigger.recurrence {
+            var raw: [String: Int] = [:]
+            if let v = recurrence.day { raw["day"] = v }
+            if let v = recurrence.weekday { raw["weekday"] = v }
+            if let v = recurrence.weekOfMonth { raw["weekOfMonth"] = v }
+            if let v = recurrence.weekOfYear { raw["weekOfYear"] = v }
+            if let v = recurrence.month { raw["month"] = v }
+            if let v = recurrence.year { raw["year"] = v }
+            if let v = recurrence.hour { raw["hour"] = v }
+            if let v = recurrence.minute { raw["minute"] = v }
+            if let v = recurrence.second { raw["second"] = v }
+            if !raw.isEmpty {
+                detail["recurrence_raw"] = raw
+            }
+        }
+
+        return detail
+    }
+
     /// Summary of an automation (event trigger) for list views.
     static func automationSummary(_ trigger: HMEventTrigger, homeName: String) -> [String: Any] {
         var dict: [String: Any] = [
@@ -288,16 +335,24 @@ enum AccessoryModel {
         else if let sigEvent = trigger.events.first as? HMSignificantTimeEvent {
             let label = sigEvent.significantEvent == .sunrise ? "sunrise" : "sunset"
             var summary = "at \(label)"
-            if let off = sigEvent.offset, let m = off.minute, m != 0 {
-                summary += m > 0 ? "+\(m)m" : "\(m)m"
+            if let off = sigEvent.offset {
+                let totalMinutes = (off.hour ?? 0) * 60 + (off.minute ?? 0)
+                if totalMinutes != 0 {
+                    summary += totalMinutes > 0 ? "+\(totalMinutes)m" : "\(totalMinutes)m"
+                }
             }
             dict["event_summary"] = summary
             dict["trigger_type"] = "significant_time"
         }
+        // Unrecognized HMEvent subclass — keep schema's "unknown" contract
+        // consistent with `triggerSummary`'s fallback for non-HMEventTrigger triggers.
+        else {
+            dict["trigger_type"] = "unknown"
+        }
 
         // Surface auto-off duration (HMDurationEvent in endEvents).
         if let durationEvent = trigger.endEvents.compactMap({ $0 as? HMDurationEvent }).first {
-            let seconds = Int(durationEvent.duration)
+            let seconds = Int(durationEvent.duration.rounded())
             dict["duration_seconds"] = seconds
             if let existing = dict["event_summary"] as? String {
                 dict["event_summary"] = existing + " (off after \(formatDuration(seconds)))"
