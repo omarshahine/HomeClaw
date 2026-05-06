@@ -359,6 +359,16 @@ enum AccessoryModel {
             }
         }
 
+        // Brief condition count in the event summary so list views show the predicate is non-trivial.
+        // Full structured conditions are surfaced by `automationDetail` and `extractConditions`.
+        // We pass `home: nil` here because this summary path doesn't have access to it; weekdays
+        // and time predicates are still counted, characteristic accessory names just won't resolve.
+        // (`automationDetail` uses the home-scoped variant for richer output.)
+        let conditionCount = countConditions(trigger.predicate)
+        if conditionCount > 0, let existing = dict["event_summary"] as? String {
+            dict["event_summary"] = existing + " (+\(conditionCount) condition\(conditionCount == 1 ? "" : "s"))"
+        }
+
         return dict
     }
 
@@ -370,7 +380,8 @@ enum AccessoryModel {
     }
 
     /// Detailed view of an automation including all events and linked scenes.
-    static func automationDetail(_ trigger: HMEventTrigger, homeName: String) -> [String: Any] {
+    /// Pass `home` to resolve characteristic-condition predicates to accessory names.
+    static func automationDetail(_ trigger: HMEventTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
         var detail = automationSummary(trigger, homeName: homeName)
 
         let events: [[String: Any]] = trigger.events.compactMap { event in
@@ -418,7 +429,154 @@ enum AccessoryModel {
         }
         detail["action_sets"] = actionSets
 
+        // Decode the trigger predicate into structured conditions. Skipped when there's no
+        // predicate at all, or when nothing decodes (rather than emitting an empty array
+        // — keeps existing JSON consumers from seeing a new-but-always-empty key).
+        let conditions = extractConditions(trigger.predicate, in: home)
+        if !conditions.isEmpty {
+            detail["conditions"] = conditions
+        }
+
         return detail
+    }
+
+    // MARK: - Predicate decoding
+
+    /// Decode an automation trigger's NSPredicate into a structured array of conditions.
+    /// Returns dicts with a `type` discriminator: `characteristic`, `weekdays`, `time`, or
+    /// `unknown`. Each kind has its own field shape (see inline comments). Pass `home` to
+    /// resolve characteristic UUIDs to accessory names; without it characteristic conditions
+    /// fall back to a `characteristic_id` lookup hint.
+    static func extractConditions(_ predicate: NSPredicate?, in home: HMHome?) -> [[String: Any]] {
+        guard let predicate else { return [] }
+
+        // UUID → (accessory, characteristic) lookup so we can name characteristic conditions.
+        var charMap: [String: (accessory: HMAccessory, characteristic: HMCharacteristic)] = [:]
+        if let home {
+            for accessory in home.accessories {
+                for service in accessory.services {
+                    for char in service.characteristics {
+                        charMap[char.uniqueIdentifier.uuidString.uppercased()] = (accessory, char)
+                    }
+                }
+            }
+        }
+
+        var subpredicates: [NSPredicate] = []
+        flattenTopAnd(predicate, into: &subpredicates)
+
+        return subpredicates.compactMap { sub -> [String: Any]? in
+            // Weekday OR-compound (--days output): OR of comparisons against DateComponents.weekday.
+            if let orCompound = sub as? NSCompoundPredicate, orCompound.compoundPredicateType == .or {
+                var weekdays: [Int] = []
+                for inner in (orCompound.subpredicates as? [NSPredicate] ?? []) {
+                    if let cmp = inner as? NSComparisonPredicate,
+                       let dc = (cmp.rightExpression.constantValue ?? cmp.leftExpression.constantValue) as? DateComponents,
+                       let wd = dc.weekday
+                    {
+                        weekdays.append(wd)
+                    }
+                }
+                if !weekdays.isEmpty {
+                    let names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+                    let sorted = weekdays.sorted()
+                    return [
+                        "type": "weekdays",
+                        "weekdays": sorted,
+                        "summary": sorted.map { names[$0 - 1] }.joined(separator: ","),
+                    ]
+                }
+            }
+
+            // Single-weekday predicate (rare — produced when --days has exactly one entry).
+            if let cmp = sub as? NSComparisonPredicate,
+               let dc = (cmp.rightExpression.constantValue ?? cmp.leftExpression.constantValue) as? DateComponents,
+               let wd = dc.weekday
+            {
+                let names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+                return ["type": "weekdays", "weekdays": [wd], "summary": names[wd - 1]]
+            }
+
+            // Sun-relative time predicate (--time-after / --time-before): NSComparisonPredicate
+            // referencing the `sunrise`/`sunset` HMSignificantEvent string. We can't reliably
+            // recover the offset from the public predicate API, so offset_minutes is omitted
+            // when not 0/representable; the field is always present for shape stability.
+            if let cmp = sub as? NSComparisonPredicate {
+                for expr in [cmp.leftExpression, cmp.rightExpression] {
+                    if let eventStr = expr.constantValue as? String,
+                       (eventStr == HMSignificantEvent.sunrise.rawValue || eventStr == HMSignificantEvent.sunset.rawValue)
+                    {
+                        let eventName = eventStr == HMSignificantEvent.sunrise.rawValue ? "sunrise" : "sunset"
+                        let isBefore = cmp.predicateOperatorType == .lessThan || cmp.predicateOperatorType == .lessThanOrEqualTo
+                        let relation = isBefore ? "before" : "after"
+                        return [
+                            "type": "time",
+                            "relation": relation,
+                            "event": eventName,
+                            "summary": "\(relation) \(eventName)",
+                        ]
+                    }
+                }
+            }
+
+            // Characteristic predicate: HomeKit wraps each as a 2-sub AND
+            // (characteristic == <HMCharacteristic> AND characteristicValue == X).
+            guard let compound = sub as? NSCompoundPredicate, compound.compoundPredicateType == .and else { return nil }
+            let inner = compound.subpredicates as? [NSPredicate] ?? []
+            var foundChar: HMCharacteristic?
+            var foundValue: String?
+            for innerSub in inner {
+                guard let cmp = innerSub as? NSComparisonPredicate else { continue }
+                if let hmChar = cmp.rightExpression.constantValue as? HMCharacteristic {
+                    foundChar = hmChar
+                } else if let val = cmp.rightExpression.constantValue {
+                    foundValue = "\(val)"
+                }
+            }
+            guard let char = foundChar, let value = foundValue else { return nil }
+            let uuid = char.uniqueIdentifier.uuidString.uppercased()
+            if let entry = charMap[uuid] {
+                return [
+                    "type": "characteristic",
+                    "accessory": entry.accessory.name,
+                    "accessory_id": entry.accessory.uniqueIdentifier.uuidString,
+                    "property": CharacteristicMapper.name(for: entry.characteristic.characteristicType),
+                    "operator": "==",
+                    "value": value,
+                ]
+            }
+            // Fallback when home lookup is unavailable — surface the raw UUID so callers can resolve.
+            return [
+                "type": "characteristic",
+                "characteristic_id": uuid,
+                "operator": "==",
+                "value": value,
+            ]
+        }
+    }
+
+    /// Lightweight count of decoded conditions, used by `automationSummary` to annotate
+    /// `event_summary` without paying the home-scoped lookup cost.
+    private static func countConditions(_ predicate: NSPredicate?) -> Int {
+        extractConditions(predicate, in: nil).count
+    }
+
+    /// Flatten nested top-level AND compounds into a flat subpredicate list.
+    /// Successive `updatePredicate` mutations (e.g. `add-condition` calls in a future PR)
+    /// can produce AND-of-ANDs; treating those as a flat list keeps the decoder stable.
+    /// A single-condition predicate of shape `(char == X AND value == Y)` is a leaf — both
+    /// subs are NSComparisonPredicate, not compounds — so we keep it as one entry.
+    private static func flattenTopAnd(_ p: NSPredicate, into out: inout [NSPredicate]) {
+        guard let cmp = p as? NSCompoundPredicate, cmp.compoundPredicateType == .and else {
+            out.append(p)
+            return
+        }
+        let subs = cmp.subpredicates as? [NSPredicate] ?? []
+        if subs.allSatisfy({ $0 is NSCompoundPredicate }) {
+            for sub in subs { flattenTopAnd(sub, into: &out) }
+        } else {
+            out.append(p)
+        }
     }
 
     /// Maps press type integer to human-readable name.

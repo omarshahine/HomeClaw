@@ -21078,7 +21078,31 @@ var tools = [
         weekdays: {
           type: "array",
           items: { type: "number", enum: [1, 2, 3, 4, 5, 6, 7] },
-          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, the automation fires every day. iOS 15+ marks time-conditional automations without weekday gating as "unreliable", so pass weekdays explicitly when combining with time-of-day conditions. (create action)'
+          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, the automation fires every day. iOS 15+ marks time-conditional automations without weekday gating as "unreliable", so pass weekdays explicitly when combining with time-of-day conditions. If you set time_after/time_before but omit weekdays, HomeClaw auto-fills all 7 days and sets `weekdays_auto_filled: true` in the response. (create action)'
+        },
+        conditions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
+              property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
+              value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
+              room: { type: "string", description: "Room name for accessory disambiguation (optional)" }
+            },
+            required: ["accessory", "property", "value"]
+          },
+          description: "Extra characteristic predicates ANDed into the trigger predicate (create action). The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create action)"
+        },
+        time_after: {
+          type: "array",
+          items: { type: "string" },
+          description: 'Sun-relative time predicates ANDed into the trigger so it only fires after the given event (create action). Format: "<sunrise|sunset>[\xB1N]" where N is minutes (e.g., "sunset-30", "sunrise+15", "sunset"). Offsets larger than 1440 minutes are rejected. Combine with time_before for a window (e.g., time_after=["sunset-30"] + time_before=["sunrise+15"] for "between dusk and dawn"). When set without explicit weekdays, HomeClaw auto-fills all 7 days; see the weekdays field. (create action)'
+        },
+        time_before: {
+          type: "array",
+          items: { type: "string" },
+          description: "Sun-relative time predicates ANDed into the trigger so it only fires before the given event (create action). Same format and offset rules as time_after. (create action)"
         },
         dry_run: {
           type: "boolean",
@@ -21307,6 +21331,15 @@ async function handleAutomations(args) {
       if (args.service_index != null) socketArgs.service_index = String(args.service_index);
       if (Array.isArray(args.weekdays) && args.weekdays.length > 0) {
         socketArgs.weekdays = args.weekdays;
+      }
+      if (Array.isArray(args.conditions) && args.conditions.length > 0) {
+        socketArgs.conditions = args.conditions;
+      }
+      if (Array.isArray(args.time_after) && args.time_after.length > 0) {
+        socketArgs.time_after = args.time_after;
+      }
+      if (Array.isArray(args.time_before) && args.time_before.length > 0) {
+        socketArgs.time_before = args.time_before;
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run) socketArgs.dry_run = "true";

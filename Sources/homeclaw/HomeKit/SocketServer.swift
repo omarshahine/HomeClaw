@@ -708,6 +708,26 @@ final class SocketServer: @unchecked Sendable {
                 let weekdays = (args["weekdays"] as? [Int])
                     ?? (args["weekdays"] as? [String])?.compactMap(Int.init)
                     ?? []
+                let conditions = (args["conditions"] as? [[String: String]]) ?? []
+                // Parse sun-relative time predicates. The CLI/MCP layer pre-validates format,
+                // but defensively re-validate here so direct socket clients can't bypass it.
+                let timeAfterRaw = (args["time_after"] as? [String]) ?? []
+                let timeBeforeRaw = (args["time_before"] as? [String]) ?? []
+                var timeConditions: [TimeCondition] = []
+                for raw in timeAfterRaw {
+                    guard let tc = TimeCondition.parse(raw, relation: .after) else {
+                        return encodeResponse(success: false,
+                            error: "Invalid 'time_after' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
+                    }
+                    timeConditions.append(tc)
+                }
+                for raw in timeBeforeRaw {
+                    guard let tc = TimeCondition.parse(raw, relation: .before) else {
+                        return encodeResponse(success: false,
+                            error: "Invalid 'time_before' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunrise+15').")
+                    }
+                    timeConditions.append(tc)
+                }
                 result = try await hk.createAutomation(
                     name: name,
                     accessoryID: accessoryID,
@@ -718,6 +738,8 @@ final class SocketServer: @unchecked Sendable {
                     actions: actions,
                     serviceIndex: serviceIndex,
                     weekdays: weekdays,
+                    conditions: conditions,
+                    timeConditions: timeConditions,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
                 )

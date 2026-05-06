@@ -1,5 +1,90 @@
 import HomeKit
 
+// MARK: - Time Condition
+
+/// A before/after sun-relative time predicate for automation triggers.
+/// Composes via `HMEventTrigger.predicateForEvaluatingTrigger(occurringBefore/After:applyingOffset:)`.
+///
+/// Format: `<sun-event>[±<minutes>]` where sun-event is `sunrise` or `sunset` and the offset
+/// is signed minutes (e.g. `sunset-30`, `sunrise+15`, `sunset`).
+struct TimeCondition {
+    enum Relation { case after, before }
+    enum Event {
+        case sunrise, sunset
+        var significantEvent: String {
+            self == .sunrise ? HMSignificantEvent.sunrise.rawValue : HMSignificantEvent.sunset.rawValue
+        }
+    }
+
+    let relation: Relation
+    let event: Event
+    let offsetMinutes: Int   // positive = after the event, negative = before
+
+    /// Reject offsets larger than 24h — almost certainly a typo (the user probably meant a
+    /// `--days` filter). Smaller-than-24h but suspicious offsets (>720m / 12h) are allowed
+    /// to keep the parser permissive; the CLI flag layer surfaces them in `--help`.
+    static let maxOffsetMinutes = 1440
+
+    func predicate() -> NSPredicate? {
+        var offset: DateComponents? = nil
+        if offsetMinutes != 0 {
+            var dc = DateComponents()
+            dc.minute = offsetMinutes
+            offset = dc
+        }
+        // The string-form predicate APIs are marked deprecated in Catalyst 13.1+, but the
+        // replacement (HMSignificantTimeEvent-taking variant) is not exposed to Swift —
+        // only the DateComponents and HMPresenceEvent overloads bridge. Mirror the existing
+        // weekday predicate construction (`occurringOn:`) which is in the same boat.
+        switch relation {
+        case .after:
+            return HMEventTrigger.predicateForEvaluatingTrigger(
+                occurringAfter: event.significantEvent,
+                applyingOffset: offset
+            )
+        case .before:
+            return HMEventTrigger.predicateForEvaluatingTrigger(
+                occurringBefore: event.significantEvent,
+                applyingOffset: offset
+            )
+        }
+    }
+
+    /// Parse a sun-relative time spec. Returns nil for malformed input;
+    /// throws via the caller's `ValidationError` boundary.
+    /// Accepts: `sunrise`, `sunset`, `sunrise+15`, `sunset-30`. Rejects: bare offsets,
+    /// `noon`/`midnight`, missing-numeric offset (`sunset+`), unknown events.
+    static func parse(_ raw: String, relation: Relation) -> TimeCondition? {
+        let s = raw.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty else { return nil }
+
+        let event: Event
+        var rest: String
+        if s.hasPrefix("sunrise") {
+            event = .sunrise
+            rest = String(s.dropFirst("sunrise".count))
+        } else if s.hasPrefix("sunset") {
+            event = .sunset
+            rest = String(s.dropFirst("sunset".count))
+        } else {
+            return nil
+        }
+
+        rest = rest.trimmingCharacters(in: .whitespaces)
+        if rest.isEmpty {
+            return TimeCondition(relation: relation, event: event, offsetMinutes: 0)
+        }
+
+        // Must start with + or -, followed by a positive integer (minutes).
+        guard let sign = rest.first, sign == "+" || sign == "-" else { return nil }
+        let numStr = String(rest.dropFirst())
+        guard !numStr.isEmpty, let magnitude = Int(numStr), magnitude >= 0 else { return nil }
+        if magnitude > maxOffsetMinutes { return nil }
+        let offset = sign == "+" ? magnitude : -magnitude
+        return TimeCondition(relation: relation, event: event, offsetMinutes: offset)
+    }
+}
+
 /// Central HomeKit interface. Must run on @MainActor because HMHomeManager
 /// requires main-thread delegate callbacks.
 @MainActor
@@ -775,7 +860,7 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
         let home = try resolveHome(homeID: homeID)
         if let trigger = findEventTrigger(id: id, in: home) {
-            return AccessoryModel.automationDetail(trigger, homeName: home.name)
+            return AccessoryModel.automationDetail(trigger, homeName: home.name, home: home)
         }
         if let timer = findTimerTrigger(id: id, in: home) {
             return AccessoryModel.timerTriggerDetail(timer, homeName: home.name)
@@ -793,6 +878,8 @@ final class HomeKitManager: NSObject, Observable {
         actions: [[String: String]]? = nil,
         serviceIndex: Int? = nil,
         weekdays: [Int] = [],
+        conditions: [[String: String]] = [],
+        timeConditions: [TimeCondition] = [],
         homeID: String? = nil,
         dryRun: Bool = false
     ) async throws -> [String: Any] {
@@ -801,6 +888,92 @@ final class HomeKitManager: NSObject, Observable {
 
         guard let accessory = findAccessory(id: accessoryID, homeID: homeID) else {
             throw ControlError.accessoryNotFound(accessoryID)
+        }
+
+        // Resolve & validate condition predicates up-front so we fail before mutating HomeKit.
+        // Each condition must reference a real accessory + characteristic; values must parse.
+        // The resolved tuples are then used both for predicate construction (Step 1b) and for
+        // structured echo back in the result dict.
+        struct ResolvedCondition {
+            let accessory: HMAccessory
+            let characteristic: HMCharacteristic
+            let property: String
+            let value: NSCopying & NSObjectProtocol
+            let rawValue: String
+        }
+        var resolvedConditions: [ResolvedCondition] = []
+        for cond in conditions {
+            guard let condAccessoryID = cond["accessory"],
+                  let condProperty = cond["property"],
+                  let condValueStr = cond["value"],
+                  !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty
+            else {
+                throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
+            }
+            // Match createAutomation's own resolution: UUID first, then case-insensitive name
+            // (with optional `room` disambiguator if the caller supplied one).
+            let condAccessory: HMAccessory
+            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(condAccessoryID) == .orderedSame }) {
+                condAccessory = found
+            } else if let found = findAccessoryByName(condAccessoryID, room: cond["room"], in: home) {
+                condAccessory = found
+            } else {
+                throw ControlError.accessoryNotFound(condAccessoryID)
+            }
+            guard let condChar = findCharacteristicByDescription(on: condAccessory, property: condProperty) else {
+                throw ControlError.invalidArgument("Characteristic '\(condProperty)' not found on '\(condAccessory.name)' for --condition")
+            }
+            guard let parsed = parseActionValue(condValueStr, property: condProperty) else {
+                throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
+            }
+            resolvedConditions.append(ResolvedCondition(
+                accessory: condAccessory,
+                characteristic: condChar,
+                property: condProperty,
+                value: parsed,
+                rawValue: condValueStr
+            ))
+        }
+
+        // iOS 15+ marks time-conditional automations without weekday gating as "unreliable".
+        // Auto-fill all 7 days when --time-after / --time-before is set but --days is not,
+        // so the automation actually fires. Surface this via `weekdays_auto_filled` so the
+        // CLI/MCP caller knows we made a behavioural decision on their behalf.
+        let weekdaysAutoFilled = !timeConditions.isEmpty && weekdays.isEmpty
+        let effectiveWeekdays: [Int] = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
+
+        // Echo conditions / time conditions back to the caller in a stable, structured shape.
+        // Always set when input was provided so dry-run and success responses agree.
+        let conditionsEcho: [[String: String]] = resolvedConditions.map {
+            [
+                "accessory": $0.accessory.name,
+                "accessory_id": $0.accessory.uniqueIdentifier.uuidString,
+                "property": $0.property,
+                "value": $0.rawValue,
+            ]
+        }
+        let timeAfterEcho: [String] = timeConditions.compactMap {
+            guard $0.relation == .after else { return nil }
+            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
+            if $0.offsetMinutes == 0 { return ev }
+            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
+        }
+        let timeBeforeEcho: [String] = timeConditions.compactMap {
+            guard $0.relation == .before else { return nil }
+            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
+            if $0.offsetMinutes == 0 { return ev }
+            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
+        }
+        // Closure used by both dry-run and success paths to attach predicate-related fields.
+        // Keeping the shape identical between paths means callers/tests don't need to special-case.
+        let attachPredicateFields: ([String: Any]) -> [String: Any] = { existing in
+            var r = existing
+            if !effectiveWeekdays.isEmpty { r["weekdays"] = effectiveWeekdays }
+            if weekdaysAutoFilled { r["weekdays_auto_filled"] = true }
+            if !conditionsEcho.isEmpty { r["conditions"] = conditionsEcho }
+            if !timeAfterEcho.isEmpty { r["time_after"] = timeAfterEcho }
+            if !timeBeforeEcho.isEmpty { r["time_before"] = timeBeforeEcho }
+            return r
         }
 
         // Resolve the trigger characteristic and value based on trigger mode
@@ -863,8 +1036,7 @@ final class HomeKitManager: NSObject, Observable {
                     result["characteristic"] = characteristic
                     result["trigger_value"] = triggerValue
                 }
-                if !weekdays.isEmpty { result["weekdays"] = weekdays }
-                return result
+                return attachPredicateFields(result)
             }
 
             // Action sets created via the public API are always visible in the Home app
@@ -918,8 +1090,7 @@ final class HomeKitManager: NSObject, Observable {
                     result["characteristic"] = characteristic
                     result["trigger_value"] = triggerValue
                 }
-                if !weekdays.isEmpty { result["weekdays"] = weekdays }
-                return result
+                return attachPredicateFields(result)
             }
 
             actionSet = existingSet
@@ -949,28 +1120,58 @@ final class HomeKitManager: NSObject, Observable {
             }
         }
 
-        // Step 1b: Apply weekday predicate (iOS 15+ marks time-conditional automations
-        // without weekday gating as "unreliable"; explicit weekdays are the workaround).
-        // The OR of per-day predicates is AND'd with the trigger's existing predicate.
-        if !weekdays.isEmpty {
-            let dayPredicates: [NSPredicate] = weekdays.map { weekday in
+        // Step 1b: Build the combined trigger predicate from weekdays + conditions +
+        // time conditions and apply it in a single `updatePredicate` call.
+        //
+        // Only the LAST `updatePredicate` call sticks, so all three predicate kinds must be
+        // composed together. The structure is one outer AND:
+        //
+        //   AND(
+        //     existing-trigger-predicate,                  // currently always nil at this point
+        //     OR(weekday=1, weekday=2, ...),               // from --days / auto-fill
+        //     characteristic-condition-1,                  // from each --condition
+        //     characteristic-condition-2,
+        //     time-condition-1,                            // from each --time-after / --time-before
+        //     ...
+        //   )
+        //
+        // If only one of these is present, we either skip the call entirely (none) or pass the
+        // single predicate directly (no compound wrapper). Failure rolls back the orphan trigger
+        // (and inline action set if we created one), mirroring the action-set-link rollback path.
+        var subpredicates: [NSPredicate] = []
+        if let existing = trigger.predicate { subpredicates.append(existing) }
+        if !effectiveWeekdays.isEmpty {
+            let dayPredicates: [NSPredicate] = effectiveWeekdays.map { weekday in
                 var dc = DateComponents()
                 dc.weekday = weekday
                 return HMEventTrigger.predicateForEvaluatingTrigger(occurringOn: dc)
             }
-            let weekdayPredicate: NSPredicate = dayPredicates.count == 1
-                ? dayPredicates[0]
-                : NSCompoundPredicate(orPredicateWithSubpredicates: dayPredicates)
-            let combinedPredicate: NSPredicate
-            if let existing = trigger.predicate {
-                combinedPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [existing, weekdayPredicate])
-            } else {
-                combinedPredicate = weekdayPredicate
-            }
+            subpredicates.append(
+                dayPredicates.count == 1
+                    ? dayPredicates[0]
+                    : NSCompoundPredicate(orPredicateWithSubpredicates: dayPredicates)
+            )
+        }
+        for cond in resolvedConditions {
+            subpredicates.append(
+                HMEventTrigger.predicateForEvaluatingTrigger(
+                    cond.characteristic,
+                    relatedBy: .equalTo,
+                    toValue: cond.value
+                )
+            )
+        }
+        for tc in timeConditions {
+            if let p = tc.predicate() { subpredicates.append(p) }
+        }
+        if !subpredicates.isEmpty {
+            let combinedPredicate: NSPredicate = subpredicates.count == 1
+                ? subpredicates[0]
+                : NSCompoundPredicate(andPredicateWithSubpredicates: subpredicates)
             do {
                 try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
             } catch {
-                // Cleanup orphaned trigger on predicate failure
+                // Cleanup orphaned trigger on predicate failure (no inline action set linked yet).
                 try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     home.removeTrigger(trigger) { err in
                         if let err { continuation.resume(throwing: err) }
@@ -1054,10 +1255,7 @@ final class HomeKitManager: NSObject, Observable {
         } else {
             result["scene"] = actionSet.name
         }
-        if !weekdays.isEmpty {
-            result["weekdays"] = weekdays
-        }
-        return result
+        return attachPredicateFields(result)
     }
 
     /// Resolve action definitions to HomeKit accessory/characteristic/value tuples.
