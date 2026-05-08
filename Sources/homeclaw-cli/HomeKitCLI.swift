@@ -33,6 +33,7 @@ struct HomeKitCLI: ParsableCommand {
             Automations.self,
             Triggers.self,
             WebhookLog.self,
+            Ui.self,
         ],
         defaultSubcommand: Status.self
     )
