@@ -304,6 +304,9 @@ platform :ios do
       cleaned = base.sub(/_\d+_[A-F0-9-]+$/i, "")
       next if cleaned == base
       target = File.join(File.dirname(path), "#{cleaned}.png")
+      if File.exist?(target) && target != path
+        UI.user_error!("Two test attachments would clean to the same filename: #{File.basename(target)}. Rename one of the XCTAttachment names in ScreenshotTests.")
+      end
       File.rename(path, target)
     end
 

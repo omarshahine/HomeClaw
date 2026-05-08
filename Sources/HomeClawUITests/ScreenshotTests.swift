@@ -50,15 +50,24 @@ final class ScreenshotTests: XCTestCase {
     /// Returns the first window with a non-1×1 frame. The headless default
     /// scene shows as a 1×1 hidden window — this filter ensures we capture
     /// the actual Settings or Onboarding window, not that ghost.
+    ///
+    /// Polls up to 10s for a non-ghost window to appear in the accessibility
+    /// tree. Without this, on a cold launch the SwiftUI window may not be
+    /// registered when `windows.count` is first evaluated and we'd fall
+    /// through to capturing the 1×1 ghost — producing a useless screenshot.
     private func firstVisibleWindow(in app: XCUIApplication) -> XCUIElement {
         let windows = app.windows
-        // Wait for at least one window to exist before filtering.
-        _ = windows.firstMatch.waitForExistence(timeout: 5)
-        // XCUIElementQuery is lazy; iterate by index to inspect frames.
-        for i in 0..<windows.count {
-            let w = windows.element(boundBy: i)
-            if w.frame.width > 10, w.frame.height > 10 { return w }
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            for i in 0..<windows.count {
+                let w = windows.element(boundBy: i)
+                if w.exists, w.frame.width > 10, w.frame.height > 10 {
+                    return w
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.25)
         }
+        XCTFail("No visible window appeared within 10s — only the 1×1 headless scene is in the accessibility tree.")
         return windows.firstMatch
     }
 

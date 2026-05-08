@@ -80,9 +80,10 @@ final class HomeKitManager: NSObject, Observable {
 
     /// Home count exposed to views. In demo mode the `homes` array is empty
     /// (HMHome objects can't be synthesized), so views must read this rather
-    /// than `homes.count` directly.
+    /// than `homes.count` directly. Routes through `DemoFixtures` to stay in
+    /// sync with `listHomes()` if the fixture set ever grows past one home.
     var homeCount: Int {
-        if Self.isDemoMode { return 1 }
+        if Self.isDemoMode { return DemoFixtures.demoHomeCount }
         return homes.count
     }
 

@@ -311,4 +311,5 @@ enum DemoFixtures {
     }
 
     static var demoAccessoryCount: Int { demoAccessories.count }
+    static var demoHomeCount: Int { 1 }
 }
