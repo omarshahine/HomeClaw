@@ -6,6 +6,15 @@ import HomeKit
 final class HomeKitManager: NSObject, Observable {
     static let shared = HomeKitManager()
 
+    /// True when the app should bypass HomeKit and serve `DemoFixtures` data.
+    /// Used by App Store screenshot capture so we never leak real home data.
+    /// Gate: `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1` env var.
+    static var isDemoMode: Bool {
+        let args = ProcessInfo.processInfo.arguments
+        if args.contains("--ui-test-demo") { return true }
+        return ProcessInfo.processInfo.environment["HOMECLAW_DEMO"] == "1"
+    }
+
     private var homeManager: HMHomeManager?
     private var homesReady = false
     private var pendingContinuations: [CheckedContinuation<Void, Never>] = []
@@ -26,6 +35,21 @@ final class HomeKitManager: NSObject, Observable {
     /// before a window exists causes a TCC privacy violation crash.
     func start() {
         guard homeManager == nil else { return }
+
+        if Self.isDemoMode {
+            AppLogger.homekit.info("Demo mode enabled — serving DemoFixtures, skipping HMHomeManager")
+            homesReady = true
+            for continuation in pendingContinuations { continuation.resume() }
+            pendingContinuations.removeAll()
+            NotificationCenter.default.post(
+                name: .homeKitStatusDidChange,
+                object: nil,
+                userInfo: ["ready": true, "homeNames": [DemoFixtures.homeName]]
+            )
+            scheduleMenuDataPush()
+            return
+        }
+
         let manager = HMHomeManager()
         manager.delegate = self
         homeManager = manager
@@ -48,13 +72,15 @@ final class HomeKitManager: NSObject, Observable {
     var isReady: Bool { homesReady }
 
     var totalAccessoryCount: Int {
-        homes.reduce(0) { $0 + $1.accessories.count }
+        if Self.isDemoMode { return DemoFixtures.demoAccessoryCount }
+        return homes.reduce(0) { $0 + $1.accessories.count }
     }
 
     // MARK: - Homes
 
     func listHomes() async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode { return [DemoFixtures.homeSummary()] }
         let activeHomes = filteredHomes(homeID: nil)
         let activeID = activeHomes.first?.uniqueIdentifier
         return homes.map { home in
@@ -68,6 +94,7 @@ final class HomeKitManager: NSObject, Observable {
 
     func listRooms(homeID: String? = nil) async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.roomSummaries() }
         let targetHomes = filteredHomes(homeID: homeID)
         var result: [[String: Any]] = []
         for home in targetHomes {
@@ -90,6 +117,11 @@ final class HomeKitManager: NSObject, Observable {
 
     func listAccessories(homeID: String? = nil, room: String? = nil) async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode {
+            let all = DemoFixtures.accessorySummaries()
+            guard let room else { return all }
+            return all.filter { ($0["room"] as? String)?.localizedCaseInsensitiveCompare(room) == .orderedSame }
+        }
         let targetHomes = filteredHomes(homeID: homeID)
         var accessories: [HMAccessory] = []
 
@@ -129,6 +161,7 @@ final class HomeKitManager: NSObject, Observable {
 
     func getAccessory(id: String, homeID: String? = nil) async -> [String: Any]? {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.accessoryDetail(id: id) }
         guard let accessory = findAccessory(id: id, homeID: homeID) else { return nil }
         guard isAccessoryAllowed(accessory) else { return nil }
         await readAllValues(for: accessory)
@@ -177,6 +210,14 @@ final class HomeKitManager: NSObject, Observable {
 
     func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil, serviceType: String? = nil, dryRun: Bool = false) async throws -> [String: Any] {
         await waitForReady()
+
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.control(id: id, characteristic: characteristic, value: value) else {
+                throw ControlError.accessoryNotFound(id)
+            }
+            scheduleMenuDataPush()
+            return result
+        }
 
         guard let accessory = findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
@@ -257,6 +298,13 @@ final class HomeKitManager: NSObject, Observable {
 
     func listScenes(homeID: String? = nil) async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode {
+            return DemoFixtures.sceneSummaries.map { scene in
+                var dict = scene
+                dict["home_name"] = DemoFixtures.homeName
+                return dict
+            }
+        }
         let targetHomes = filteredHomes(homeID: homeID)
         return targetHomes.flatMap { home in
             home.actionSets.map { actionSet in
@@ -269,6 +317,15 @@ final class HomeKitManager: NSObject, Observable {
 
     func triggerScene(id: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let scene = DemoFixtures.sceneSummaries.first(where: {
+                ($0["id"] as? String) == id
+                    || ($0["name"] as? String)?.localizedCaseInsensitiveCompare(id) == .orderedSame
+            }) else {
+                throw ControlError.sceneNotFound(id)
+            }
+            return scene
+        }
         let targetHomes = filteredHomes(homeID: homeID)
 
         for home in targetHomes {
@@ -1781,6 +1838,7 @@ final class HomeKitManager: NSObject, Observable {
     /// Used by the settings UI to populate the device checkbox list.
     func listAllAccessories() async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.allAccessoriesWithHome() }
         return homes.flatMap { home in
             home.accessories.map { accessory in
                 let id = accessory.uniqueIdentifier.uuidString
@@ -1814,6 +1872,7 @@ final class HomeKitManager: NSObject, Observable {
     /// for the menu bar. Reads only from the in-memory cache — no async I/O.
     func buildMenuData() -> [String: Any] {
         guard homesReady else { return ["ready": false] }
+        if Self.isDemoMode { return DemoFixtures.menuData() }
 
         let targetHomes = filteredHomes(homeID: nil)
         guard let selectedHome = targetHomes.first else {

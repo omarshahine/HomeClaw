@@ -210,9 +210,31 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
                 self?.openOnboarding()
             }
         }
+
+        // UI-test routing: in demo mode, `--ui-test-screen settings|onboarding`
+        // auto-opens the requested scene so XCUITest can capture it without
+        // having to drive the NSStatusItem menu bar.
+        if HomeKitManager.isDemoMode, let screen = uiTestScreen() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                switch screen {
+                case "settings": self?.openSettings()
+                case "onboarding": self?.openOnboarding()
+                default: break
+                }
+            }
+        }
         #endif
 
         return true
+    }
+
+    /// Returns the value passed via `--ui-test-screen <name>`, or nil.
+    private func uiTestScreen() -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: "--ui-test-screen"), idx + 1 < args.count else {
+            return nil
+        }
+        return args[idx + 1]
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -384,8 +406,15 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         #if targetEnvironment(macCatalyst)
         windowScene.title = " "
-        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
-        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
+        // In demo (UI test) mode, allow resizing up to Mac App Store screenshot
+        // dimensions (1440×900) so capture tests can fill the marketing canvas.
+        if HomeKitManager.isDemoMode {
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
+            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 1440, height: 900)
+        } else {
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
+            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 800, height: 900)
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             Self.activateApp()
@@ -521,8 +550,15 @@ class OnboardingSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         #if targetEnvironment(macCatalyst)
         windowScene.title = "Welcome to HomeClaw"
-        windowScene.sizeRestrictions?.minimumSize = CGSize(width: 700, height: 600)
-        windowScene.sizeRestrictions?.maximumSize = CGSize(width: 700, height: 600)
+        // Demo mode: allow up to 1440×900 for screenshot capture; production
+        // keeps a fixed welcome size.
+        if HomeKitManager.isDemoMode {
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 700, height: 600)
+            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 1440, height: 900)
+        } else {
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 700, height: 600)
+            windowScene.sizeRestrictions?.maximumSize = CGSize(width: 700, height: 600)
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             Self.activateAndCenter()

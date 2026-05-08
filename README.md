@@ -767,7 +767,15 @@ fastlane auth_check    # Validate ASC API key setup
 # Pass tester notes (used by `beta` and `submit_only`):
 fastlane beta notes_file:/tmp/notes.txt
 fastlane beta notes:"Bug fixes and improvements"
+
+# App Store screenshot pipeline (XCUITest-driven, demo mode, zero personal data):
+fastlane screenshots          # Run HomeClawUITests in demo mode, extract PNGs to fastlane/screenshots/en-US/
+fastlane upload_screenshots   # Push screenshots to App Store Connect
 ```
+
+The screenshot pipeline uses **demo mode** — `HomeKitManager.isDemoMode` (gated on `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1`) bypasses HomeKit and serves synthetic data from `Sources/homeclaw/HomeKit/DemoFixtures.swift`. Real HomeKit data is never read or shown. Requires `xcparse` (`brew install chargepoint/xcparse/xcparse`).
+
+Known follow-up: the menu-bar dropdown is `NSMenu` (AppKit), so it can't be auto-rendered via SwiftUI `ImageRenderer`. Capture it manually with `screencapture -x` of the running demo-mode app, or build a SwiftUI mockup of the dropdown.
 
 Auth uses an App Store Connect API key from `~/.secrets.env` (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`). Team ID comes from `.env.local` (`HOMEKIT_TEAM_ID`).
 

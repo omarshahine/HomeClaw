@@ -151,6 +151,30 @@ targets:
         SKIP_INSTALL: YES
         MACOSX_DEPLOYMENT_TARGET: "15.0"
 
+  # ─── UI Tests (App Store screenshot capture) ──────────────
+  # Drives demo-mode HomeClaw via XCUITest to capture App Store screenshots.
+  # Demo mode (HomeKitManager.isDemoMode) is gated on `--ui-test-demo` so we
+  # never touch real HomeKit data. See fastlane `screenshots` lane.
+  HomeClawUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    attributes:
+      UIKitCatalyst: optimized
+    sources:
+      - path: Sources/HomeClawUITests
+    dependencies:
+      - target: HomeClaw
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw.uitests
+        PRODUCT_NAME: HomeClawUITests
+        TEST_TARGET_NAME: HomeClaw
+        TARGETED_DEVICE_FAMILY: "6"
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
   # ─── CLI Tool ──────────────────────────────────────────────
   homeclaw-cli:
     type: tool
@@ -193,3 +217,18 @@ schemes:
       config: Release
     profile:
       config: Release
+
+  HomeClawUITests:
+    build:
+      targets:
+        HomeClaw: all
+        macOSBridge: all
+        homeclaw-cli: all
+        HomeClawUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - HomeClawUITests
+    run:
+      config: Debug
+      executable: HomeClaw

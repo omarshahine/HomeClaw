@@ -253,6 +253,60 @@ platform :ios do
     UI.success("Build #{build_number} submitted to '#{group_name}'.")
   end
 
+  desc "Capture App Store screenshots via XCUITest in demo mode"
+  # Runs HomeClawUITests/ScreenshotTests with `--ui-test-demo`, then uses
+  # xcparse to extract XCTAttachments from the .xcresult bundle into
+  # fastlane/screenshots/en-US/.
+  #
+  # TODO: menu-bar dropdown screenshot. The dropdown is NSMenu (AppKit), not
+  # SwiftUI, so it can't be rendered via ImageRenderer. Follow-up options:
+  #   (a) build a SwiftUI mockup of the dropdown and ImageRenderer it here
+  #   (b) `screencapture -x` of the running demo-mode app (manual click)
+  lane :screenshots do
+    prepare
+    team = team_id!
+
+    out_dir = File.join(PROJECT_ROOT, "fastlane/screenshots/en-US")
+    FileUtils.mkdir_p(out_dir)
+    Dir.glob(File.join(out_dir, "*.png")).each { |f| File.delete(f) }
+
+    result_path = File.join(PROJECT_ROOT, ".build/screenshots.xcresult")
+    FileUtils.rm_rf(result_path)
+
+    run_tests(
+      project: "HomeClaw.xcodeproj",
+      scheme: "HomeClawUITests",
+      destination: "platform=macOS,variant=Mac Catalyst",
+      result_bundle_path: result_path,
+      code_coverage: false,
+      xcargs: "DEVELOPMENT_TEAM=#{team} -allowProvisioningUpdates"
+    )
+
+    unless system("command -v xcparse >/dev/null 2>&1")
+      UI.user_error!("xcparse not installed. Run: brew install chargepoint/xcparse/xcparse")
+    end
+
+    sh("xcparse screenshots #{Shellwords.escape(result_path)} #{Shellwords.escape(out_dir)}")
+
+    pngs = Dir.glob(File.join(out_dir, "*.png"))
+    UI.success("Captured #{pngs.length} screenshots → #{out_dir}")
+  end
+
+  desc "Upload screenshots from fastlane/screenshots/ to App Store Connect"
+  lane :upload_screenshots do
+    api_key = asc_api_key
+    deliver(
+      api_key: api_key,
+      app_identifier: BUNDLE_ID,
+      skip_binary_upload: true,
+      skip_metadata: true,
+      skip_screenshots: false,
+      overwrite_screenshots: true,
+      force: true,
+      run_precheck_before_submit: false
+    )
+  end
+
   desc "Show TestFlight status for the latest (or specified) build"
   lane :status do |options|
     asc_api_key
