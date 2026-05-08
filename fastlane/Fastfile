@@ -296,8 +296,20 @@ platform :ios do
 
     sh("xcparse screenshots #{Shellwords.escape(result_path)} #{Shellwords.escape(out_dir)}")
 
-    pngs = Dir.glob(File.join(out_dir, "*.png"))
+    # xcparse emits filenames like `01_Onboarding_0_<UUID>.png`. ASC's deliver
+    # action sorts/uploads by filename, so strip the trailing `_<digits>_<UUID>`
+    # to match the attachment name we set in ScreenshotTests.
+    Dir.glob(File.join(out_dir, "*.png")).each do |path|
+      base = File.basename(path, ".png")
+      cleaned = base.sub(/_\d+_[A-F0-9-]+$/i, "")
+      next if cleaned == base
+      target = File.join(File.dirname(path), "#{cleaned}.png")
+      File.rename(path, target)
+    end
+
+    pngs = Dir.glob(File.join(out_dir, "*.png")).sort
     UI.success("Captured #{pngs.length} screenshots → #{out_dir}")
+    pngs.each { |p| UI.message("  • #{File.basename(p)}") }
   end
 
   desc "Upload screenshots from fastlane/screenshots/ to App Store Connect"

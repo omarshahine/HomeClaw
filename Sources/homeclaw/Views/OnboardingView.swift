@@ -259,7 +259,7 @@ struct OnboardingFlowView: View {
     private func loadHomes() {
         Task { @MainActor in
             let hk = HomeKitManager.shared
-            homeCount = hk.homes.count
+            homeCount = hk.homeCount
             let homesList = await hk.listHomes()
             homes = homesList.map { dict in
                 HomeInfo(

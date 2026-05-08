@@ -178,7 +178,7 @@ private struct HomeKitSettingsView: View {
     private func loadStatus() async {
         let hk = HomeKitManager.shared
         isReady = hk.isReady
-        homeCount = hk.homes.count
+        homeCount = hk.homeCount
         accessoryCount = hk.totalAccessoryCount
 
         let homesList = await hk.listHomes()

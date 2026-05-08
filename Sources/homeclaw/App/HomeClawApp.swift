@@ -406,10 +406,11 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         #if targetEnvironment(macCatalyst)
         windowScene.title = " "
-        // In demo (UI test) mode, allow resizing up to Mac App Store screenshot
-        // dimensions (1440×900) so capture tests can fill the marketing canvas.
+        // In demo (UI test) mode, lock the window to exactly 1440×900 — when
+        // captured at 2× Retina that's 2880×1800, a valid Mac App Store
+        // screenshot dimension (16:10).
         if HomeKitManager.isDemoMode {
-            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 1440, height: 900)
             windowScene.sizeRestrictions?.maximumSize = CGSize(width: 1440, height: 900)
         } else {
             windowScene.sizeRestrictions?.minimumSize = CGSize(width: 640, height: 720)
@@ -550,10 +551,11 @@ class OnboardingSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         #if targetEnvironment(macCatalyst)
         windowScene.title = "Welcome to HomeClaw"
-        // Demo mode: allow up to 1440×900 for screenshot capture; production
-        // keeps a fixed welcome size.
+        // Demo mode: lock to exactly 1440×900 → 2880×1800 at 2× Retina,
+        // a valid Mac App Store screenshot dimension. Production keeps a
+        // fixed welcome size.
         if HomeKitManager.isDemoMode {
-            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 700, height: 600)
+            windowScene.sizeRestrictions?.minimumSize = CGSize(width: 1440, height: 900)
             windowScene.sizeRestrictions?.maximumSize = CGSize(width: 1440, height: 900)
         } else {
             windowScene.sizeRestrictions?.minimumSize = CGSize(width: 700, height: 600)

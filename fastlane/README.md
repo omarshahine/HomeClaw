@@ -55,6 +55,22 @@ Build + upload + submit to external TestFlight (full release loop)
 
 Re-submit an already-uploaded build to external TestFlight (recovery)
 
+### ios screenshots
+
+```sh
+[bundle exec] fastlane ios screenshots
+```
+
+Capture App Store screenshots via XCUITest in demo mode
+
+### ios upload_screenshots
+
+```sh
+[bundle exec] fastlane ios upload_screenshots
+```
+
+Upload screenshots from fastlane/screenshots/ to App Store Connect
+
 ### ios status
 
 ```sh

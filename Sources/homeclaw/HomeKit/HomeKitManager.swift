@@ -78,6 +78,14 @@ final class HomeKitManager: NSObject, Observable {
         return homes.reduce(0) { $0 + $1.accessories.count }
     }
 
+    /// Home count exposed to views. In demo mode the `homes` array is empty
+    /// (HMHome objects can't be synthesized), so views must read this rather
+    /// than `homes.count` directly.
+    var homeCount: Int {
+        if Self.isDemoMode { return 1 }
+        return homes.count
+    }
+
     // MARK: - Homes
 
     func listHomes() async -> [[String: Any]] {

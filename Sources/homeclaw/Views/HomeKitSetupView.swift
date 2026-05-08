@@ -92,7 +92,7 @@ struct HomeKitSetupView: View {
         Task { @MainActor in
             let hk = HomeKitManager.shared
             isReady = hk.isReady
-            homeCount = hk.homes.count
+            homeCount = hk.homeCount
             if isReady {
                 statusText = "Connected to HomeKit"
             }
