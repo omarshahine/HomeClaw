@@ -10,6 +10,11 @@ import XCTest
 @MainActor
 final class ScreenshotTests: XCTestCase {
 
+    /// Headless default scene shows as a 1×1 hidden window. Anything larger
+    /// than this is the real Settings/Onboarding window — see
+    /// `firstVisibleWindow`.
+    private static let ghostWindowMaxDimension: CGFloat = 100
+
     override class var runsForEachTargetApplicationUIConfiguration: Bool { false }
 
     override func setUpWithError() throws {
@@ -26,10 +31,11 @@ final class ScreenshotTests: XCTestCase {
         defer { app.terminate() }
 
         let window = firstVisibleWindow(in: app)
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
-        // Give the SwiftUI welcome view time to load fixture data + run
-        // any opening animation before capturing.
-        sleep(3)
+        // Wait for the Continue button to exist as a signal that the SwiftUI
+        // welcome view has fully loaded. Falls back to a brief sleep for the
+        // opening animation if accessibility isn't yet plumbed.
+        _ = app.buttons["Continue"].waitForExistence(timeout: 10)
+        sleep(1)
         attachScreenshot(of: window, named: "01_Onboarding")
     }
 
@@ -39,29 +45,30 @@ final class ScreenshotTests: XCTestCase {
         defer { app.terminate() }
 
         let window = firstVisibleWindow(in: app)
-        XCTAssertTrue(window.waitForExistence(timeout: 5))
-        // SettingsView's `.task` loads homes/rooms/accessories asynchronously.
-        sleep(2)
+        // "Demo Home" rendering means SettingsView's `.task` finished its
+        // async listHomes() round-trip — much more robust than a fixed sleep.
+        _ = app.staticTexts["Demo Home"].waitForExistence(timeout: 10)
+        sleep(1)
         attachScreenshot(of: window, named: "02_Settings_Home")
     }
 
     // MARK: - Window selection
 
-    /// Returns the first window with a non-1×1 frame. The headless default
-    /// scene shows as a 1×1 hidden window — this filter ensures we capture
-    /// the actual Settings or Onboarding window, not that ghost.
-    ///
-    /// Polls up to 10s for a non-ghost window to appear in the accessibility
-    /// tree. Without this, on a cold launch the SwiftUI window may not be
-    /// registered when `windows.count` is first evaluated and we'd fall
-    /// through to capturing the 1×1 ghost — producing a useless screenshot.
+    /// Returns the first window with a non-ghost frame. Polls up to 10s for
+    /// a real window to appear in the accessibility tree — without this, on
+    /// a cold launch the SwiftUI window may not be registered yet and we'd
+    /// fall through to capturing the 1×1 ghost (producing a useless
+    /// screenshot). Calls `XCTFail` on timeout rather than silently returning
+    /// the ghost; with `continueAfterFailure = false` the test then stops.
     private func firstVisibleWindow(in app: XCUIApplication) -> XCUIElement {
         let windows = app.windows
         let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
             for i in 0..<windows.count {
                 let w = windows.element(boundBy: i)
-                if w.exists, w.frame.width > 10, w.frame.height > 10 {
+                if w.exists,
+                   w.frame.width > Self.ghostWindowMaxDimension,
+                   w.frame.height > Self.ghostWindowMaxDimension {
                     return w
                 }
             }
