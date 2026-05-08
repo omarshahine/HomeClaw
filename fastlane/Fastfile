@@ -1,0 +1,292 @@
+require "open3"
+require "shellwords"
+require "fileutils"
+
+default_platform(:ios)
+
+PROJECT_ROOT = File.expand_path("..", __dir__)
+APP_NAME = "HomeClaw"
+BUNDLE_ID = "com.shahine.homeclaw"
+ARCHIVE_PATH = File.join(PROJECT_ROOT, ".build/archives/#{APP_NAME}.xcarchive")
+EXPORT_PATH = File.join(PROJECT_ROOT, ".build/export")
+
+def load_env_file(path)
+  return unless File.exist?(path)
+
+  # scrub() replaces invalid UTF-8 bytes — survives a stray non-UTF-8 byte in
+  # unrelated values (e.g. a smart-quoted Unsplash key). Only ASC_*/HOMEKIT_*
+  # are consumed here.
+  File.binread(path).force_encoding("UTF-8").scrub.each_line do |line|
+    line = line.strip
+    next if line.empty? || line.start_with?("#")
+    line = line.sub(/\Aexport /, "")
+    next unless line.include?("=")
+    key, _, val = line.partition("=")
+    key = key.strip
+    val = val.strip.gsub(/\A["']|["']\z/, "")
+    ENV[key] = val if !ENV.key?(key) || ENV[key].to_s.empty?
+  end
+end
+
+# Load project + global secret env files (matches archive.sh + asc-testflight.py).
+load_env_file(File.join(PROJECT_ROOT, ".env.local"))
+load_env_file(File.expand_path("~/.secrets.env"))
+
+def asc_api_key
+  key_id = ENV["ASC_KEY_ID"]
+  issuer_id = ENV["ASC_ISSUER_ID"]
+  key_path = ENV["ASC_KEY_PATH"]
+  key_path = File.expand_path("~/.private_keys/AuthKey_#{key_id}.p8") if key_path.nil? || key_path.empty?
+
+  UI.user_error!("Missing ASC_KEY_ID. Set in ~/.secrets.env.") if key_id.nil? || key_id.empty?
+  UI.user_error!("Missing ASC_ISSUER_ID. Set in ~/.secrets.env.") if issuer_id.nil? || issuer_id.empty?
+  UI.user_error!("ASC API key not found at #{key_path}.") unless File.exist?(key_path)
+
+  app_store_connect_api_key(
+    key_id: key_id,
+    issuer_id: issuer_id,
+    key_filepath: key_path,
+    duration: 1200,
+    in_house: false
+  )
+end
+
+def team_id!
+  team = ENV["HOMEKIT_TEAM_ID"]
+  if team.nil? || team.empty? || team == "YOUR_TEAM_ID"
+    UI.user_error!("No Apple Developer Team ID. Set HOMEKIT_TEAM_ID in .env.local.")
+  end
+  team
+end
+
+# Marketing version from latest `v*` tag, stripping the `+build` suffix
+# (release tags are `v{version}+{build}` and Apple rejects extra components).
+def marketing_version
+  tag = `git -C #{Shellwords.escape(PROJECT_ROOT)} describe --tags --abbrev=0 --match 'v*' 2>/dev/null`.strip
+  tag = "v0.0.1" if tag.empty?
+  tag.delete_prefix("v").split("+").first
+end
+
+# Build number: .build-number file (incremented in-memory, not written back —
+# matches archive.sh) or git rev-list count as fallback.
+def next_build_number
+  bn_file = File.join(PROJECT_ROOT, ".build-number")
+  if File.exist?(bn_file)
+    File.read(bn_file).strip.to_i + 1
+  else
+    `git -C #{Shellwords.escape(PROJECT_ROOT)} rev-list --count HEAD`.strip.to_i
+  end
+end
+
+# Verify HomeKit entitlement is present in the source entitlements file —
+# without it HMHomeManager silently returns zero homes.
+def verify_homekit_entitlement!
+  ents = File.join(PROJECT_ROOT, "Resources/HomeClaw.entitlements")
+  unless File.exist?(ents) && File.read(ents).include?("com.apple.developer.homekit")
+    UI.user_error!("HomeKit entitlement missing from #{ents}.")
+  end
+end
+
+# Verify bundled artifacts after archive (CLI binary, AppKit bridge, MCP server,
+# OpenClaw plugin, HomeKit entitlement on the signed app).
+def verify_bundle!
+  app_path = File.join(ARCHIVE_PATH, "Products/Applications/#{APP_NAME}.app")
+  return unless File.directory?(app_path)
+
+  checks = {
+    "Contents/MacOS/HomeClaw" => :file,
+    "Contents/MacOS/homeclaw-cli" => :file,
+    "Contents/Resources/macOSBridge.bundle" => :dir,
+    "Contents/Resources/mcp-server.js" => :file,
+    "Contents/Resources/openclaw" => :dir
+  }
+
+  UI.message("Bundle contents:")
+  checks.each do |rel, kind|
+    full = File.join(app_path, rel)
+    ok = kind == :file ? File.file?(full) : File.directory?(full)
+    UI.success("  ✓ #{rel}") if ok
+    UI.error("  ✗ #{rel} (missing)") unless ok
+  end
+
+  signed_ents, _, _ = Open3.capture3("codesign", "-d", "--entitlements", ":-", app_path)
+  if signed_ents.include?("com.apple.developer.homekit")
+    UI.success("  ✓ HomeKit entitlement present")
+  else
+    UI.error("  ✗ HomeKit entitlement missing on signed app!")
+  end
+end
+
+# Resolve the dynamic external beta group name (uses the first external group,
+# matching asc-testflight.py's behavior).
+def first_external_group_name(api_key)
+  require "spaceship"
+  app = Spaceship::ConnectAPI::App.find(BUNDLE_ID)
+  UI.user_error!("App not found: #{BUNDLE_ID}") unless app
+  groups = app.get_beta_groups
+  external = groups.find { |g| !g.is_internal_group }
+  UI.user_error!("No external beta groups configured. Create one in App Store Connect.") unless external
+  external.name
+end
+
+def archive_and_export(team:, version:, build_number:, export: false)
+  rm_rf = ->(p) { FileUtils.rm_rf(p) }
+  rm_rf.call(ARCHIVE_PATH)
+  rm_rf.call(EXPORT_PATH) if export
+
+  build_app(
+    skip_package_ipa: !export,
+    xcargs: "DEVELOPMENT_TEAM=#{team} MARKETING_VERSION=#{version} CURRENT_PROJECT_VERSION=#{build_number} ONLY_ACTIVE_ARCH=NO -allowProvisioningUpdates",
+    export_xcargs: "-allowProvisioningUpdates"
+  )
+
+  verify_bundle!
+end
+
+platform :ios do
+  # Pre-archive prep: regenerate Xcode project + build the Node.js MCP server.
+  private_lane :prepare do
+    UI.user_error!("xcodegen not installed. brew install xcodegen") unless system("command -v xcodegen >/dev/null 2>&1")
+
+    UI.message("Generating Xcode project...")
+    sh("cd #{Shellwords.escape(PROJECT_ROOT)} && xcodegen generate --use-cache", log: false)
+
+    UI.message("Building MCP server...")
+    sh("cd #{Shellwords.escape(PROJECT_ROOT)} && npm run build:mcp", log: false)
+
+    verify_homekit_entitlement!
+  end
+
+  desc "Validate App Store Connect API key auth"
+  lane :auth_check do
+    asc_api_key
+    UI.success("App Store Connect API auth OK.")
+  end
+
+  desc "Build a release .xcarchive (no upload)"
+  lane :archive do
+    prepare
+    team = team_id!
+    version = marketing_version
+    build_number = next_build_number
+
+    UI.message("Archiving #{APP_NAME} v#{version} build #{build_number}")
+    archive_and_export(team: team, version: version, build_number: build_number, export: false)
+
+    UI.success("Archive: #{ARCHIVE_PATH}")
+    UI.success("Open in Organizer: open '#{ARCHIVE_PATH}'")
+  end
+
+  desc "Build + upload to App Store Connect (no external submission)"
+  lane :upload do
+    api_key = asc_api_key
+    prepare
+    team = team_id!
+    version = marketing_version
+    build_number = next_build_number
+
+    UI.message("Archiving + uploading #{APP_NAME} v#{version} build #{build_number}")
+    archive_and_export(team: team, version: version, build_number: build_number, export: true)
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
+      skip_waiting_for_build_processing: true,
+      skip_submission: true
+    )
+
+    UI.success("Build #{build_number} uploaded. Check https://appstoreconnect.apple.com/apps/6759682551/testflight")
+  end
+
+  desc "Build + upload + submit to external TestFlight (full release loop)"
+  lane :beta do |options|
+    api_key = asc_api_key
+    prepare
+    team = team_id!
+    version = marketing_version
+    build_number = next_build_number
+
+    notes = resolve_notes(options)
+
+    UI.message("Releasing #{APP_NAME} v#{version} build #{build_number} to external TestFlight")
+    archive_and_export(team: team, version: version, build_number: build_number, export: true)
+
+    group_name = first_external_group_name(api_key)
+
+    upload_to_testflight(
+      api_key: api_key,
+      ipa: lane_context[SharedValues::IPA_OUTPUT_PATH],
+      changelog: notes,
+      groups: [group_name],
+      distribute_external: true,
+      notify_external_testers: true,
+      reject_build_waiting_for_review: true,
+      wait_processing_interval: 30,
+      wait_for_uploaded_build: true
+    )
+
+    UI.success("Build #{build_number} submitted to external group '#{group_name}'.")
+  end
+
+  desc "Re-submit an already-uploaded build to external TestFlight (recovery)"
+  lane :submit_only do |options|
+    api_key = asc_api_key
+    build_number = options[:build] || ENV["BUILD"]
+    UI.user_error!("Pass build:NNN (e.g. fastlane submit_only build:143)") unless build_number
+
+    notes = resolve_notes(options)
+    group_name = first_external_group_name(api_key)
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: BUNDLE_ID,
+      build_number: build_number.to_s,
+      changelog: notes,
+      groups: [group_name],
+      distribute_external: true,
+      notify_external_testers: true,
+      skip_submission: false,
+      skip_waiting_for_build_processing: false,
+      wait_processing_interval: 30
+    )
+
+    UI.success("Build #{build_number} submitted to '#{group_name}'.")
+  end
+
+  desc "Show TestFlight status for the latest (or specified) build"
+  lane :status do |options|
+    asc_api_key
+    require "spaceship"
+    app = Spaceship::ConnectAPI::App.find(BUNDLE_ID)
+    UI.user_error!("App not found: #{BUNDLE_ID}") unless app
+
+    bn = options[:build] || ENV["BUILD"]
+    filter = { app: app.id }
+    filter[:version] = bn.to_s if bn
+    # `includes: "buildBetaDetail"` sideloads internal/external states in one call
+    # so this works even for freshly uploaded builds where the detail isn't
+    # cached on the Build object yet.
+    builds = Spaceship::ConnectAPI.get_builds(
+      filter: filter,
+      sort: "-uploadedDate",
+      limit: bn ? 5 : 1,
+      includes: "buildBetaDetail"
+    ).to_models
+    UI.user_error!("No build found#{bn ? " (#{bn})" : ''}") if builds.empty?
+
+    b = builds.first
+    detail = b.build_beta_detail
+    UI.message("Build #{b.version}")
+    UI.message("  Processing: #{b.processing_state}")
+    UI.message("  Uploaded:   #{b.uploaded_date}")
+    UI.message("  Internal:   #{detail&.internal_build_state || '?'}")
+    UI.message("  External:   #{detail&.external_build_state || '?'}")
+  end
+end
+
+# Resolve test notes from --notes_file, --notes, or NOTES_FILE/NOTES env vars.
+def resolve_notes(options)
+  file = options[:notes_file] || ENV["NOTES_FILE"]
+  return File.read(file).strip if file && File.exist?(file)
+  options[:notes] || ENV["NOTES"]
+end

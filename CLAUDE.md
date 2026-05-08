@@ -43,8 +43,8 @@ Sources/
     Commands/_disabled/  # Preserved token command (not compiled)
     SocketClient.swift   # Direct socket communication
 Resources/               # Info.plist, entitlements, app icons
-scripts/build.sh         # Build & install script
-scripts/archive.sh       # Archive for App Store / TestFlight
+scripts/build.sh         # Build & install script (debug/release for local use)
+fastlane/Fastfile        # Release pipeline: archive, upload, beta (TestFlight)
 mcp-server/              # Node.js stdio MCP server (wraps homeclaw-cli)
 openclaw/                # HomeClaw — OpenClaw plugin
   openclaw.plugin.json   # Plugin manifest (configurable binDir)
@@ -52,11 +52,11 @@ openclaw/                # HomeClaw — OpenClaw plugin
   skills/homekit/        # HomeKit skill definition
 
 App bundle layout (after build):
-  Contents/MacOS/HomeClaw          # Catalyst app executable
-  Contents/MacOS/homeclaw-cli      # Bundled CLI binary
-  Contents/PlugIns/macOSBridge.bundle  # AppKit menu bar plugin
-  Contents/Resources/mcp-server.js     # Node.js stdio MCP server
-  Contents/Resources/openclaw/         # Bundled OpenClaw plugin files
+  Contents/MacOS/HomeClaw                # Catalyst app executable
+  Contents/MacOS/homeclaw-cli            # Bundled CLI binary
+  Contents/Resources/macOSBridge.bundle  # AppKit menu bar plugin
+  Contents/Resources/mcp-server.js       # Node.js stdio MCP server
+  Contents/Resources/openclaw/           # Bundled OpenClaw plugin files
 ```
 
 ## Build System

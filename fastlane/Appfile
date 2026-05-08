@@ -1,0 +1,6 @@
+app_identifier("com.shahine.homeclaw")
+
+# Team ID is loaded from .env.local via the Fastfile (HOMEKIT_TEAM_ID).
+# Auth uses App Store Connect API key from ~/.secrets.env:
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (default: ~/.private_keys/AuthKey_<ID>.p8)
+team_id(ENV["HOMEKIT_TEAM_ID"]) if ENV["HOMEKIT_TEAM_ID"]

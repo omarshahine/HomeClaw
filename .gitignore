@@ -66,3 +66,15 @@ openclaw/package-lock.json
 __pycache__/
 *.pyc
 openclaw/reports/
+
+# Fastlane runtime artifacts (lanes write reports + screenshots/metadata caches)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output
+fastlane/README.md.bak
+
+# macOS Spotlight indexing markers
+.metadata_never_index
+
+# Claude Code session state
+.claude/scheduled_tasks.lock

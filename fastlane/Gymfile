@@ -1,0 +1,16 @@
+project("HomeClaw.xcodeproj")
+scheme("HomeClaw")
+configuration("Release")
+
+# Mac Catalyst archive — required for HomeKit entitlement support on macOS.
+catalyst_platform("macos")
+destination("generic/platform=macOS,variant=Mac Catalyst")
+
+archive_path(".build/archives/HomeClaw.xcarchive")
+output_directory(".build/export")
+output_name("HomeClaw")
+
+clean(true)
+include_symbols(true)
+include_bitcode(false)
+export_method("app-store")
