@@ -9,11 +9,13 @@ final class HomeKitManager: NSObject, Observable {
     /// True when the app should bypass HomeKit and serve `DemoFixtures` data.
     /// Used by App Store screenshot capture so we never leak real home data.
     /// Gate: `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1` env var.
-    static var isDemoMode: Bool {
+    /// Evaluated once at first read and cached — `ProcessInfo` results don't
+    /// change for the lifetime of the process.
+    static let isDemoMode: Bool = {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("--ui-test-demo") { return true }
         return ProcessInfo.processInfo.environment["HOMECLAW_DEMO"] == "1"
-    }
+    }()
 
     private var homeManager: HMHomeManager?
     private var homesReady = false

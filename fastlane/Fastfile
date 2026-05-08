@@ -67,8 +67,16 @@ def marketing_version
   tag.delete_prefix("v").split("+").first
 end
 
-# Build number: .build-number file (incremented in-memory, not written back —
-# matches archive.sh) or git rev-list count as fallback.
+# Build number: read `.build-number` and return file + 1.
+#
+# The canonical write happens in `project.yml`'s preBuildScript during Release
+# archive — that script reads the same file, increments, writes back to
+# `.build-number`, and updates Info.plist via PlistBuddy. Both sides compute
+# the same value from the same source, but PlistBuddy wins for the binary's
+# CFBundleVersion. We pass `CURRENT_PROJECT_VERSION` to xcodebuild for build
+# settings parity; the prebuild script is the source of truth on disk.
+#
+# Falls back to `git rev-list --count HEAD` if `.build-number` is absent.
 def next_build_number
   bn_file = File.join(PROJECT_ROOT, ".build-number")
   if File.exist?(bn_file)
