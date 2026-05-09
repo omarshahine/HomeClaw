@@ -205,8 +205,14 @@ targets:
         Debug:
           ENABLE_APP_SANDBOX: NO
         Release:
-          ENABLE_APP_SANDBOX: YES
-          ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
+          # CLI must stay unsandboxed: the `ui` subcommand uses SwiftTUI which
+          # calls `tcsetattr(STDIN_FILENO, ...)` to put the terminal in raw
+          # mode. The sandbox blocks that syscall silently and the TUI
+          # appears unresponsive (no keys work). Apple permits unsandboxed
+          # bundled CLI helpers inside a sandboxed app — Xcode's git is the
+          # canonical example. The main HomeClaw app and macOSBridge stay
+          # sandboxed.
+          ENABLE_APP_SANDBOX: NO
 
 schemes:
   HomeClaw:
