@@ -257,12 +257,16 @@ enum DemoFixtures {
         ),
     ]
 
+    /// Values match what `CharacteristicMapper.formatValue` produces against
+    /// real HMHome data — pre-formatted units on temperatures, lower-case
+    /// lock states, etc. Anything else would have the TUI render demo data
+    /// differently from production data.
     private static let defaultAccessoryState: [String: [String: String]] = [
         "00000000-0000-4000-8000-000000000100": ["power_state": "On", "brightness": "60"],
         "00000000-0000-4000-8000-000000000101": ["power_state": "On", "brightness": "40", "hue": "212"],
         "00000000-0000-4000-8000-000000000102": [
-            "current_temperature": "70.5", "target_temperature": "72.0",
-            "current_heating_cooling_state": "Heat", "target_heating_cooling_state": "Heat",
+            "current_temperature": "70.5°F", "target_temperature": "72°F",
+            "current_heating_cooling_state": "heat", "target_heating_cooling_state": "heat",
         ],
         "00000000-0000-4000-8000-000000000103": ["current_position": "100", "target_position": "100"],
         "00000000-0000-4000-8000-000000000110": ["power_state": "Off"],
@@ -270,7 +274,7 @@ enum DemoFixtures {
         "00000000-0000-4000-8000-000000000112": ["motion_detected": "No"],
         "00000000-0000-4000-8000-000000000120": ["power_state": "Off"],
         "00000000-0000-4000-8000-000000000121": ["power_state": "On", "rotation_speed": "50"],
-        "00000000-0000-4000-8000-000000000122": ["lock_current_state": "Secured", "lock_target_state": "Secured"],
+        "00000000-0000-4000-8000-000000000122": ["lock_current_state": "locked", "lock_target_state": "locked"],
     ]
 
     private struct DemoScene {

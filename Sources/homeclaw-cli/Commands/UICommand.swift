@@ -131,6 +131,58 @@ private struct HomeClawTUIView: View {
             if state["current_temperature"] != nil { return .cyan }
             return .brightBlack
         }
+
+        /// Whether the state should render in bold. Bold reads as "active /
+        /// attention-worthy" (light is on, lock is unlocked, motion detected,
+        /// thermostat is heating/cooling) vs. quiet ambient states.
+        var stateIsActive: Bool {
+            if let power = state["power_state"]?.lowercased() { return power == "on" }
+            if let lock = state["lock_current_state"]?.lowercased() {
+                return lock == "unlocked" || lock == "unsecured"
+            }
+            if let motion = state["motion_detected"]?.lowercased() {
+                return motion == "yes" || motion == "true" || motion == "1"
+            }
+            if let mode = state["current_heating_cooling_state"]?.lowercased() {
+                return mode != "off"
+            }
+            return false
+        }
+
+        /// Color for the state summary text (separate from `statusColor` for
+        /// the leading dot — they happen to match in most cases, but this
+        /// gives us room to differentiate when needed).
+        var stateColor: Color {
+            // Power: on → category color, off → dim
+            if let power = state["power_state"]?.lowercased() {
+                if power == "on" { return statusColor }
+                return .brightBlack
+            }
+            // Locks: green when locked, red when unlocked
+            if let lock = state["lock_current_state"]?.lowercased() {
+                if lock == "locked" || lock == "secured" { return .green }
+                if lock == "unlocked" || lock == "unsecured" { return .brightRed }
+                return .yellow
+            }
+            // Heating/cooling mode → red for heat, cyan for cool, yellow for auto, dim for off
+            if let mode = state["current_heating_cooling_state"]?.lowercased() {
+                switch mode {
+                case "heat": return .brightRed
+                case "cool": return .brightCyan
+                case "auto": return .brightYellow
+                default: return .brightBlack
+                }
+            }
+            // Motion alert
+            if let motion = state["motion_detected"]?.lowercased(),
+               motion == "yes" || motion == "true" || motion == "1" {
+                return .brightRed
+            }
+            // Temperatures, positions, sensor values — informational
+            if state["current_temperature"] != nil { return .cyan }
+            if state["current_position"] != nil { return .brightBlack }
+            return .brightBlack
+        }
     }
 
     struct RoomNode: Identifiable {
@@ -211,18 +263,32 @@ private struct HomeClawTUIView: View {
                 Text(accessory.statusGlyph).foregroundColor(accessory.statusColor)
                 Text(" ")
                 Text(Self.padded(accessory.name, to: Self.nameColumnWidth))
-                Text(accessory.stateSummary).foregroundColor(.brightBlack)
+                stateText(accessory)
             }
         }
     }
 
+    @ViewBuilder
+    private func stateText(_ accessory: AccessoryNode) -> some View {
+        // Active states (light On, lock Unlocked, motion, heat/cool running)
+        // render in bold + meaningful color. Quiet states (Off, idle) stay dim.
+        if accessory.stateIsActive {
+            Text(accessory.stateSummary).bold().foregroundColor(accessory.stateColor)
+        } else {
+            Text(accessory.stateSummary).foregroundColor(accessory.stateColor)
+        }
+    }
+
     private var footer: some View {
+        // SwiftTUI hardcodes Ctrl-D (EOT) as the only application-level quit
+        // key — q can't be intercepted without forking the library, so the
+        // footer documents what actually works. Enter triggers the focused
+        // accessory's Button action (slice 2 will toggle / open details).
         HStack {
-            footerKey("q", "quit")
+            footerKey("^D", "quit")
             footerKey("↑↓", "navigate")
-            footerKey("⏎", "(slice 2: toggle)")
+            footerKey("Enter", "details")
             Spacer()
-            Text("slice 1: read-only").foregroundColor(.brightBlack)
         }
         .padding(.top, 1)
     }
