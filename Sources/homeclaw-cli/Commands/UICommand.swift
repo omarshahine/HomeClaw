@@ -4,10 +4,14 @@ import SwiftTUI
 
 /// `homeclaw-cli ui` — full-screen interactive HomeKit browser.
 ///
-/// First slice: rooms + accessories tree, fetched once from the running
-/// HomeClaw app via the existing socket. Quit with `q`. See issue #53 for
-/// the full UX plan (detail pane, event log, scene picker, live updates,
-/// search).
+/// Slice 1: rooms + accessories tree, fetched once from the running
+/// HomeClaw app. Each accessory row is a focusable Button so arrow keys
+/// move focus (and scroll the view) — without focusable controls,
+/// SwiftTUI's ScrollView can't intercept arrows and they leak as raw
+/// escape codes. Pressing Enter on a row is a no-op for now (slice 2
+/// will toggle accessories). Quit with `q` or Ctrl-C.
+///
+/// Full UX plan in issue #53.
 struct Ui: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ui",
@@ -61,8 +65,7 @@ private struct HomeClawTUIView: View {
 
         /// Compact one-line state summary. Values arrive from the socket
         /// already formatted by CharacteristicMapper (e.g. "63°F", "locked"),
-        /// so this just picks the most informative one and lightly cosmetic-
-        /// tunes the casing.
+        /// so this picks the most informative one and tunes the casing.
         var stateSummary: String {
             if let power = state["power_state"], !power.isEmpty {
                 return power.capitalized
@@ -90,8 +93,6 @@ private struct HomeClawTUIView: View {
             return ""
         }
 
-        /// Single-glyph status indicator. Filled for "active" states (light
-        /// on, lock locked, motion detected), hollow for off/idle.
         var statusGlyph: String {
             if let power = state["power_state"]?.lowercased() {
                 return power == "on" ? "●" : "○"
@@ -105,13 +106,11 @@ private struct HomeClawTUIView: View {
                 if motion == "yes" || motion == "true" || motion == "1" { return "●" }
                 return "○"
             }
-            // Sensors with a current value count as active.
             if state["current_temperature"] != nil { return "◐" }
             return "○"
         }
 
         var statusColor: Color {
-            // On/off coloring for actuators
             if let power = state["power_state"]?.lowercased(), power == "on" {
                 switch category {
                 case "lightbulb": return .yellow
@@ -120,20 +119,16 @@ private struct HomeClawTUIView: View {
                 default: return .green
                 }
             }
-            // Lock states have their own semantics
             if let lock = state["lock_current_state"]?.lowercased() {
                 if lock == "locked" || lock == "secured" { return .green }
                 if lock == "unlocked" || lock == "unsecured" { return .red }
                 return .yellow
             }
-            // Active motion
             if let motion = state["motion_detected"]?.lowercased(),
                motion == "yes" || motion == "true" || motion == "1" {
                 return .red
             }
-            // Read-only sensors
             if state["current_temperature"] != nil { return .cyan }
-            // Off / idle / unknown — dim
             return .brightBlack
         }
     }
@@ -150,6 +145,10 @@ private struct HomeClawTUIView: View {
     }
 
     let initialState: HomeKitState
+
+    /// Width of the left-aligned name column. Long names truncate with `…`,
+    /// short names pad with trailing spaces so the state column lines up.
+    private static let nameColumnWidth = 32
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -188,10 +187,10 @@ private struct HomeClawTUIView: View {
 
     private func roomSection(_ room: RoomNode) -> some View {
         VStack(alignment: .leading) {
-            HStack {
+            HStack(spacing: 0) {
                 Text("▾ ").foregroundColor(.brightBlack)
                 Text(room.name).bold()
-                Text("(\(room.accessories.count))").foregroundColor(.brightBlack)
+                Text(" (\(room.accessories.count))").foregroundColor(.brightBlack)
             }
             ForEach(Array(room.accessories.enumerated()), id: \.element.id) { idx, accessory in
                 accessoryRow(accessory, isLast: idx == room.accessories.count - 1)
@@ -201,31 +200,49 @@ private struct HomeClawTUIView: View {
     }
 
     private func accessoryRow(_ accessory: AccessoryNode, isLast: Bool) -> some View {
-        HStack {
-            Text("  \(isLast ? "└─" : "├─") ").foregroundColor(.brightBlack)
-            Text(accessory.statusGlyph).foregroundColor(accessory.statusColor)
-            Text(" \(accessory.name)")
-            Spacer()
-            Text(accessory.stateSummary).foregroundColor(.brightBlack)
-            Text("  ")
+        // Wrapping the row in a Button gives SwiftTUI's ScrollView a focusable
+        // child to track — that's what enables arrow-key scrolling. Pressing
+        // Enter is a no-op for now (slice 2 wires up toggle/control).
+        Button(action: {}) {
+            HStack(spacing: 0) {
+                Text("  ").foregroundColor(.brightBlack)
+                Text(isLast ? "└─" : "├─").foregroundColor(.brightBlack)
+                Text(" ")
+                Text(accessory.statusGlyph).foregroundColor(accessory.statusColor)
+                Text(" ")
+                Text(Self.padded(accessory.name, to: Self.nameColumnWidth))
+                Text(accessory.stateSummary).foregroundColor(.brightBlack)
+            }
         }
     }
 
     private var footer: some View {
         HStack {
             footerKey("q", "quit")
-            footerKey("↑↓", "scroll")
-            Text("·").foregroundColor(.brightBlack)
-            Text("slice 1: read-only").foregroundColor(.brightBlack)
+            footerKey("↑↓", "navigate")
+            footerKey("⏎", "(slice 2: toggle)")
             Spacer()
+            Text("slice 1: read-only").foregroundColor(.brightBlack)
         }
         .padding(.top, 1)
     }
 
     private func footerKey(_ key: String, _ label: String) -> some View {
-        HStack {
+        HStack(spacing: 0) {
             Text(key).bold().foregroundColor(.brightYellow)
+            Text(" ")
             Text(label).foregroundColor(.brightBlack)
+            Text("  ")
         }
+    }
+
+    /// Truncate to width-1 + `…`, or pad with trailing spaces. Uses
+    /// extended-grapheme count so accented chars / emoji don't break alignment.
+    private static func padded(_ s: String, to width: Int) -> String {
+        let count = s.count
+        if count > width {
+            return String(s.prefix(width - 1)) + "…"
+        }
+        return s + String(repeating: " ", count: width - count)
     }
 }
