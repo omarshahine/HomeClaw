@@ -14,10 +14,12 @@ struct Welcome: ParsableCommand {
 
     func run() throws {
         // ANSI escapes — zero visible width, safe to use inside padded strings.
-        // Suppressed when stdout isn't a TTY (piped, captured) or NO_COLOR is set,
+        // Suppressed when stdout isn't a TTY (piped, captured), NO_COLOR is set,
+        // or TERM=dumb (CI systems and pagers signaling no ANSI rendering),
         // so script callers get clean text instead of raw escape sequences.
         let useColor = isatty(STDOUT_FILENO) != 0
             && ProcessInfo.processInfo.environment["NO_COLOR"] == nil
+            && ProcessInfo.processInfo.environment["TERM"] != "dumb"
         let orange = useColor ? "\u{001B}[38;5;208m" : ""
         let cyan = useColor ? "\u{001B}[36m" : ""
         let green = useColor ? "\u{001B}[32m" : ""
@@ -58,7 +60,7 @@ struct Welcome: ParsableCommand {
             ("homeclaw-cli", "set \"Desk Lamp\" 50",   "Set brightness or value"),
             ("homeclaw-cli", "search lamp",            "Fuzzy search across accessories"),
             ("homeclaw-cli", "scenes",                 "List scenes"),
-            ("homeclaw-cli", "scenes \"Movie Time\"",  "Trigger a scene"),
+            ("homeclaw-cli", "trigger \"Movie Time\"", "Trigger a scene"),
             ("homeclaw-cli", "automations",            "List automations"),
             ("homeclaw-cli", "events --since 1h",      "Tail recent HomeKit events"),
             ("homeclaw-cli", "status",                 "Daemon + HomeKit + webhook status"),
@@ -118,6 +120,8 @@ struct Welcome: ParsableCommand {
 
     /// Reads the CLI's bundle version when running inside HomeClaw.app/Contents/MacOS/.
     /// Falls back to a hardcoded value when invoked from SPM .build/.
+    /// Note: "1.0" is Xcode's default Info.plist placeholder for new targets,
+    /// so we treat it as absent. Revisit if a real 1.0 ever ships.
     private var cliVersion: String {
         if let v = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
            !v.isEmpty, v != "1.0" {
