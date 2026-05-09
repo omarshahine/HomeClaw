@@ -228,22 +228,35 @@ final class TUIHomeState: ObservableObject, @unchecked Sendable {
 
     var totalAccessoryCount: Int { rooms.reduce(0) { $0 + $1.accessories.count } }
 
-    /// Toggle the focused accessory. Optimistically flips the local
-    /// state immediately for instant feedback, then sends the control
-    /// command and refetches truth. On failure the refetch corrects
-    /// any drift from the optimistic guess.
-    func toggle(_ accessory: AccessoryNode) {
-        guard let target = accessory.toggleTarget else { return }
-        applyOptimisticUpdate(accessoryId: accessory.id, target: target)
+    /// Toggle the accessory with the given id. Looks up the current state
+    /// at call time — never trusts a captured `accessory` snapshot, since
+    /// SwiftTUI Button closures capture by value and would always see the
+    /// initial state, breaking the second and subsequent toggles.
+    /// Optimistically flips the local state for instant feedback, then
+    /// sends the control command and refetches truth.
+    func toggle(accessoryId: String) {
+        guard let current = findAccessory(id: accessoryId),
+              let target = current.toggleTarget
+        else { return }
+        applyOptimisticUpdate(accessoryId: accessoryId, target: target)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             _ = try? SocketClient.send(command: "control", args: [
-                "id": accessory.id,
+                "id": accessoryId,
                 "characteristic": target.characteristic,
                 "value": target.value,
             ])
             DispatchQueue.main.async { self?.refetch() }
         }
+    }
+
+    private func findAccessory(id: String) -> AccessoryNode? {
+        for room in rooms {
+            if let match = room.accessories.first(where: { $0.id == id }) {
+                return match
+            }
+        }
+        return nil
     }
 
     /// Re-pull the room/accessory tree from the running app. Used after
@@ -355,8 +368,11 @@ struct HomeClawTUIView: View {
 
     private func accessoryRow(_ accessory: AccessoryNode, isLast: Bool) -> some View {
         // Wrapping the row in a Button gives SwiftTUI's ScrollView a
-        // focusable child to track and lets Enter trigger toggle.
-        Button(action: { state.toggle(accessory) }) {
+        // focusable child to track and lets Enter trigger toggle. We pass
+        // only the id so the toggle reads current state rather than a
+        // captured snapshot.
+        let accessoryId = accessory.id
+        return Button(action: { state.toggle(accessoryId: accessoryId) }) {
             HStack(spacing: 0) {
                 Text("  ").foregroundColor(.brightBlack)
                 Text(isLast ? "└─" : "├─").foregroundColor(.brightBlack)
