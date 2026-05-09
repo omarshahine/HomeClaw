@@ -242,6 +242,41 @@ OUTPUT_FORMAT=json homeclaw-cli list          # Force JSON via env var
 
 **Button modes:** Some buttons (like Aqara AR009) support fast mode (2 buttons, single press each, instant response) or multi-event mode (1 button, single/double/long press, ~300ms delay). Use `--service-index` to target a specific button in fast mode.
 
+### Interactive TUI
+
+```bash
+homeclaw-cli ui
+```
+
+Launches a full-screen, keyboard-driven view of your home. Browse rooms and accessories, see live state at a glance, and toggle anything that has a binary state (lights, switches, fans, outlets, locks, blinds).
+
+```
+🦞 HomeClaw                                    21 rooms · 112 accessories
+
+┌──────────────────────────────────────────────────────────────────────┐
+│ ▾ Living Room (4)                                                     │
+│   ├─ ● Floor Lamp                       On                            │
+│   ├─ ● TV Light Strip                   On                            │
+│   ├─ ◐ Thermostat                       70.5°F                        │
+│   └─ ○ Window Blinds                    100%                          │
+│                                                                       │
+│ ▾ Kitchen (3)                                                         │
+│   ├─ ○ Counter Light                    Off                           │
+│   ...                                                                 │
+└──────────────────────────────────────────────────────────────────────┘
+^D quit  ↑↓ navigate  Enter toggle
+```
+
+| Key | Action |
+|---|---|
+| `↑` `↓` | Navigate between accessories |
+| `Enter` | Toggle the focused accessory (lights/switches/outlets/fans flip on↔off, locks flip locked↔unlocked, blinds flip 0%↔100%) |
+| `Ctrl-D` | Quit |
+
+State color coding: lights on are yellow, outlets/switches cyan, fans blue, locks green when locked / red when unlocked, motion red, sensors cyan, off/idle dim.
+
+The TUI works over SSH (no AppKit assumptions), runs against the same Unix socket as the rest of the CLI, and respects demo mode — launch HomeClaw with `--ui-test-demo` to render a synthetic home for screenshots or demos. Built on [SwiftTUI](https://github.com/rensbreur/SwiftTUI). Scene picker, search, and help overlay are tracked in [#53](https://github.com/omarshahine/HomeClaw/issues/53) — they need a different framework's key handling and will land when SwiftTUI gains app-level key bindings (or we switch).
+
 ## Using with Claude Code
 
 HomeClaw integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as a **plugin** that provides MCP tools and a HomeKit skill for richer natural language understanding.

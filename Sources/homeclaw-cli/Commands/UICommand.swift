@@ -4,14 +4,24 @@ import SwiftTUI
 
 /// `homeclaw-cli ui` — full-screen interactive HomeKit browser.
 ///
-/// Slice 1: rooms + accessories tree, fetched once from the running
-/// HomeClaw app. Each accessory row is a focusable Button so arrow keys
-/// move focus (and scroll the view) — without focusable controls,
-/// SwiftTUI's ScrollView can't intercept arrows and they leak as raw
-/// escape codes. Pressing Enter on a row is a no-op for now (slice 2
-/// will toggle accessories). Quit with `q` or Ctrl-C.
+/// What works in this version:
+/// - Tree of rooms + accessories from the running HomeClaw app
+/// - Live arrow-key navigation between accessory rows
+/// - Enter on a focused row toggles the accessory (lights/switches/
+///   outlets/fans flip power_state, locks flip lock_target_state, blinds
+///   flip target_position between 0 and 100)
+/// - Optimistic local update + socket refetch after each toggle
+/// - Color-coded state values (On in category color, Off dim, Locked
+///   green, Unlocked red, etc.)
+/// - Ctrl-D to quit (SwiftTUI hardcodes EOT — `q` cannot be intercepted
+///   without forking the library)
 ///
-/// Full UX plan in issue #53.
+/// Out of scope per SwiftTUI's app-level key-handler limits:
+/// - Scene picker overlay (`s`)
+/// - Search (`/`)
+/// - Help overlay (`?`)
+/// These would require either forking SwiftTUI or switching to a more
+/// flexible TUI framework (TermKit, Bubble Tea). See issue #53.
 struct Ui: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ui",
@@ -19,184 +29,276 @@ struct Ui: ParsableCommand {
     )
 
     func run() throws {
-        let initial = try fetchInitialState()
-        Application(rootView: HomeClawTUIView(initialState: initial)).start()
+        let initialRooms = try fetchRooms()
+        let state = TUIHomeState(rooms: initialRooms)
+        Application(rootView: HomeClawTUIView(state: state)).start()
     }
 
-    private func fetchInitialState() throws -> HomeClawTUIView.HomeKitState {
-        // listRooms returns rooms with their accessories embedded — exactly what
-        // the tree view needs in a single round-trip.
+    private func fetchRooms() throws -> [RoomNode] {
         let response = try SocketClient.send(command: "list_rooms", args: nil)
         guard response.success else {
             throw ValidationError(response.error ?? "Failed to load HomeKit data")
         }
+        return Self.parseRooms((response.data?.value as? [[String: Any]]) ?? [])
+    }
 
-        let rooms = (response.data?.value as? [[String: Any]]) ?? []
-        let modelRooms: [HomeClawTUIView.RoomNode] = rooms.map { dict in
+    /// Shared parser used by both initial fetch and post-toggle refetch.
+    static func parseRooms(_ rooms: [[String: Any]]) -> [RoomNode] {
+        return rooms.map { dict in
             let accDicts = (dict["accessories"] as? [[String: Any]]) ?? []
-            let accessories: [HomeClawTUIView.AccessoryNode] = accDicts.map { acc in
+            let accessories: [AccessoryNode] = accDicts.map { acc in
                 let state = (acc["state"] as? [String: String]) ?? [:]
-                return HomeClawTUIView.AccessoryNode(
+                return AccessoryNode(
                     id: acc["id"] as? String ?? UUID().uuidString,
                     name: acc["name"] as? String ?? "Unknown",
                     category: acc["category"] as? String ?? "other",
                     state: state
                 )
             }
-            return HomeClawTUIView.RoomNode(
+            return RoomNode(
                 id: dict["id"] as? String ?? UUID().uuidString,
                 name: dict["name"] as? String ?? "Unknown",
                 accessories: accessories
             )
         }
-
-        return HomeClawTUIView.HomeKitState(rooms: modelRooms)
     }
 }
 
-// MARK: - SwiftTUI views
+// MARK: - Models (file-level so TUIHomeState can hold them)
 
-private struct HomeClawTUIView: View {
-    struct AccessoryNode: Identifiable {
-        let id: String
-        let name: String
-        let category: String
-        let state: [String: String]
+struct AccessoryNode: Identifiable {
+    let id: String
+    let name: String
+    let category: String
+    var state: [String: String]
 
-        /// Compact one-line state summary. Values arrive from the socket
-        /// already formatted by CharacteristicMapper (e.g. "63°F", "locked"),
-        /// so this picks the most informative one and tunes the casing.
-        var stateSummary: String {
-            if let power = state["power_state"], !power.isEmpty {
-                return power.capitalized
-            }
-            if let temp = state["current_temperature"], !temp.isEmpty, temp != "--" {
-                return temp
-            }
-            if let lock = state["lock_current_state"], !lock.isEmpty {
-                return lock.capitalized
-            }
-            if let mode = state["current_heating_cooling_state"], !mode.isEmpty {
-                return mode.capitalized
-            }
-            if let pos = state["current_position"], !pos.isEmpty, pos != "--" {
-                return "\(pos)%"
-            }
-            if let motion = state["motion_detected"], !motion.isEmpty {
-                let on = motion.lowercased()
-                if on == "yes" || on == "true" || on == "1" { return "Motion" }
-                return ""
-            }
-            if let speed = state["rotation_speed"], !speed.isEmpty, speed != "--" {
-                return "\(speed)%"
-            }
+    /// Compact one-line state summary. Values arrive from the socket
+    /// already formatted by CharacteristicMapper (e.g. "63°F", "locked"),
+    /// so this picks the most informative one and tunes the casing.
+    var stateSummary: String {
+        if let power = state["power_state"], !power.isEmpty {
+            return power.capitalized
+        }
+        if let temp = state["current_temperature"], !temp.isEmpty, temp != "--" {
+            return temp
+        }
+        if let lock = state["lock_current_state"], !lock.isEmpty {
+            return lock.capitalized
+        }
+        if let mode = state["current_heating_cooling_state"], !mode.isEmpty {
+            return mode.capitalized
+        }
+        if let pos = state["current_position"], !pos.isEmpty, pos != "--" {
+            return "\(pos)%"
+        }
+        if let motion = state["motion_detected"], !motion.isEmpty {
+            let on = motion.lowercased()
+            if on == "yes" || on == "true" || on == "1" { return "Motion" }
             return ""
         }
+        if let speed = state["rotation_speed"], !speed.isEmpty, speed != "--" {
+            return "\(speed)%"
+        }
+        return ""
+    }
 
-        var statusGlyph: String {
-            if let power = state["power_state"]?.lowercased() {
-                return power == "on" ? "●" : "○"
-            }
-            if let lock = state["lock_current_state"]?.lowercased() {
-                if lock == "locked" || lock == "secured" { return "●" }
-                if lock == "unlocked" || lock == "unsecured" { return "◐" }
-                return "○"
-            }
-            if let motion = state["motion_detected"]?.lowercased() {
-                if motion == "yes" || motion == "true" || motion == "1" { return "●" }
-                return "○"
-            }
-            if state["current_temperature"] != nil { return "◐" }
+    var statusGlyph: String {
+        if let power = state["power_state"]?.lowercased() {
+            return power == "on" ? "●" : "○"
+        }
+        if let lock = state["lock_current_state"]?.lowercased() {
+            if lock == "locked" || lock == "secured" { return "●" }
+            if lock == "unlocked" || lock == "unsecured" { return "◐" }
             return "○"
         }
+        if let motion = state["motion_detected"]?.lowercased() {
+            if motion == "yes" || motion == "true" || motion == "1" { return "●" }
+            return "○"
+        }
+        if state["current_temperature"] != nil { return "◐" }
+        return "○"
+    }
 
-        var statusColor: Color {
-            if let power = state["power_state"]?.lowercased(), power == "on" {
-                switch category {
-                case "lightbulb": return .yellow
-                case "outlet", "switch": return .cyan
-                case "fan": return .blue
-                default: return .green
-                }
+    var statusColor: Color {
+        if let power = state["power_state"]?.lowercased(), power == "on" {
+            switch category {
+            case "lightbulb": return .yellow
+            case "outlet", "switch": return .cyan
+            case "fan": return .blue
+            default: return .green
             }
-            if let lock = state["lock_current_state"]?.lowercased() {
-                if lock == "locked" || lock == "secured" { return .green }
-                if lock == "unlocked" || lock == "unsecured" { return .red }
-                return .yellow
-            }
-            if let motion = state["motion_detected"]?.lowercased(),
-               motion == "yes" || motion == "true" || motion == "1" {
-                return .red
-            }
-            if state["current_temperature"] != nil { return .cyan }
+        }
+        if let lock = state["lock_current_state"]?.lowercased() {
+            if lock == "locked" || lock == "secured" { return .green }
+            if lock == "unlocked" || lock == "unsecured" { return .red }
+            return .yellow
+        }
+        if let motion = state["motion_detected"]?.lowercased(),
+           motion == "yes" || motion == "true" || motion == "1" {
+            return .red
+        }
+        if state["current_temperature"] != nil { return .cyan }
+        return .brightBlack
+    }
+
+    var stateIsActive: Bool {
+        if let power = state["power_state"]?.lowercased() { return power == "on" }
+        if let lock = state["lock_current_state"]?.lowercased() {
+            return lock == "unlocked" || lock == "unsecured"
+        }
+        if let motion = state["motion_detected"]?.lowercased() {
+            return motion == "yes" || motion == "true" || motion == "1"
+        }
+        if let mode = state["current_heating_cooling_state"]?.lowercased() {
+            return mode != "off"
+        }
+        return false
+    }
+
+    var stateColor: Color {
+        if let power = state["power_state"]?.lowercased() {
+            if power == "on" { return statusColor }
             return .brightBlack
         }
-
-        /// Whether the state should render in bold. Bold reads as "active /
-        /// attention-worthy" (light is on, lock is unlocked, motion detected,
-        /// thermostat is heating/cooling) vs. quiet ambient states.
-        var stateIsActive: Bool {
-            if let power = state["power_state"]?.lowercased() { return power == "on" }
-            if let lock = state["lock_current_state"]?.lowercased() {
-                return lock == "unlocked" || lock == "unsecured"
-            }
-            if let motion = state["motion_detected"]?.lowercased() {
-                return motion == "yes" || motion == "true" || motion == "1"
-            }
-            if let mode = state["current_heating_cooling_state"]?.lowercased() {
-                return mode != "off"
-            }
-            return false
+        if let lock = state["lock_current_state"]?.lowercased() {
+            if lock == "locked" || lock == "secured" { return .green }
+            if lock == "unlocked" || lock == "unsecured" { return .brightRed }
+            return .yellow
         }
+        if let mode = state["current_heating_cooling_state"]?.lowercased() {
+            switch mode {
+            case "heat": return .brightRed
+            case "cool": return .brightCyan
+            case "auto": return .brightYellow
+            default: return .brightBlack
+            }
+        }
+        if let motion = state["motion_detected"]?.lowercased(),
+           motion == "yes" || motion == "true" || motion == "1" {
+            return .brightRed
+        }
+        if state["current_temperature"] != nil { return .cyan }
+        return .brightBlack
+    }
 
-        /// Color for the state summary text (separate from `statusColor` for
-        /// the leading dot — they happen to match in most cases, but this
-        /// gives us room to differentiate when needed).
-        var stateColor: Color {
-            // Power: on → category color, off → dim
-            if let power = state["power_state"]?.lowercased() {
-                if power == "on" { return statusColor }
-                return .brightBlack
+    /// What characteristic + value to send on Enter, given the current state.
+    /// Returns nil for accessories whose toggle behavior isn't well-defined
+    /// (sensors, thermostats — those need slice 3).
+    var toggleTarget: (characteristic: String, value: String)? {
+        if let power = state["power_state"]?.lowercased() {
+            return ("power_state", power == "on" ? "off" : "on")
+        }
+        if let lock = state["lock_current_state"]?.lowercased() {
+            if lock == "locked" || lock == "secured" {
+                return ("lock_target_state", "unlocked")
             }
-            // Locks: green when locked, red when unlocked
-            if let lock = state["lock_current_state"]?.lowercased() {
-                if lock == "locked" || lock == "secured" { return .green }
-                if lock == "unlocked" || lock == "unsecured" { return .brightRed }
-                return .yellow
-            }
-            // Heating/cooling mode → red for heat, cyan for cool, yellow for auto, dim for off
-            if let mode = state["current_heating_cooling_state"]?.lowercased() {
-                switch mode {
-                case "heat": return .brightRed
-                case "cool": return .brightCyan
-                case "auto": return .brightYellow
-                default: return .brightBlack
-                }
-            }
-            // Motion alert
-            if let motion = state["motion_detected"]?.lowercased(),
-               motion == "yes" || motion == "true" || motion == "1" {
-                return .brightRed
-            }
-            // Temperatures, positions, sensor values — informational
-            if state["current_temperature"] != nil { return .cyan }
-            if state["current_position"] != nil { return .brightBlack }
-            return .brightBlack
+            return ("lock_target_state", "locked")
+        }
+        if let posStr = state["current_position"], let pos = Int(posStr) {
+            return ("target_position", pos > 50 ? "0" : "100")
+        }
+        return nil
+    }
+}
+
+struct RoomNode: Identifiable {
+    let id: String
+    let name: String
+    var accessories: [AccessoryNode]
+}
+
+// MARK: - State management
+
+/// Holds the live tree of rooms/accessories and handles toggle round-trips.
+/// `@Published rooms` triggers a SwiftTUI re-render whenever state changes,
+/// so optimistic updates show up instantly and the post-control refetch
+/// reconciles with what HomeKit actually reports back.
+///
+/// SwiftTUI runs on DispatchQueue.main; Button actions call into here on
+/// the main thread. Socket round-trips happen on a background queue, with
+/// state mutations bounced back to main. We mark this `@unchecked Sendable`
+/// because thread-safety is handled by the explicit DispatchQueue hops
+/// rather than by the actor system.
+final class TUIHomeState: ObservableObject, @unchecked Sendable {
+    @Published var rooms: [RoomNode]
+
+    init(rooms: [RoomNode]) {
+        self.rooms = rooms
+    }
+
+    var totalAccessoryCount: Int { rooms.reduce(0) { $0 + $1.accessories.count } }
+
+    /// Toggle the focused accessory. Optimistically flips the local
+    /// state immediately for instant feedback, then sends the control
+    /// command and refetches truth. On failure the refetch corrects
+    /// any drift from the optimistic guess.
+    func toggle(_ accessory: AccessoryNode) {
+        guard let target = accessory.toggleTarget else { return }
+        applyOptimisticUpdate(accessoryId: accessory.id, target: target)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            _ = try? SocketClient.send(command: "control", args: [
+                "id": accessory.id,
+                "characteristic": target.characteristic,
+                "value": target.value,
+            ])
+            DispatchQueue.main.async { self?.refetch() }
         }
     }
 
-    struct RoomNode: Identifiable {
-        let id: String
-        let name: String
-        let accessories: [AccessoryNode]
+    /// Re-pull the room/accessory tree from the running app. Used after
+    /// every toggle, and could later be hooked to a periodic timer or to
+    /// a `homeKitMenuDataDidChange` push for true live updates.
+    func refetch() {
+        guard let response = try? SocketClient.send(command: "list_rooms", args: nil),
+              response.success,
+              let dicts = response.data?.value as? [[String: Any]]
+        else { return }
+        rooms = Ui.parseRooms(dicts)
     }
 
-    struct HomeKitState {
-        let rooms: [RoomNode]
-        var totalAccessoryCount: Int { rooms.reduce(0) { $0 + $1.accessories.count } }
+    /// Mutate the local rooms array to reflect a toggle the user just made.
+    /// Maps target-side characteristics to current-side state keys
+    /// (`lock_target_state` → `lock_current_state`, `target_position` →
+    /// `current_position`) and uses the same casing CharacteristicMapper
+    /// would have produced server-side ("on" → "On", "locked" → "locked").
+    private func applyOptimisticUpdate(
+        accessoryId: String,
+        target: (characteristic: String, value: String)
+    ) {
+        rooms = rooms.map { room in
+            var newRoom = room
+            newRoom.accessories = room.accessories.map { acc in
+                guard acc.id == accessoryId else { return acc }
+                var newAcc = acc
+                let (key, mappedValue) = Self.optimisticStateChange(target: target)
+                newAcc.state[key] = mappedValue
+                return newAcc
+            }
+            return newRoom
+        }
     }
 
-    let initialState: HomeKitState
+    private static func optimisticStateChange(
+        target: (characteristic: String, value: String)
+    ) -> (key: String, value: String) {
+        switch target.characteristic {
+        case "power_state":
+            return ("power_state", target.value.capitalized)  // "on" → "On"
+        case "lock_target_state":
+            return ("lock_current_state", target.value)  // "locked" / "unlocked"
+        case "target_position":
+            return ("current_position", target.value)
+        default:
+            return (target.characteristic, target.value)
+        }
+    }
+}
+
+// MARK: - Views
+
+struct HomeClawTUIView: View {
+    @ObservedObject var state: TUIHomeState
 
     /// Width of the left-aligned name column. Long names truncate with `…`,
     /// short names pad with trailing spaces so the state column lines up.
@@ -217,10 +319,10 @@ private struct HomeClawTUIView: View {
             Text("🦞 ").foregroundColor(.brightYellow)
             Text("HomeClaw").bold().foregroundColor(.cyan)
             Spacer()
-            Text("\(initialState.rooms.count) rooms")
+            Text("\(state.rooms.count) rooms")
                 .foregroundColor(.brightBlack)
             Text("·").foregroundColor(.brightBlack)
-            Text("\(initialState.totalAccessoryCount) accessories")
+            Text("\(state.totalAccessoryCount) accessories")
                 .foregroundColor(.brightBlack)
         }
         .padding(.bottom, 1)
@@ -229,7 +331,7 @@ private struct HomeClawTUIView: View {
     private var tree: some View {
         ScrollView {
             VStack(alignment: .leading) {
-                ForEach(Array(initialState.rooms.enumerated()), id: \.element.id) { _, room in
+                ForEach(Array(state.rooms.enumerated()), id: \.element.id) { _, room in
                     roomSection(room)
                 }
             }
@@ -252,10 +354,9 @@ private struct HomeClawTUIView: View {
     }
 
     private func accessoryRow(_ accessory: AccessoryNode, isLast: Bool) -> some View {
-        // Wrapping the row in a Button gives SwiftTUI's ScrollView a focusable
-        // child to track — that's what enables arrow-key scrolling. Pressing
-        // Enter is a no-op for now (slice 2 wires up toggle/control).
-        Button(action: {}) {
+        // Wrapping the row in a Button gives SwiftTUI's ScrollView a
+        // focusable child to track and lets Enter trigger toggle.
+        Button(action: { state.toggle(accessory) }) {
             HStack(spacing: 0) {
                 Text("  ").foregroundColor(.brightBlack)
                 Text(isLast ? "└─" : "├─").foregroundColor(.brightBlack)
@@ -270,8 +371,6 @@ private struct HomeClawTUIView: View {
 
     @ViewBuilder
     private func stateText(_ accessory: AccessoryNode) -> some View {
-        // Active states (light On, lock Unlocked, motion, heat/cool running)
-        // render in bold + meaningful color. Quiet states (Off, idle) stay dim.
         if accessory.stateIsActive {
             Text(accessory.stateSummary).bold().foregroundColor(accessory.stateColor)
         } else {
@@ -280,14 +379,10 @@ private struct HomeClawTUIView: View {
     }
 
     private var footer: some View {
-        // SwiftTUI hardcodes Ctrl-D (EOT) as the only application-level quit
-        // key — q can't be intercepted without forking the library, so the
-        // footer documents what actually works. Enter triggers the focused
-        // accessory's Button action (slice 2 will toggle / open details).
         HStack {
             footerKey("^D", "quit")
             footerKey("↑↓", "navigate")
-            footerKey("Enter", "details")
+            footerKey("Enter", "toggle")
             Spacer()
         }
         .padding(.top, 1)
@@ -302,8 +397,7 @@ private struct HomeClawTUIView: View {
         }
     }
 
-    /// Truncate to width-1 + `…`, or pad with trailing spaces. Uses
-    /// extended-grapheme count so accented chars / emoji don't break alignment.
+    /// Truncate to width-1 + `…`, or pad with trailing spaces.
     private static func padded(_ s: String, to width: Int) -> String {
         let count = s.count
         if count > width {
