@@ -179,6 +179,9 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires before the given event. Format: '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunrise+15'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
     var timeBefore: [String] = []
 
+    @Option(name: .long, help: "Auto-revert the trigger's actions after this many seconds via HMDurationEvent (1-86400). Useful for motion-triggered lights that should turn off again after a delay.")
+    var duration: Int?
+
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
     var home: String?
 
@@ -294,6 +297,15 @@ struct CreateAutomation: ParsableCommand {
             args["time_before"] = try timeBefore.map { try validateTimeSpec($0, flag: "--time-before") }
         }
 
+        if let duration {
+            guard (1...86400).contains(duration) else {
+                throw ValidationError(
+                    "--duration must be a positive integer between 1 and 86400 (24 hours)"
+                )
+            }
+            args["duration_seconds"] = duration
+        }
+
         if let home { args["home_id"] = home }
 
         let response = try SocketClient.sendAny(command: "create_automation", args: args)
@@ -344,6 +356,9 @@ struct CreateAutomation: ParsableCommand {
                 print("  Scene: \(sceneName)")
             }
             printPredicateFields(from: result)
+            if let durationSeconds = result["duration_seconds"] as? Int {
+                print("  Auto-off: \(Self.formatDuration(durationSeconds))")
+            }
         } else {
             if isInline {
                 print("Created automation '\(autoName)' with \(actionCount ?? 0) inline action(s)")
@@ -354,6 +369,9 @@ struct CreateAutomation: ParsableCommand {
                 print("  \(triggerDescription) → \(sceneName)")
             }
             printPredicateFields(from: result)
+            if let durationSeconds = result["duration_seconds"] as? Int {
+                print("  Auto-off: \(Self.formatDuration(durationSeconds))")
+            }
         }
     }
 
@@ -426,6 +444,20 @@ struct CreateAutomation: ParsableCommand {
                 print("  Days: \(formatWeekdays(weekdays))")
             }
         }
+    }
+
+    /// Format a duration in seconds as a short human label (e.g. `45s`, `5m`, `1h30m`).
+    /// Matches the surfacing PR #50 added to `automations list/get` output.
+    static func formatDuration(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        let minutes = seconds / 60
+        let remSeconds = seconds % 60
+        if minutes < 60 {
+            return remSeconds == 0 ? "\(minutes)m" : "\(minutes)m\(remSeconds)s"
+        }
+        let hours = minutes / 60
+        let remMinutes = minutes % 60
+        return remMinutes == 0 ? "\(hours)h" : "\(hours)h\(remMinutes)m"
     }
 }
 

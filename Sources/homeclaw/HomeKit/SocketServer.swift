@@ -728,6 +728,14 @@ final class SocketServer: @unchecked Sendable {
                     }
                     timeConditions.append(tc)
                 }
+                let durationSeconds = (args["duration_seconds"] as? Int)
+                    ?? (args["duration_seconds"] as? String).flatMap(Int.init)
+                if let durationSeconds, !(1...86400).contains(durationSeconds) {
+                    return encodeResponse(
+                        success: false,
+                        error: "'duration_seconds' must be a positive integer between 1 and 86400 (24 hours)"
+                    )
+                }
                 result = try await hk.createAutomation(
                     name: name,
                     accessoryID: accessoryID,
@@ -740,6 +748,7 @@ final class SocketServer: @unchecked Sendable {
                     weekdays: weekdays,
                     conditions: conditions,
                     timeConditions: timeConditions,
+                    durationSeconds: durationSeconds,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
                 )

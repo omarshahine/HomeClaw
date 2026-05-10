@@ -21015,7 +21015,7 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) with either a scene reference or inline actions, delete automations, or enable/disable them. For button triggers use press_type; for other triggers use characteristic + trigger_value. List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "timer" | "unknown") and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype.',
+    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) with either a scene reference or inline actions, delete automations, or enable/disable them. For button triggers use press_type; for other triggers use characteristic + trigger_value. Use duration_seconds at create time to auto-revert actions after N seconds (e.g. motion-triggered lights that turn off again after a delay). List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "timer" | "unknown") and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype.',
     inputSchema: {
       type: "object",
       properties: {
@@ -21103,6 +21103,12 @@ var tools = [
           type: "array",
           items: { type: "string" },
           description: "Sun-relative time predicates ANDed into the trigger so it only fires before the given event (create action). Same format and offset rules as time_after. (create action)"
+        },
+        duration_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 86400,
+          description: "Auto-revert the trigger's actions after this many seconds (1-86400, i.e. up to 24 hours). Implemented as an HMDurationEvent attached to the trigger's endEvents \u2014 HomeKit handles the revert natively, no follow-up automation required. Common use case: motion-triggered lights that should turn off again after a delay (e.g. `duration_seconds: 300` for a 5-minute hold). (create action)"
         },
         dry_run: {
           type: "boolean",
@@ -21340,6 +21346,13 @@ async function handleAutomations(args) {
       }
       if (Array.isArray(args.time_before) && args.time_before.length > 0) {
         socketArgs.time_before = args.time_before;
+      }
+      if (args.duration_seconds != null) {
+        const d = args.duration_seconds;
+        if (!Number.isInteger(d) || d < 1 || d > 86400) {
+          throw new Error("duration_seconds must be an integer between 1 and 86400 (24 hours)");
+        }
+        socketArgs.duration_seconds = String(d);
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run) socketArgs.dry_run = "true";
