@@ -24,6 +24,9 @@ jobs:
       - name: Build homeclaw-cli
         run: swift build --product homeclaw-cli
 
+      - name: Run Swift tests
+        run: swift test
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:

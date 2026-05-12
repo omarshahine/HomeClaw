@@ -20,5 +20,9 @@ let package = Package(
             ],
             exclude: ["Commands/_disabled"]
         ),
+        .testTarget(
+            name: "homeclaw-cliTests",
+            dependencies: ["homeclaw-cli"]
+        ),
     ]
 )

@@ -1174,7 +1174,18 @@ final class HomeKitManager: NSObject, Observable {
             do {
                 try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
             } catch {
-                // Cleanup orphaned trigger on predicate failure (no inline action set linked yet).
+                // Cleanup on predicate failure: remove the orphaned trigger AND the inline
+                // action set if we created one. (The action set exists in `home.actionSets`
+                // from Step 1's `addActionSet` call even though it's not yet linked to the
+                // trigger — without this removal it would persist as an orphaned scene tile.)
+                if isInlineActionSet {
+                    try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        home.removeActionSet(actionSet) { err in
+                            if let err { continuation.resume(throwing: err) }
+                            else { continuation.resume() }
+                        }
+                    }
+                }
                 try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     home.removeTrigger(trigger) { err in
                         if let err { continuation.resume(throwing: err) }
