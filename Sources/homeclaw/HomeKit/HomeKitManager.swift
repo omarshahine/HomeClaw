@@ -1667,17 +1667,27 @@ final class HomeKitManager: NSObject, Observable {
     fileprivate func resolveConditions(_ conditions: [[String: String]], in home: HMHome) throws -> [ResolvedCondition] {
         var resolved: [ResolvedCondition] = []
         for cond in conditions {
-            guard let condAccessoryID = cond["accessory"],
-                  let condProperty = cond["property"],
-                  let condValueStr = cond["value"],
-                  !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty
-            else {
+            // Trim and reject whitespace-only values for the same reasons
+            // `addAutomationCondition` does — a `"   "` accessory string would
+            // pass the bare `.isEmpty` check but fail accessory lookup with a
+            // less helpful error. Keeping symmetry with add-condition's
+            // discipline so the same input fails the same way at every entry
+            // point. (Tightens behavior of PR #56's existing parser.)
+            let condAccessoryID = (cond["accessory"] ?? "").trimmingCharacters(in: .whitespaces)
+            let condProperty = (cond["property"] ?? "").trimmingCharacters(in: .whitespaces)
+            let condValueStr = (cond["value"] ?? "").trimmingCharacters(in: .whitespaces)
+            guard !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty else {
                 throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
             }
+            let condRoom: String? = {
+                guard let raw = cond["room"] else { return nil }
+                let t = raw.trimmingCharacters(in: .whitespaces)
+                return t.isEmpty ? nil : t
+            }()
             let condAccessory: HMAccessory
             if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(condAccessoryID) == .orderedSame }) {
                 condAccessory = found
-            } else if let found = findAccessoryByName(condAccessoryID, room: cond["room"], in: home) {
+            } else if let found = findAccessoryByName(condAccessoryID, room: condRoom, in: home) {
                 condAccessory = found
             } else {
                 throw ControlError.accessoryNotFound(condAccessoryID)
@@ -1980,6 +1990,195 @@ final class HomeKitManager: NSObject, Observable {
         var result = summary
         result["dry_run"] = false
         result["after"] = trigger.actionSets.map { $0.name }
+        return result
+    }
+
+    /// Append a characteristic condition (ANDed) to an existing automation's predicate,
+    /// preserving the trigger UUID so button bindings, Siri references, and other
+    /// UUID-keyed integrations survive the modification.
+    ///
+    /// Only HMEventTrigger supports characteristic-condition predicates. HMTimerTrigger
+    /// (Apple Home native time automations) and other HMTrigger subclasses don't expose
+    /// `updatePredicate`, so we reject those up-front with a clear error.
+    ///
+    /// Flatten-at-write strategy: when the trigger's existing predicate is a
+    /// top-level AND compound that ISN'T a characteristic leaf, extract its
+    /// subpredicates and rebuild a fresh top-level AND with the new condition
+    /// appended. Successive calls keep the top-level AND 1-deep — its children
+    /// remain the standard `HMEventTrigger.predicateForEvaluatingTrigger` leaves
+    /// (each itself a 2-element AND of comparisons). This holds for predicates
+    /// HomeClaw wrote; predicates written by Apple Home or other HomeKit clients
+    /// may already have nested structures we preserve when extending.
+    /// `AccessoryModel.extractConditions` + `flattenTopAnd` (see #56 / 34fd00f)
+    /// decode this back to a flat list of conditions regardless of write-time
+    /// nesting, so the read-side decoder handles either case.
+    ///
+    /// HMEventTrigger.updatePredicate is observed to leave the original predicate
+    /// intact on failure (Apple's docs deliver an error via the completion handler
+    /// without formally documenting atomicity, but empirically no partial mutation
+    /// occurs). Earlier steps in this method (resolve accessory / characteristic,
+    /// parse value, build the combined predicate) run before the mutation and
+    /// surface as plain `throws` — no partial mutation can occur there either.
+    ///
+    /// Idempotency: repeated calls with the same accessory+property+value silently
+    /// append duplicate conjuncts. `A AND A` is logically `A` so HomeKit
+    /// evaluation is unaffected, but `extractConditions` will report the
+    /// duplicates and the predicate grows. This is intentional for retry-safety
+    /// after transient HomeKit errors; callers wanting deduplication should
+    /// `get` the trigger first and filter against the existing conditions.
+    ///
+    /// `conditionRoom` is an optional disambiguator forwarded to the name-based
+    /// accessory lookup. When two accessories share a name across different rooms,
+    /// the caller can pass the room name to scope the match. Ignored when
+    /// `accessoryID` already resolves as a UUID. Mirrors the `room` disambiguator
+    /// accepted by `createAutomation`'s `--condition` parser. When the accessory
+    /// name matches multiple accessories across rooms and `conditionRoom` is nil,
+    /// `findAccessoryByName` returns the first match by HomeKit's accessory
+    /// iteration order — non-deterministic from the user's perspective. Pass
+    /// `conditionRoom` (or use the accessory's UUID) to disambiguate.
+    func addAutomationCondition(
+        id: String,
+        accessoryID: String,
+        conditionRoom: String? = nil,
+        property: String,
+        value: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let home = try resolveHome(homeID: homeID)
+
+        // Only HMEventTrigger supports updatePredicate. Reject other trigger subclasses
+        // explicitly so callers get a clear message instead of a no-op.
+        if findEventTrigger(id: id, in: home) == nil, findAnyTrigger(id: id, in: home) != nil {
+            throw ControlError.invalidArgument(
+                "Automation '\(id)' is an HMTimerTrigger (Apple Home native time automation), " +
+                "not an HMEventTrigger. add-condition only works on HMEventTrigger automations " +
+                "because HMTimerTrigger doesn't expose the predicate API needed to append a condition. " +
+                "There's no in-place workaround that preserves the trigger UUID — recreating via " +
+                "`automations create-time` would produce a new UUID, breaking any references " +
+                "(button bindings, Siri shortcuts, integrations) to the original."
+            )
+        }
+        guard let trigger = findEventTrigger(id: id, in: home) else {
+            throw ControlError.triggerNotFound(id)
+        }
+
+        // Resolve the new condition's accessory + characteristic + value before mutating.
+        // Mirrors `createAutomation`'s `--condition` resolution path so the same inputs
+        // produce the same errors regardless of which command was called. Trim
+        // `conditionRoom` here too so a future Swift caller that bypasses
+        // SocketServer (where the wire-side trim happens) still gets the same
+        // discipline — defensive layer-symmetry, not a duplicate of the wire check.
+        let trimmedAccessoryID = accessoryID.trimmingCharacters(in: .whitespaces)
+        let trimmedProperty = property.trimmingCharacters(in: .whitespaces)
+        let trimmedValue = value.trimmingCharacters(in: .whitespaces)
+        let trimmedRoom: String? = {
+            guard let raw = conditionRoom else { return nil }
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            return t.isEmpty ? nil : t
+        }()
+        guard !trimmedAccessoryID.isEmpty,
+              !trimmedProperty.isEmpty,
+              !trimmedValue.isEmpty else {
+            throw ControlError.invalidArgument("Each of accessory/property/value must be non-empty")
+        }
+        // Track which lookup path resolved the accessory so we only echo `room` in
+        // the response when the room scoping was actually meaningful (the
+        // name-based path used it). UUID lookups ignore the room hint, so echoing
+        // it back would suggest the room mattered when it didn't.
+        let condAccessory: HMAccessory
+        let roomScopedLookup: Bool
+        if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(trimmedAccessoryID) == .orderedSame }) {
+            condAccessory = found
+            roomScopedLookup = false
+        } else if let found = findAccessoryByName(trimmedAccessoryID, room: trimmedRoom, in: home) {
+            condAccessory = found
+            roomScopedLookup = (trimmedRoom != nil)
+        } else {
+            throw ControlError.accessoryNotFound(trimmedAccessoryID)
+        }
+        guard let condChar = findCharacteristicByDescription(on: condAccessory, property: trimmedProperty) else {
+            throw ControlError.invalidArgument("Characteristic '\(trimmedProperty)' not found on '\(condAccessory.name)'")
+        }
+        guard let parsedValue = parseActionValue(trimmedValue, property: trimmedProperty) else {
+            throw ControlError.invalidArgument("Cannot parse condition value '\(trimmedValue)' for '\(trimmedProperty)'")
+        }
+
+        let newConditionPredicate = HMEventTrigger.predicateForEvaluatingTrigger(
+            condChar,
+            relatedBy: .equalTo,
+            toValue: parsedValue
+        )
+
+        // Flatten-at-write: if the existing predicate is already a top-level AND that's
+        // NOT a characteristic-leaf (the 2-sub `char == X AND value == Y` shape HomeKit
+        // uses to express a single characteristic predicate), reuse its subpredicates so
+        // the result stays a single flat N-ary AND instead of growing nested.
+        let combinedPredicate: NSPredicate
+        if let existing = trigger.predicate {
+            if let compound = existing as? NSCompoundPredicate,
+               compound.compoundPredicateType == .and,
+               let subs = compound.subpredicates as? [NSPredicate],
+               !AccessoryModel.isCharacteristicLeaf(subs)
+            {
+                var flattened = subs
+                flattened.append(newConditionPredicate)
+                combinedPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: flattened)
+            } else {
+                combinedPredicate = NSCompoundPredicate(andPredicateWithSubpredicates: [existing, newConditionPredicate])
+            }
+        } else {
+            combinedPredicate = newConditionPredicate
+        }
+
+        // Project the post-add characteristic-condition count from the structured
+        // decoder. Filter to `type == "characteristic"` so the count matches what a
+        // user expects after `add-condition` — i.e. the number of characteristic
+        // predicates ANDed in the trigger, NOT the total conjunct count (which
+        // would also include weekday and time-of-day predicates).
+        //
+        // Dry-run projects this count from the same `extractConditions` decoder a
+        // follow-up `get` would use, so structurally the count should match. Exact
+        // equality assumes HomeKit preserves the predicate's AND structure on
+        // `updatePredicate` round-trip — empirically observed but not formally
+        // documented by Apple. Note: predicates with conjunct shapes outside
+        // `extractConditions`'s recognized set (e.g. HomeKit-native NOT-compounds,
+        // exotic comparison operators) won't be counted, so the projected count
+        // can under-report on triggers Apple Home wrote with non-standard shapes.
+        let projectedConditionCount = AccessoryModel
+            .extractConditions(combinedPredicate, in: home)
+            .filter { ($0["type"] as? String) == "characteristic" }
+            .count
+
+        var result: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": trigger.name,
+            "home": home.name,
+            "accessory": condAccessory.name,
+            "accessory_id": condAccessory.uniqueIdentifier.uuidString,
+            "property": trimmedProperty,
+            "value": trimmedValue,
+            "condition_count_after": projectedConditionCount,
+        ]
+        // Echo back the room disambiguator only when it actually scoped the
+        // accessory lookup (the name-based path was taken AND the caller passed
+        // a room). Echoing it back on the UUID path would suggest the room
+        // mattered when in fact it was ignored — UUID lookup is unambiguous and
+        // the room hint is silently discarded.
+        if roomScopedLookup, let trimmedRoom { result["room"] = trimmedRoom }
+
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+
+        // See the function-level docstring for atomicity / failure semantics.
+        try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
+
+        AppLogger.homekit.info(
+            "[\(home.name)] Added condition to automation '\(trigger.name)': \(condAccessory.name).\(trimmedProperty) = \(trimmedValue)")
+        result["dry_run"] = false
         return result
     }
 

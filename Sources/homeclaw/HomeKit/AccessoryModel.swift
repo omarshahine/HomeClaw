@@ -562,8 +562,12 @@ enum AccessoryModel {
     }
 
     /// Flatten nested top-level AND compounds into a flat subpredicate list.
-    /// Successive `updatePredicate` mutations (e.g. `add-condition` calls in a future PR)
-    /// can produce AND-of-ANDs; treating those as a flat list keeps the decoder stable.
+    /// Successive `updatePredicate` mutations from `add-condition` (which appends
+    /// new condition leaves to a trigger's existing predicate) can produce AND-of-
+    /// ANDs whose top-level is flat but whose children are themselves the standard
+    /// HMEventTrigger characteristic-leaf compounds. This function flattens
+    /// unconditionally with `isCharacteristicLeaf` as the leaf signal, so callers
+    /// see a flat conjunct list regardless of write-time nesting.
     ///
     /// The characteristic predicate `(characteristic == X AND value == Y)` is a leaf — both
     /// subs are NSComparisonPredicate referencing an HMCharacteristic — so we keep it intact
@@ -583,9 +587,15 @@ enum AccessoryModel {
         for sub in subs { flattenTopAnd(sub, into: &out) }
     }
 
-    /// True for the 2-sub AND of comparisons that HomeKit uses to express a single
-    /// characteristic predicate. Identified by an HMCharacteristic constant on either side.
-    private static func isCharacteristicLeaf(_ subs: [NSPredicate]) -> Bool {
+    /// Determines whether an NSPredicate is the "characteristic leaf" shape HomeKit
+    /// uses to represent a single condition: a 2-element AND of comparisons, with an
+    /// HMCharacteristic constant on either side of one comparison. Used by
+    /// `extractConditions` via `flattenTopAnd` on the read side, and by
+    /// `HomeKitManager.addAutomationCondition` on the write side to decide whether
+    /// to wrap or flatten an existing predicate. Introduced for the decoder fix in
+    /// 34fd00f; reused for the writer in this PR to keep the leaf-recognition
+    /// vocabulary in lockstep.
+    static func isCharacteristicLeaf(_ subs: [NSPredicate]) -> Bool {
         guard subs.count == 2 else { return false }
         let comparisons = subs.compactMap { $0 as? NSComparisonPredicate }
         guard comparisons.count == 2 else { return false }

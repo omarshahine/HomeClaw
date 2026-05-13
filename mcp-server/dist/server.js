@@ -21015,13 +21015,13 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "timer" | "unknown") and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype.',
+    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). Use action=add_condition to append a characteristic condition (ANDed) to an existing automation in place \u2014 the trigger UUID is preserved, so button bindings and Siri references survive. List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "timer" | "unknown") and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype. Note: the predicate-composition features (conditions, time_after/time_before, add_condition) are built on standard HMEventTrigger predicate composition \u2014 supported by Apple\'s HomeKit framework APIs but not yet surfaced in the Home app\'s Automations tab. They mirror the rule-editor capabilities exposed by third-party HomeKit apps like Controller for HomeKit. Rules created or modified this way execute correctly via HomeKit; use list/get to inspect them since they may not be editable from the Home app.',
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable"],
+          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable", "add_condition"],
           description: "Action to perform. Default: list"
         },
         home_id: {
@@ -21092,7 +21092,7 @@ var tools = [
               accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
               property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
               value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
-              room: { type: "string", description: "Room name for accessory disambiguation (optional)" }
+              room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" }
             },
             required: ["accessory", "property", "value"]
           },
@@ -21114,9 +21114,20 @@ var tools = [
           maximum: 86400,
           description: "Auto-revert the trigger's actions after this many seconds (1-86400, i.e. up to 24 hours). Implemented as an HMDurationEvent attached to the trigger's endEvents \u2014 HomeKit handles the revert natively, no follow-up automation required. Common use cases: motion-triggered lights that should turn off again after a delay (e.g. `duration_seconds: 300` for a 5-minute hold), or sunset porch lights that should turn off after an hour. (create / create_time actions)"
         },
+        condition: {
+          type: "object",
+          properties: {
+            accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
+            property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
+            value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
+            room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" }
+          },
+          required: ["accessory", "property", "value"],
+          description: "Single characteristic condition (object \u2014 note the singular field name, distinct from the plural `conditions` array used by create / create_time) to append (ANDed) to an existing automation's trigger predicate. To add multiple conditions, call add_condition repeatedly \u2014 each call preserves the trigger UUID, so physical button bindings, Siri references, and other UUID-keyed integrations survive every modification. The read-side decoder (list/get) surfaces the new condition automatically. To replace an existing condition set, delete the automation and recreate it. (add_condition action)"
+        },
         dry_run: {
           type: "boolean",
-          description: "Preview changes without applying (create/create_time/delete actions)"
+          description: "Preview changes without applying (create/create_time/delete/add_condition actions)"
         }
       },
       required: ["action"]
@@ -21353,7 +21364,7 @@ async function handleAutomations(args) {
         socketArgs.duration_seconds = String(d);
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
-      if (args.dry_run) socketArgs.dry_run = "true";
+      if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
       return sendCommand("create_time_automation", socketArgs);
     }
     case "create": {
@@ -21396,14 +21407,14 @@ async function handleAutomations(args) {
         socketArgs.duration_seconds = String(d);
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
-      if (args.dry_run) socketArgs.dry_run = "true";
+      if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
       return sendCommand("create_automation", socketArgs);
     }
     case "delete": {
       if (!args.id) throw new Error("id is required for delete action");
       const socketArgs = { id: args.id };
       if (args.home_id) socketArgs.home_id = args.home_id;
-      if (args.dry_run) socketArgs.dry_run = "true";
+      if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
       return sendCommand("delete_automation", socketArgs);
     }
     case "enable":
@@ -21415,6 +21426,37 @@ async function handleAutomations(args) {
       };
       if (args.home_id) socketArgs.home_id = args.home_id;
       return sendCommand("enable_automation", socketArgs);
+    }
+    case "add_condition": {
+      if (typeof args.id !== "string" || args.id.trim() === "") {
+        throw new Error("id is required for add_condition action (must be a non-empty string)");
+      }
+      if (!args.condition || typeof args.condition !== "object") {
+        throw new Error("condition object is required for add_condition action");
+      }
+      const { accessory, property, value, room } = args.condition;
+      if (typeof accessory !== "string" || accessory.trim() === "") {
+        throw new Error("condition.accessory is required (must be a non-empty string)");
+      }
+      if (typeof property !== "string" || property.trim() === "") {
+        throw new Error("condition.property is required (must be a non-empty string)");
+      }
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new Error("condition.value must be a non-empty string");
+      }
+      if (room != null && (typeof room !== "string" || room.trim() === "")) {
+        throw new Error("condition.room must be a non-empty string when provided");
+      }
+      const socketArgs = {
+        id: args.id,
+        accessory,
+        property,
+        value
+      };
+      if (room) socketArgs.room = room;
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
+      return sendCommand("add_automation_condition", socketArgs);
     }
     default:
       throw new Error(`Unknown automations action: ${action}`);

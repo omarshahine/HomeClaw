@@ -14,6 +14,7 @@ struct Automations: ParsableCommand {
             EnableAutomation.self,
             DisableAutomation.self,
             RewireAutomation.self,
+            AddAutomationCondition.self,
         ],
         defaultSubcommand: ListAutomations.self
     )
@@ -918,6 +919,120 @@ struct RewireAutomation: ParsableCommand {
         if !warnings.isEmpty {
             print("\nWarnings:")
             for w in warnings { print("  ⚠ \(w)") }
+        }
+    }
+}
+
+// MARK: - Add Condition (modify-in-place)
+
+/// Append a characteristic condition (ANDed) to an existing automation's trigger predicate.
+/// Preserves the trigger UUID so physical button bindings, Siri references, and any other
+/// UUID-keyed integrations survive the modification (the reason this exists rather than
+/// "delete + recreate with extra flags"). See `HomeKitManager.addAutomationCondition`
+/// for the predicate-combine strategy (flatten-at-write) and the failure semantics.
+struct AddAutomationCondition: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "add-condition",
+        abstract:
+            "Add a characteristic condition (ANDed) to an existing automation in place (preserves trigger UUID)"
+    )
+
+    @Argument(help: "Automation name or UUID")
+    var id: String
+
+    @Option(name: .long, help: "Accessory name or UUID for the new condition")
+    var accessory: String
+
+    @Option(name: .long, help: "Characteristic name (e.g., contact_state, occupancy_detected, power)")
+    var property: String
+
+    @Option(name: .long, help: "Required value as string (e.g., 'true', '0', '50'); uses exact match (==)")
+    var value: String
+
+    @Option(name: .long, help: "Room name for accessory disambiguation when multiple accessories share a name (optional)")
+    var room: String?
+
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
+    @Flag(name: .long, help: "Preview without modifying the automation")
+    var dryRun = false
+
+    @Flag(name: .long, help: "Output raw JSON")
+    var json = false
+
+    func validate() throws {
+        // ArgumentParser already enforces presence of @Option/@Argument, but it doesn't
+        // catch empty strings (e.g. --accessory '' or a positional argument that's just
+        // whitespace). Reject those here so the user gets a CLI ValidationError before
+        // we open the socket and round-trip to HomeKitManager.
+        if id.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("Automation id/name must be non-empty")
+        }
+        if accessory.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--accessory must be non-empty")
+        }
+        if property.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--property must be non-empty")
+        }
+        if value.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--value must be non-empty")
+        }
+        if let room, room.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--room must be non-empty when provided")
+        }
+    }
+
+    func run() throws {
+        var args: [String: Any] = [
+            "id": id,
+            "accessory": accessory,
+            "property": property,
+            "value": value,
+            "dry_run": dryRun,
+        ]
+        if let room { args["room"] = room }
+        if let home { args["home_id"] = home }
+
+        let response = try SocketClient.sendAny(command: "add_automation_condition", args: args)
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
+
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
+        let isDryRun = result["dry_run"] as? Bool ?? false
+        let autoName = result["name"] as? String ?? id
+        let accessoryName = result["accessory"] as? String ?? accessory
+        let propertyName = result["property"] as? String ?? property
+        let valueStr = result["value"] as? String ?? value
+        let count = result["condition_count_after"] as? Int
+        // Only echo the room when HomeKitManager included it in the result —
+        // it does so only when the room hint actually scoped the lookup (the
+        // name-based path was taken). UUID lookups omit it because the room
+        // would be misleading.
+        let roomSuffix: String
+        if let room = result["room"] as? String {
+            roomSuffix = " (in room \(room))"
+        } else {
+            roomSuffix = ""
+        }
+
+        if isDryRun {
+            print("DRY RUN — would add condition to '\(autoName)': \(accessoryName)\(roomSuffix).\(propertyName) = \(valueStr)")
+        } else {
+            print("Added condition to '\(autoName)': \(accessoryName)\(roomSuffix).\(propertyName) = \(valueStr)")
+        }
+        if let count {
+            print("  Trigger now has \(count) condition(s)")
         }
     }
 }

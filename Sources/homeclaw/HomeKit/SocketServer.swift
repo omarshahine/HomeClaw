@@ -12,8 +12,34 @@ final class SocketServer: @unchecked Sendable {
     private var acceptSource: DispatchSourceRead?
     private let queue = DispatchQueue(label: "com.shahine.homeclaw.socket", qos: .userInitiated)
 
+    /// Parse a boolean wire arg, distinguishing absent from present-but-unparseable.
+    ///
+    /// Accepts:
+    ///   - true / false (as JSON booleans, bridged to NSCFBoolean on iOS/macOS)
+    ///   - "true" / "false" (case-insensitive strings)
+    ///
+    /// Rejects (returns `defaultValue`):
+    ///   - integers like `1` / `0` (would otherwise silently bool-coerce via `as? Bool`)
+    ///   - typo'd strings like `"yes"`, `"1"`, `"on"` (only the literal "true" string is truthy)
+    ///
+    /// The default-on-unrecognized direction is deliberately the SAFE one for the
+    /// most-affected caller (`dry_run`) — typo'd opt-ins become no-ops rather than
+    /// silently real-applying. The dangerous direction would be treating an
+    /// unparseable input as `true`; this implementation never does that.
     private func parseBool(_ args: [String: Any], key: String, default defaultValue: Bool = false) -> Bool {
-        (args[key] as? Bool) ?? (args[key] as? String).map { $0 == "true" } ?? defaultValue
+        guard let raw = args[key] else { return defaultValue }
+        // Accept NSCFBoolean (the runtime class JSON booleans bridge to). Checking
+        // CFGetTypeID against CFBooleanGetTypeID rejects NSNumber-bool-coerced
+        // integers (`1`, `0`) which would otherwise pass `as? Bool` silently.
+        if let nsNum = raw as? NSNumber, CFGetTypeID(nsNum) == CFBooleanGetTypeID() {
+            return nsNum.boolValue
+        }
+        // Accept explicit "true"/"false" strings (case-insensitive). Any other
+        // string (e.g. "yes", "1", "on") returns the default — never silently true.
+        if let s = raw as? String {
+            return s.lowercased() == "true"
+        }
+        return defaultValue
     }
 
     /// Thrown by `parseWeekdaysArg` when `weekdays` is present but malformed.
@@ -1085,6 +1111,80 @@ final class SocketServer: @unchecked Sendable {
                     id: id,
                     enabled: enabled,
                     homeID: args["home_id"] as? String
+                )
+
+            case "add_automation_condition":
+                // Wire contract: flat args (`accessory`, `property`, `value`, `room`) — the
+                // MCP/JS handler unpacks the nested `condition` object into these flat
+                // siblings. Direct socket clients bypassing the JS layer should send the
+                // flat shape, not the nested.
+                //
+                // Required string args: id, accessory, property, value. Validate each
+                // is present AND non-empty (after whitespace trim) so a whitespace-only
+                // string from the wire can't slip through to HomeKitManager. Mirrors the
+                // CLI `validate()` rules and the discipline established by the
+                // duration_seconds parsing above — distinguish absent from unparseable.
+                // Trim once and forward the trimmed values. Validating a trimmed
+                // string but forwarding the raw form (the prior bug) meant
+                // `--accessory " Front Door "` validated fine but the manager-side
+                // lookup got the padded form and threw `accessoryNotFound`.
+                guard let idRaw = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                let id = idRaw.trimmingCharacters(in: .whitespaces)
+                guard !id.isEmpty else {
+                    return encodeResponse(success: false, error: "'id' argument must be non-empty (after trimming whitespace)")
+                }
+                guard let accessoryRaw = args["accessory"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'accessory' argument")
+                }
+                let accessory = accessoryRaw.trimmingCharacters(in: .whitespaces)
+                guard !accessory.isEmpty else {
+                    return encodeResponse(success: false, error: "'accessory' argument must be non-empty (after trimming whitespace)")
+                }
+                guard let propertyRaw = args["property"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'property' argument")
+                }
+                let property = propertyRaw.trimmingCharacters(in: .whitespaces)
+                guard !property.isEmpty else {
+                    return encodeResponse(success: false, error: "'property' argument must be non-empty (after trimming whitespace)")
+                }
+                guard let valueRaw = args["value"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'value' argument")
+                }
+                let value = valueRaw.trimmingCharacters(in: .whitespaces)
+                guard !value.isEmpty else {
+                    return encodeResponse(success: false, error: "'value' argument must be non-empty (after trimming whitespace)")
+                }
+                // Optional room disambiguator — mirrors the `condition.room` field
+                // accepted by `create`/`create-time`. Forwarded to HomeKitManager so
+                // accessory name lookup can scope by room when multiple accessories
+                // share a name across rooms. Distinguish absent (nil OK) from
+                // present-but-malformed (e.g. `room: 123` or `room: ["Kitchen"]`),
+                // mirroring the e6ffa1b validation pattern Omar applied to
+                // time_after / time_before in a46ac9f. Empty / whitespace-only
+                // strings are rejected up-front rather than silently coerced to nil.
+                let conditionRoom: String?
+                if let raw = args["room"] {
+                    guard let s = raw as? String else {
+                        return encodeResponse(success: false, error: "'room' must be a string when provided")
+                    }
+                    let trimmed = s.trimmingCharacters(in: .whitespaces)
+                    if trimmed.isEmpty {
+                        return encodeResponse(success: false, error: "'room' must be non-empty when provided")
+                    }
+                    conditionRoom = trimmed
+                } else {
+                    conditionRoom = nil
+                }
+                result = try await hk.addAutomationCondition(
+                    id: id,
+                    accessoryID: accessory,
+                    conditionRoom: conditionRoom,
+                    property: property,
+                    value: value,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
                 )
 
             case "webhook_log":
