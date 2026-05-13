@@ -85,6 +85,178 @@ struct TimeCondition {
     }
 }
 
+// MARK: - Time Spec (trigger event)
+
+/// The TIME-OF-DAY trigger event a `create-time` automation fires on.
+///
+/// Distinct from `TimeCondition` (which is a *predicate* gating any trigger):
+/// a `TimeSpec` becomes the trigger's `HMEvent` itself — either an
+/// `HMCalendarEvent` (HH:MM clock fire) or an `HMSignificantTimeEvent`
+/// (sunrise/sunset, optionally offset by ±N minutes).
+///
+/// Accepted string forms (case-insensitive, whitespace-trimmed):
+/// - `HH:MM`         — clock time (00:00 ... 23:59), zero-padded
+/// - `sunrise`       — at sunrise
+/// - `sunset`        — at sunset
+/// - `sunrise+N`     — N minutes after sunrise
+/// - `sunset-N`      — N minutes before sunset
+/// - `sunrise-N`, `sunset+N` — same idea, signed offset
+///
+/// Offsets larger than ±1440 minutes (24h) are rejected (mirrors `TimeCondition`).
+enum TimeSpec: Equatable {
+    case calendar(hour: Int, minute: Int)
+    case significantTime(event: TimeCondition.Event, offsetMinutes: Int)
+
+    /// Largest offset accepted for sun-event variants. Larger values are
+    /// almost certainly typos (the user probably meant `--days`).
+    static let maxOffsetMinutes = TimeCondition.maxOffsetMinutes
+
+    /// Parsing errors. The caller maps these to its preferred error type
+    /// (CLI: `ValidationError`; socket/manager: `ControlError.invalidArgument`).
+    enum ParseError: Error, Equatable {
+        case empty
+        case unknownFormat(String)
+        case badHour(String)
+        case badMinute(String)
+        case badOffsetSign(String)
+        case missingOffset(String)
+        case badOffset(String)
+        case offsetOutOfRange(Int)
+
+        var message: String {
+            switch self {
+            case .empty:
+                return "time value is empty. Use 'HH:MM', 'sunrise', 'sunset', or '<sun-event>±<minutes>'."
+            case .unknownFormat(let raw):
+                return "Invalid time '\(raw)'. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30')."
+            case .badHour(let raw):
+                return "Invalid time '\(raw)'. Hour must be 0-23."
+            case .badMinute(let raw):
+                return "Invalid time '\(raw)'. Minute must be 0-59 and exactly two digits."
+            case .badOffsetSign(let raw):
+                return "Invalid time '\(raw)'. Offset must start with '+' or '-' (e.g. 'sunset-30')."
+            case .missingOffset(let raw):
+                return "Invalid time '\(raw)'. Missing offset minutes after the sign."
+            case .badOffset(let raw):
+                return "Invalid time '\(raw)'. Offset must be a non-negative integer number of minutes."
+            case .offsetOutOfRange(let n):
+                return "Invalid time offset \(n) minutes. Offsets larger than \(maxOffsetMinutes) minutes (24h) are rejected — that's almost certainly a typo; use --days for weekday gating."
+            }
+        }
+    }
+
+    /// Strict parser for time-spec strings. Manager-side source of truth for
+    /// `create-time` automations. Accepts: `HH:MM` (24-hour, range 00:00-23:59,
+    /// both components two digits exactly), `sunrise`/`sunset`, `sunrise+N`,
+    /// `sunrise-N`, `sunset+N`, `sunset-N` where |N| <= 1440 (24h).
+    ///
+    /// The CLI-side mirror is `CreateAutomation.validateTimeOfDaySpec(...)` in
+    /// `Sources/homeclaw-cli/Commands/AutomationsCommand.swift`. Both parsers
+    /// implement identical rules so the CLI fails fast with friendly error
+    /// messages, the SocketServer re-validates via this function (defense-in-
+    /// depth), and the manager has the canonical truth at HomeKit-mutation time.
+    /// If you change rules here, update `validateTimeOfDaySpec` to match. The
+    /// CLI parser's unit tests in `Tests/homeclaw-cliTests/CreateTimeTests.swift`
+    /// cover the shared rule set; a direct unit test for this function would
+    /// require a new SPM test target that depends on the Catalyst module.
+    ///
+    /// Strict format checks: HH:MM must be exactly two digits each (`12:3` and
+    /// `12:345` are rejected, matching the user expectation that a time-of-day
+    /// automation can't silently re-interpret `12:5` as `12:50`).
+    static func parse(_ raw: String) throws -> TimeSpec {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { throw ParseError.empty }
+        let lower = trimmed.lowercased()
+
+        // HH:MM
+        if lower.contains(":") {
+            let parts = lower.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { throw ParseError.unknownFormat(raw) }
+            let hourStr = String(parts[0])
+            let minStr = String(parts[1])
+            // Reject ambiguous widths — `12:3` and `12:345` are both errors.
+            guard hourStr.count == 2, minStr.count == 2 else {
+                if hourStr.count != 2 { throw ParseError.badHour(raw) }
+                throw ParseError.badMinute(raw)
+            }
+            guard let hour = Int(hourStr), (0...23).contains(hour) else { throw ParseError.badHour(raw) }
+            guard let minute = Int(minStr), (0...59).contains(minute) else { throw ParseError.badMinute(raw) }
+            return .calendar(hour: hour, minute: minute)
+        }
+
+        // sunrise / sunset (with optional ±N offset)
+        let event: TimeCondition.Event
+        var rest: String
+        if lower.hasPrefix("sunrise") {
+            event = .sunrise
+            rest = String(lower.dropFirst("sunrise".count))
+        } else if lower.hasPrefix("sunset") {
+            event = .sunset
+            rest = String(lower.dropFirst("sunset".count))
+        } else {
+            throw ParseError.unknownFormat(raw)
+        }
+
+        if rest.isEmpty { return .significantTime(event: event, offsetMinutes: 0) }
+
+        guard let sign = rest.first, sign == "+" || sign == "-" else { throw ParseError.badOffsetSign(raw) }
+        let numStr = String(rest.dropFirst())
+        guard !numStr.isEmpty else { throw ParseError.missingOffset(raw) }
+        guard let magnitude = Int(numStr), magnitude >= 0 else { throw ParseError.badOffset(raw) }
+        if magnitude > maxOffsetMinutes { throw ParseError.offsetOutOfRange(magnitude) }
+        let signed = sign == "+" ? magnitude : -magnitude
+        return .significantTime(event: event, offsetMinutes: signed)
+    }
+
+    /// Construct the HMEvent the trigger fires on.
+    func makeEvent() -> HMEvent {
+        switch self {
+        case .calendar(let hour, let minute):
+            var dc = DateComponents()
+            dc.hour = hour
+            dc.minute = minute
+            return HMCalendarEvent(fire: dc)
+        case .significantTime(let event, let offsetMinutes):
+            let sigEvent = event == .sunrise ? HMSignificantEvent.sunrise : HMSignificantEvent.sunset
+            var offset: DateComponents? = nil
+            if offsetMinutes != 0 {
+                var dc = DateComponents()
+                dc.minute = offsetMinutes
+                offset = dc
+            }
+            return HMSignificantTimeEvent(significantEvent: sigEvent, offset: offset)
+        }
+    }
+
+    /// Canonical echo form (matches what `AccessoryModel.automationSummary`
+    /// renders on read-back). Used in the create-time result dict so the
+    /// CLI/MCP caller sees the parsed spec, not the raw input.
+    var canonicalString: String {
+        switch self {
+        case .calendar(let hour, let minute):
+            return String(format: "%02d:%02d", hour, minute)
+        case .significantTime(let event, let offsetMinutes):
+            let label = event == .sunrise ? "sunrise" : "sunset"
+            if offsetMinutes == 0 { return label }
+            return offsetMinutes > 0 ? "\(label)+\(offsetMinutes)" : "\(label)\(offsetMinutes)"
+        }
+    }
+}
+
+// MARK: - Resolved Condition (predicate composition input)
+
+/// A `--condition` row resolved against a real HomeKit accessory + characteristic.
+/// Shared by `createAutomation` (button/characteristic triggers) and
+/// `createTimeAutomation` (HH:MM / sunrise/sunset triggers) so both call sites
+/// build identically-shaped predicates via the shared `buildCombinedPredicate` helper.
+fileprivate struct ResolvedCondition {
+    let accessory: HMAccessory
+    let characteristic: HMCharacteristic
+    let property: String
+    let value: NSCopying & NSObjectProtocol
+    let rawValue: String
+}
+
 /// Central HomeKit interface. Must run on @MainActor because HMHomeManager
 /// requires main-thread delegate callbacks.
 @MainActor
@@ -892,54 +1064,18 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         // Resolve & validate condition predicates up-front so we fail before mutating HomeKit.
-        // Each condition must reference a real accessory + characteristic; values must parse.
-        // The resolved tuples are then used both for predicate construction (Step 1b) and for
-        // structured echo back in the result dict.
-        struct ResolvedCondition {
-            let accessory: HMAccessory
-            let characteristic: HMCharacteristic
-            let property: String
-            let value: NSCopying & NSObjectProtocol
-            let rawValue: String
-        }
-        var resolvedConditions: [ResolvedCondition] = []
-        for cond in conditions {
-            guard let condAccessoryID = cond["accessory"],
-                  let condProperty = cond["property"],
-                  let condValueStr = cond["value"],
-                  !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty
-            else {
-                throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
-            }
-            // Match createAutomation's own resolution: UUID first, then case-insensitive name
-            // (with optional `room` disambiguator if the caller supplied one).
-            let condAccessory: HMAccessory
-            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(condAccessoryID) == .orderedSame }) {
-                condAccessory = found
-            } else if let found = findAccessoryByName(condAccessoryID, room: cond["room"], in: home) {
-                condAccessory = found
-            } else {
-                throw ControlError.accessoryNotFound(condAccessoryID)
-            }
-            guard let condChar = findCharacteristicByDescription(on: condAccessory, property: condProperty) else {
-                throw ControlError.invalidArgument("Characteristic '\(condProperty)' not found on '\(condAccessory.name)' for --condition")
-            }
-            guard let parsed = parseActionValue(condValueStr, property: condProperty) else {
-                throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
-            }
-            resolvedConditions.append(ResolvedCondition(
-                accessory: condAccessory,
-                characteristic: condChar,
-                property: condProperty,
-                value: parsed,
-                rawValue: condValueStr
-            ))
-        }
+        // Shared with `createTimeAutomation` via `resolveConditions(_:in:)`.
+        let resolvedConditions = try resolveConditions(conditions, in: home)
 
         // iOS 15+ marks time-conditional automations without weekday gating as "unreliable".
         // Auto-fill all 7 days when --time-after / --time-before is set but --days is not,
         // so the automation actually fires. Surface this via `weekdays_auto_filled` so the
         // CLI/MCP caller knows we made a behavioural decision on their behalf.
+        // See `createTimeAutomation`: it auto-fills whenever `weekdays` is empty, since
+        // the trigger event is itself time-of-day. `createAutomation` only auto-fills
+        // when explicit time conditions are present — the trigger event here is a
+        // characteristic change, so without time predicates there's nothing for iOS
+        // to gate on.
         let weekdaysAutoFilled = !timeConditions.isEmpty && weekdays.isEmpty
         let effectiveWeekdays: [Int] = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
 
@@ -1115,109 +1251,51 @@ final class HomeKitManager: NSObject, Observable {
             predicate: nil
         )
 
-        // Step 1: Add trigger to home
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            home.addTrigger(trigger) { error in
-                if let error { continuation.resume(throwing: error) }
-                else { continuation.resume() }
-            }
-        }
-
-        // Step 1b: Build the combined trigger predicate from weekdays + conditions +
-        // time conditions and apply it in a single `updatePredicate` call.
-        //
-        // Only the LAST `updatePredicate` call sticks, so all three predicate kinds must be
-        // composed together. The structure is one outer AND:
-        //
-        //   AND(
-        //     existing-trigger-predicate,                  // currently always nil at this point
-        //     OR(weekday=1, weekday=2, ...),               // from --days / auto-fill
-        //     characteristic-condition-1,                  // from each --condition
-        //     characteristic-condition-2,
-        //     time-condition-1,                            // from each --time-after / --time-before
-        //     ...
-        //   )
-        //
-        // If only one of these is present, we either skip the call entirely (none) or pass the
-        // single predicate directly (no compound wrapper). Failure rolls back the orphan trigger
-        // (and inline action set if we created one), mirroring the action-set-link rollback path.
-        var subpredicates: [NSPredicate] = []
-        if let existing = trigger.predicate { subpredicates.append(existing) }
-        if !effectiveWeekdays.isEmpty {
-            let dayPredicates: [NSPredicate] = effectiveWeekdays.map { weekday in
-                var dc = DateComponents()
-                dc.weekday = weekday
-                return HMEventTrigger.predicateForEvaluatingTrigger(occurringOn: dc)
-            }
-            subpredicates.append(
-                dayPredicates.count == 1
-                    ? dayPredicates[0]
-                    : NSCompoundPredicate(orPredicateWithSubpredicates: dayPredicates)
-            )
-        }
-        for cond in resolvedConditions {
-            subpredicates.append(
-                HMEventTrigger.predicateForEvaluatingTrigger(
-                    cond.characteristic,
-                    relatedBy: .equalTo,
-                    toValue: cond.value
-                )
-            )
-        }
-        for tc in timeConditions {
-            if let p = tc.predicate() { subpredicates.append(p) }
-        }
-        if !subpredicates.isEmpty {
-            let combinedPredicate: NSPredicate = subpredicates.count == 1
-                ? subpredicates[0]
-                : NSCompoundPredicate(andPredicateWithSubpredicates: subpredicates)
-            do {
-                try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
-            } catch {
-                // Cleanup on predicate failure: remove the orphaned trigger AND the inline
-                // action set if we created one. (The action set exists in `home.actionSets`
-                // from Step 1's `addActionSet` call even though it's not yet linked to the
-                // trigger — without this removal it would persist as an orphaned scene tile.)
-                if isInlineActionSet {
-                    try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                        home.removeActionSet(actionSet) { err in
-                            if let err { continuation.resume(throwing: err) }
-                            else { continuation.resume() }
-                        }
-                    }
+        // Step 1: Add trigger to home. On failure, clean up the inline action set
+        // (which already lives in `home.actionSets` from `addActionSet`) so a
+        // failed addTrigger doesn't leave an orphan scene tile in the Home app.
+        // Mirrors the cleanup shape used in `createTimeAutomation`'s Step 1 — fulfils
+        // the PR #59 follow-up to audit `createAutomation`'s failure paths for
+        // orphan-action-set leaks.
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                home.addTrigger(trigger) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
                 }
+            }
+        } catch {
+            if isInlineActionSet {
                 try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    home.removeTrigger(trigger) { err in
+                    home.removeActionSet(actionSet) { err in
                         if let err { continuation.resume(throwing: err) }
                         else { continuation.resume() }
                     }
                 }
-                throw error
             }
+            throw error
         }
+
+        // Step 1b: Build & apply the combined trigger predicate (weekdays + conditions +
+        // time conditions). Shared with `createTimeAutomation`. On failure, the helper
+        // tears down the orphan trigger and inline action set if applicable.
+        try await applyCombinedPredicate(
+            to: trigger,
+            weekdays: effectiveWeekdays,
+            resolvedConditions: resolvedConditions,
+            timeConditions: timeConditions,
+            isInlineActionSet: isInlineActionSet,
+            actionSet: actionSet,
+            in: home
+        )
 
         // Step 1c: Attach an HMDurationEvent end-event so HomeKit reverts the
         // trigger's actions after N seconds (e.g. motion-triggered light auto-off).
-        // Mirrors the predicate cleanup pattern: on failure, tear down the orphan
-        // trigger (and inline action set if we created one) before rethrowing.
         if let durationSeconds {
             do {
                 try await applyDuration(seconds: durationSeconds, to: trigger)
             } catch {
-                if isInlineActionSet {
-                    try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                        home.removeActionSet(actionSet) { err in
-                            if let err { continuation.resume(throwing: err) }
-                            else { continuation.resume() }
-                        }
-                    }
-                }
-                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    home.removeTrigger(trigger) { err in
-                        if let err { continuation.resume(throwing: err) }
-                        else { continuation.resume() }
-                    }
-                }
+                await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
                 throw error
             }
         }
@@ -1231,21 +1309,7 @@ final class HomeKitManager: NSObject, Observable {
                 }
             }
         } catch {
-            // Cleanup: remove the orphaned trigger (and inline action set if we created one)
-            if isInlineActionSet {
-                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    home.removeActionSet(actionSet) { err in
-                        if let err { continuation.resume(throwing: err) }
-                        else { continuation.resume() }
-                    }
-                }
-            }
-            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                home.removeTrigger(trigger) { err in
-                    if let err { continuation.resume(throwing: err) }
-                    else { continuation.resume() }
-                }
-            }
+            await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
             throw error
         }
 
@@ -1253,21 +1317,7 @@ final class HomeKitManager: NSObject, Observable {
         do {
             try await homeKitAsync { trigger.enable(true, completionHandler: $0) }
         } catch {
-            // Cleanup on enable failure
-            if isInlineActionSet {
-                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    home.removeActionSet(actionSet) { err in
-                        if let err { continuation.resume(throwing: err) }
-                        else { continuation.resume() }
-                    }
-                }
-            }
-            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                home.removeTrigger(trigger) { err in
-                    if let err { continuation.resume(throwing: err) }
-                    else { continuation.resume() }
-                }
-            }
+            await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
             throw error
         }
 
@@ -1301,16 +1351,430 @@ final class HomeKitManager: NSObject, Observable {
         return attachPredicateFields(result)
     }
 
+    /// Create a time-of-day automation: `HMCalendarEvent` (HH:MM) or
+    /// `HMSignificantTimeEvent` (sunrise/sunset, optionally offset) as the trigger
+    /// event, with the same predicate-flag vocabulary as `createAutomation`
+    /// (`weekdays` / `conditions` / `timeConditionsAfter` / `timeConditionsBefore` /
+    /// `durationSeconds`) ANDed into the trigger's predicate.
+    ///
+    /// The time-of-day spec is itself the trigger *event*, not a predicate. Adding
+    /// a `--time-after sunset-30` flag to a `06:30` clock automation means "fire at
+    /// 06:30 AND only when it's already past 30 minutes before sunset" — useful for
+    /// e.g. a coffee-maker automation that should skip the wake-up step in summer
+    /// when the user is already up.
+    ///
+    /// Auto-fills `weekdays = [1...7]` (every day) when omitted, since the
+    /// trigger event itself is time-of-day and iOS 15+ marks time-conditional
+    /// automations without weekday gating as "unreliable". This is stricter
+    /// than `createAutomation`, which only auto-fills when explicit time
+    /// conditions (`--time-after`/`--time-before`) are present. See the
+    /// inline rationale near the `effectiveWeekdays` definition.
+    func createTimeAutomation(
+        name: String,
+        time: String,
+        weekdays: [Int] = [],
+        conditions: [[String: String]] = [],
+        timeConditions: [TimeCondition] = [],
+        durationSeconds: Int? = nil,
+        sceneID: String? = nil,
+        actions: [[String: String]]? = nil,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        let home = try resolveHome(homeID: homeID)
+
+        // Parse the trigger time-of-day spec. Maps the strict-string ParseError
+        // surface to ControlError so direct-socket callers get a precise message.
+        let timeSpec: TimeSpec
+        do {
+            timeSpec = try TimeSpec.parse(time)
+        } catch let err as TimeSpec.ParseError {
+            throw ControlError.invalidArgument(err.message)
+        }
+
+        // Resolve conditions up-front (shared with createAutomation).
+        let resolvedConditions = try resolveConditions(conditions, in: home)
+
+        // iOS 15+ marks time-conditional automations without weekday gating as
+        // "unreliable", and that warning applies just as strongly when the
+        // trigger event IS itself a time-of-day fire — the OS treats `endEvent`,
+        // `recurrences`, and predicate-gated time windows the same way. Auto-fill
+        // all 7 days when no `--days` was provided so the trigger actually fires.
+        let weekdaysAutoFilled = weekdays.isEmpty
+        let effectiveWeekdays: [Int] = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
+
+        // Echo conditions / time conditions back to the caller, identical shape to createAutomation.
+        let conditionsEcho: [[String: String]] = resolvedConditions.map {
+            [
+                "accessory": $0.accessory.name,
+                "accessory_id": $0.accessory.uniqueIdentifier.uuidString,
+                "property": $0.property,
+                "value": $0.rawValue,
+            ]
+        }
+        let timeAfterEcho: [String] = timeConditions.compactMap {
+            guard $0.relation == .after else { return nil }
+            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
+            if $0.offsetMinutes == 0 { return ev }
+            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
+        }
+        let timeBeforeEcho: [String] = timeConditions.compactMap {
+            guard $0.relation == .before else { return nil }
+            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
+            if $0.offsetMinutes == 0 { return ev }
+            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
+        }
+
+        // Derive the read-side trigger_type tag to match what
+        // `AccessoryModel.automationSummary` will render on subsequent list/get.
+        let triggerTypeTag: String
+        switch timeSpec {
+        case .calendar: triggerTypeTag = "calendar"
+        case .significantTime: triggerTypeTag = "significant_time"
+        }
+
+        let attachPredicateFields: ([String: Any]) -> [String: Any] = { existing in
+            var r = existing
+            if !effectiveWeekdays.isEmpty { r["weekdays"] = effectiveWeekdays }
+            if weekdaysAutoFilled { r["weekdays_auto_filled"] = true }
+            if !conditionsEcho.isEmpty { r["conditions"] = conditionsEcho }
+            if !timeAfterEcho.isEmpty { r["time_after"] = timeAfterEcho }
+            if !timeBeforeEcho.isEmpty { r["time_before"] = timeBeforeEcho }
+            return r
+        }
+
+        // Resolve the action set: existing scene or inline action set.
+        let actionSet: HMActionSet
+        let isInlineActionSet: Bool
+
+        if let actions, !actions.isEmpty {
+            let resolvedActions = try resolveActions(actions, in: home)
+
+            if dryRun {
+                var result: [String: Any] = [
+                    "dry_run": true,
+                    "inline_actions": true,
+                    "name": name,
+                    "home": home.name,
+                    "trigger_type": triggerTypeTag,
+                    "time": timeSpec.canonicalString,
+                    "action_count": resolvedActions.count,
+                    "actions": resolvedActions.map { action in
+                        [
+                            "accessory": action.accessory.name,
+                            "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
+                            "value": "\(action.value)",
+                        ] as [String: String]
+                    },
+                ]
+                if let durationSeconds { result["duration_seconds"] = durationSeconds }
+                return attachPredicateFields(result)
+            }
+
+            let inlineSetName = name
+            let newActionSet = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMActionSet, Error>) in
+                home.addActionSet(withName: inlineSetName) { actionSet, error in
+                    if let error { continuation.resume(throwing: error) }
+                    else if let actionSet { continuation.resume(returning: actionSet) }
+                    else { continuation.resume(throwing: ControlError.writeFailed("Failed to create action set")) }
+                }
+            }
+
+            for resolved in resolvedActions {
+                let writeAction = HMCharacteristicWriteAction(
+                    characteristic: resolved.characteristic,
+                    targetValue: resolved.value as! NSCopying & NSObjectProtocol
+                )
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    newActionSet.addAction(writeAction) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+            }
+
+            actionSet = newActionSet
+            isInlineActionSet = true
+        } else if let sceneID {
+            guard let existingSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == sceneID })
+                    ?? home.actionSets.first(where: { $0.name.localizedCaseInsensitiveCompare(sceneID) == .orderedSame })
+            else {
+                throw ControlError.sceneNotFound(sceneID)
+            }
+
+            if dryRun {
+                var result: [String: Any] = [
+                    "dry_run": true,
+                    "name": name,
+                    "home": home.name,
+                    "trigger_type": triggerTypeTag,
+                    "time": timeSpec.canonicalString,
+                    "scene": existingSet.name,
+                ]
+                if let durationSeconds { result["duration_seconds"] = durationSeconds }
+                return attachPredicateFields(result)
+            }
+
+            actionSet = existingSet
+            isInlineActionSet = false
+        } else {
+            throw ControlError.writeFailed("Either 'scene_id' or 'actions' must be provided")
+        }
+
+        // Build the trigger from the time spec.
+        let triggerEvent = timeSpec.makeEvent()
+        let trigger = HMEventTrigger(
+            name: name,
+            events: [triggerEvent],
+            end: nil,
+            recurrences: nil,
+            predicate: nil
+        )
+
+        // Step 1: Add trigger to home. On failure, clean up the inline action set
+        // (which already lives in `home.actionSets` from `addActionSet`).
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                home.addTrigger(trigger) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+        } catch {
+            if isInlineActionSet {
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeActionSet(actionSet) { err in
+                        if let err { continuation.resume(throwing: err) }
+                        else { continuation.resume() }
+                    }
+                }
+            }
+            throw error
+        }
+
+        // Step 1b: predicate composition + cleanup-on-failure. Shared with createAutomation.
+        try await applyCombinedPredicate(
+            to: trigger,
+            weekdays: effectiveWeekdays,
+            resolvedConditions: resolvedConditions,
+            timeConditions: timeConditions,
+            isInlineActionSet: isInlineActionSet,
+            actionSet: actionSet,
+            in: home
+        )
+
+        // Step 1c: optional HMDurationEvent. Same cleanup pattern as Step 1b.
+        if let durationSeconds {
+            do {
+                try await applyDuration(seconds: durationSeconds, to: trigger)
+            } catch {
+                await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
+                throw error
+            }
+        }
+
+        // Step 2: Link the action set.
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                trigger.addActionSet(actionSet) { error in
+                    if let error { continuation.resume(throwing: error) }
+                    else { continuation.resume() }
+                }
+            }
+        } catch {
+            await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
+            throw error
+        }
+
+        // Step 3: Enable the trigger.
+        do {
+            try await homeKitAsync { trigger.enable(true, completionHandler: $0) }
+        } catch {
+            await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
+            throw error
+        }
+
+        let actionLabel = isInlineActionSet ? "\(actionSet.actions.count) inline action(s)" : actionSet.name
+        AppLogger.homekit.info("[\(home.name)] Created time automation '\(name)': \(timeSpec.canonicalString) → \(actionLabel)")
+        var result: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": name,
+            "home": home.name,
+            "trigger_type": triggerTypeTag,
+            "time": timeSpec.canonicalString,
+            "enabled": true,
+            "dry_run": false,
+            "action_count": actionSet.actions.count,
+        ]
+        if isInlineActionSet {
+            result["inline_actions"] = true
+        } else {
+            result["scene"] = actionSet.name
+        }
+        if let durationSeconds {
+            result["duration_seconds"] = durationSeconds
+        }
+        return attachPredicateFields(result)
+    }
+
     /// Add an HMDurationEvent to the trigger's `endEvents` so HomeKit reverts
     /// any characteristics turned on by the trigger after the given duration.
-    /// Used by `--duration N` on `automations create` to implement auto-off
-    /// for motion-triggered lights and similar patterns.
+    /// Used by `--duration N` on `automations create` / `create-time` to implement
+    /// auto-off for motion-triggered lights and similar patterns.
     private func applyDuration(seconds: Int, to trigger: HMEventTrigger) async throws {
         let durationEvent = HMDurationEvent(duration: TimeInterval(seconds))
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             trigger.updateEndEvents([durationEvent]) { error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
+            }
+        }
+    }
+
+    /// Resolve raw `--condition` rows against the home's accessories + characteristics.
+    /// Fails before any HomeKit mutation if any condition is malformed, references an
+    /// unknown accessory/characteristic, or has an unparseable value. Shared by
+    /// `createAutomation` and `createTimeAutomation`.
+    fileprivate func resolveConditions(_ conditions: [[String: String]], in home: HMHome) throws -> [ResolvedCondition] {
+        var resolved: [ResolvedCondition] = []
+        for cond in conditions {
+            guard let condAccessoryID = cond["accessory"],
+                  let condProperty = cond["property"],
+                  let condValueStr = cond["value"],
+                  !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty
+            else {
+                throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
+            }
+            let condAccessory: HMAccessory
+            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(condAccessoryID) == .orderedSame }) {
+                condAccessory = found
+            } else if let found = findAccessoryByName(condAccessoryID, room: cond["room"], in: home) {
+                condAccessory = found
+            } else {
+                throw ControlError.accessoryNotFound(condAccessoryID)
+            }
+            guard let condChar = findCharacteristicByDescription(on: condAccessory, property: condProperty) else {
+                throw ControlError.invalidArgument("Characteristic '\(condProperty)' not found on '\(condAccessory.name)' for --condition")
+            }
+            guard let parsed = parseActionValue(condValueStr, property: condProperty) else {
+                throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
+            }
+            resolved.append(ResolvedCondition(
+                accessory: condAccessory,
+                characteristic: condChar,
+                property: condProperty,
+                value: parsed,
+                rawValue: condValueStr
+            ))
+        }
+        return resolved
+    }
+
+    /// Build the AND-combined trigger predicate from weekdays + characteristic
+    /// conditions + sun-relative time conditions.
+    ///
+    /// Returns nil if all inputs are empty (no `updatePredicate` call needed).
+    /// Returns the single subpredicate directly if only one is present, or an
+    /// `NSCompoundPredicate(andPredicateWithSubpredicates:)` otherwise. Mirrors
+    /// the structure documented in `createAutomation`'s Step 1b.
+    fileprivate func buildCombinedPredicate(
+        existing: NSPredicate?,
+        weekdays: [Int],
+        resolvedConditions: [ResolvedCondition],
+        timeConditions: [TimeCondition]
+    ) -> NSPredicate? {
+        var subpredicates: [NSPredicate] = []
+        if let existing { subpredicates.append(existing) }
+        if !weekdays.isEmpty {
+            let dayPredicates: [NSPredicate] = weekdays.map { weekday in
+                var dc = DateComponents()
+                dc.weekday = weekday
+                return HMEventTrigger.predicateForEvaluatingTrigger(occurringOn: dc)
+            }
+            subpredicates.append(
+                dayPredicates.count == 1
+                    ? dayPredicates[0]
+                    : NSCompoundPredicate(orPredicateWithSubpredicates: dayPredicates)
+            )
+        }
+        for cond in resolvedConditions {
+            subpredicates.append(
+                HMEventTrigger.predicateForEvaluatingTrigger(
+                    cond.characteristic,
+                    relatedBy: .equalTo,
+                    toValue: cond.value
+                )
+            )
+        }
+        for tc in timeConditions {
+            if let p = tc.predicate() { subpredicates.append(p) }
+        }
+        if subpredicates.isEmpty { return nil }
+        if subpredicates.count == 1 { return subpredicates[0] }
+        return NSCompoundPredicate(andPredicateWithSubpredicates: subpredicates)
+    }
+
+    /// Compose + apply the combined predicate to the trigger. On failure, clean
+    /// up the orphan trigger and inline action set (if applicable) before rethrowing.
+    /// Shared with `createTimeAutomation` so both call sites use the same Step 1b shape.
+    fileprivate func applyCombinedPredicate(
+        to trigger: HMEventTrigger,
+        weekdays: [Int],
+        resolvedConditions: [ResolvedCondition],
+        timeConditions: [TimeCondition],
+        isInlineActionSet: Bool,
+        actionSet: HMActionSet,
+        in home: HMHome
+    ) async throws {
+        let combinedPredicate = buildCombinedPredicate(
+            existing: trigger.predicate,
+            weekdays: weekdays,
+            resolvedConditions: resolvedConditions,
+            timeConditions: timeConditions
+        )
+        guard let combinedPredicate else { return }
+        do {
+            try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
+        } catch {
+            await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
+            throw error
+        }
+    }
+
+    /// Tear down an orphan trigger (and inline action set if we created one)
+    /// after a failed step in `createAutomation` / `createTimeAutomation`.
+    /// Swallows individual removal errors with `try?` so the caller's original
+    /// error is the one that surfaces. Mirrors the cleanup pattern from the
+    /// `e6ffa1b` Step 1b hardening (PR #59) — the action set exists in
+    /// `home.actionSets` from `addActionSet` regardless of whether it's been
+    /// linked to the trigger.
+    ///
+    /// Order matters: remove the trigger FIRST, then the action set. In Step 2/3
+    /// failure paths the action set is already linked to the trigger when cleanup
+    /// runs; HomeKit may reject `removeActionSet` on a linked action set, and
+    /// because the error is swallowed by `try?` the action set would silently
+    /// persist in `home.actionSets`. Removing the trigger first unlinks any
+    /// referenced action sets, so the subsequent `removeActionSet` operates on
+    /// a true orphan and succeeds.
+    fileprivate func cleanupOrphans(
+        trigger: HMEventTrigger,
+        isInlineActionSet: Bool,
+        actionSet: HMActionSet,
+        in home: HMHome
+    ) async {
+        try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            home.removeTrigger(trigger) { err in
+                if let err { continuation.resume(throwing: err) }
+                else { continuation.resume() }
+            }
+        }
+        if isInlineActionSet {
+            try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                home.removeActionSet(actionSet) { err in
+                    if let err { continuation.resume(throwing: err) }
+                    else { continuation.resume() }
+                }
             }
         }
     }

@@ -16,6 +16,119 @@ final class SocketServer: @unchecked Sendable {
         (args[key] as? Bool) ?? (args[key] as? String).map { $0 == "true" } ?? defaultValue
     }
 
+    /// Thrown by `parseWeekdaysArg` when `weekdays` is present but malformed.
+    /// Caller maps the `.message` to `encodeResponse(success: false, error:)`.
+    /// Absent → returns `[]` (does not throw), matching the existing default-empty
+    /// behavior for the optional `--days` flag.
+    fileprivate struct WeekdaysArgError: Error {
+        let message: String
+    }
+
+    /// Thrown by `parseAccessoryRowsArg` when an `actions` / `conditions` arg is
+    /// present but malformed. Caller maps the `.message` to `encodeResponse(success: false, error:)`.
+    /// Absent → returns `nil` (does not throw); empty array → returns `[]`.
+    fileprivate struct AccessoryRowsArgError: Error {
+        let message: String
+    }
+
+    /// Strict parser for `actions` / `conditions` socket args (both have the same
+    /// `accessory:property:value` row shape, with optional `room`). Mirrors the
+    /// `e6ffa1b` `duration_seconds` validation pattern: distinguish absent from
+    /// unparseable, reject `__NSCFBoolean` explicitly so JSON `true`/`false` don't
+    /// silently coerce, and validate every required field is a non-empty `String`.
+    ///
+    /// - Parameters:
+    ///   - raw: the raw arg value (typically `args["actions"]` or `args["conditions"]`).
+    ///   - fieldName: the JSON key name (`"actions"` or `"conditions"`), used in error messages.
+    /// - Returns: parsed `[[String: String]]`, or `nil` if the arg is absent. An
+    ///   explicit empty array round-trips as `[]` so callers can distinguish absent
+    ///   from explicit-empty.
+    /// - Throws: `AccessoryRowsArgError` if the arg is present but not an array,
+    ///   contains a non-dict element, or contains an element missing/empty/non-string
+    ///   `accessory`/`property`/`value` fields, or with non-string field values.
+    fileprivate static func parseAccessoryRowsArg(_ raw: Any?, fieldName: String) throws -> [[String: String]]? {
+        guard let raw else { return nil }
+        guard let array = raw as? [Any] else {
+            throw AccessoryRowsArgError(message: "'\(fieldName)' must be an array of {accessory, property, value} dicts")
+        }
+        var result: [[String: String]] = []
+        result.reserveCapacity(array.count)
+        for (index, element) in array.enumerated() {
+            guard let dict = element as? [String: Any] else {
+                throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)] must be a dict with string 'accessory', 'property', 'value' fields")
+            }
+            var row: [String: String] = [:]
+            for key in ["accessory", "property", "value"] {
+                guard let raw = dict[key] else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)] missing required string field '\(key)'")
+                }
+                // Reject NSNumber-bools and NSNumbers: JSON booleans bridge as
+                // __NSCFBoolean and would silently cast in surprising ways.
+                if let nsNum = raw as? NSNumber, CFGetTypeID(nsNum) == CFBooleanGetTypeID() {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(key) is a boolean; expected a non-empty string")
+                }
+                guard let strVal = raw as? String else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(key) must be a string")
+                }
+                guard !strVal.isEmpty else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(key) must be a non-empty string")
+                }
+                row[key] = strVal
+            }
+            // Optional `room` field — preserve if present and string-valued.
+            if let roomRaw = dict["room"] {
+                if let roomStr = roomRaw as? String, !roomStr.isEmpty {
+                    row["room"] = roomStr
+                } else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].room must be a non-empty string when provided")
+                }
+            }
+            result.append(row)
+        }
+        return result
+    }
+
+    /// Strict parser for the `weekdays` socket arg. Mirrors the `e6ffa1b`
+    /// `duration_seconds` validation pattern: distinguish absent from unparseable, reject
+    /// `__NSCFBoolean` explicitly so JSON `true`/`false` don't coerce to `1`/`0`,
+    /// and validate each element is an `Int` (or `String` parseable to `Int`)
+    /// in the HomeKit weekday range `1...7` (1=Sunday, 7=Saturday).
+    ///
+    /// - Returns: parsed `[Int]` (empty if the arg is absent).
+    /// - Throws: `WeekdaysArgError` if the arg is present but not an array,
+    ///   contains a non-Int / non-Int-parseable-String element, contains an
+    ///   `NSNumber`-bool, or contains an element outside `1...7`.
+    fileprivate static func parseWeekdaysArg(_ raw: Any?) throws -> [Int] {
+        guard let raw else { return [] }
+        guard let array = raw as? [Any] else {
+            throw WeekdaysArgError(message: "'weekdays' must be an array of integers in 1...7 (1=Sunday, 7=Saturday)")
+        }
+        var result: [Int] = []
+        result.reserveCapacity(array.count)
+        for element in array {
+            // Reject JSON booleans (bridged as __NSCFBoolean, which casts to Int 0/1).
+            if let nsNum = element as? NSNumber, CFGetTypeID(nsNum) == CFBooleanGetTypeID() {
+                throw WeekdaysArgError(message: "'weekdays' contains a boolean; expected integers in 1...7")
+            }
+            let parsed: Int?
+            if let intVal = element as? Int {
+                parsed = intVal
+            } else if let strVal = element as? String, let intFromStr = Int(strVal) {
+                parsed = intFromStr
+            } else {
+                parsed = nil
+            }
+            guard let day = parsed else {
+                throw WeekdaysArgError(message: "'weekdays' contains a non-integer value; expected integers in 1...7")
+            }
+            guard (1...7).contains(day) else {
+                throw WeekdaysArgError(message: "'weekdays' value \(day) is out of range; expected integers in 1...7 (1=Sunday, 7=Saturday)")
+            }
+            result.append(day)
+        }
+        return result
+    }
+
     /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources).
     func start() {
         let path = AppConfig.socketPath
@@ -687,14 +800,23 @@ final class SocketServer: @unchecked Sendable {
                 )
 
             case "create_automation":
-                guard let name = args["name"] as? String else {
-                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                guard let name = args["name"] as? String, !name.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    return encodeResponse(success: false, error: "Missing or empty 'name' argument")
                 }
                 guard let accessoryID = args["accessory_id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'accessory_id' argument")
                 }
                 let sceneID = args["scene_id"] as? String
-                let actions = args["actions"] as? [[String: String]]
+                // Strict parse: distinguish absent (nil) from present-but-malformed
+                // (throws) so a misshapen `actions` arg returns a precise error
+                // instead of silently coercing to nil and surfacing the misleading
+                // "Either 'scene_id' or 'actions' array is required".
+                let actions: [[String: String]]?
+                do {
+                    actions = try Self.parseAccessoryRowsArg(args["actions"], fieldName: "actions")
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
                 guard sceneID != nil || (actions != nil && !actions!.isEmpty) else {
                     return encodeResponse(success: false, error: "Either 'scene_id' or 'actions' array is required")
                 }
@@ -705,10 +827,18 @@ final class SocketServer: @unchecked Sendable {
                     ?? 0
                 let serviceIndex = (args["service_index"] as? Int)
                     ?? (args["service_index"] as? String).flatMap(Int.init)
-                let weekdays = (args["weekdays"] as? [Int])
-                    ?? (args["weekdays"] as? [String])?.compactMap(Int.init)
-                    ?? []
-                let conditions = (args["conditions"] as? [[String: String]]) ?? []
+                let weekdays: [Int]
+                do {
+                    weekdays = try Self.parseWeekdaysArg(args["weekdays"])
+                } catch let err as WeekdaysArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
+                let conditions: [[String: String]]
+                do {
+                    conditions = try Self.parseAccessoryRowsArg(args["conditions"], fieldName: "conditions") ?? []
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
                 // Parse sun-relative time predicates. The CLI/MCP layer pre-validates format,
                 // but defensively re-validate here so direct socket clients can't bypass it.
                 let timeAfterRaw = (args["time_after"] as? [String]) ?? []
@@ -765,6 +895,102 @@ final class SocketServer: @unchecked Sendable {
                     conditions: conditions,
                     timeConditions: timeConditions,
                     durationSeconds: durationSeconds,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "create_time_automation":
+                guard let name = args["name"] as? String, !name.isEmpty else {
+                    return encodeResponse(success: false, error: "Missing or empty 'name' argument")
+                }
+                guard let time = args["time"] as? String, !time.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    return encodeResponse(success: false,
+                        error: "Missing or empty 'time' argument. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30').")
+                }
+                // Defense-in-depth: re-validate format here so direct-socket clients
+                // can't bypass the CLI's `validateTimeOfDaySpec` pre-check. The
+                // manager re-runs `TimeSpec.parse` at HomeKit-mutation time (it's the
+                // canonical source of truth); this layer just shortens the round-trip
+                // for bad input. Errors surface the underlying `ParseError.message`
+                // text the manager would have returned, prefixed with `Invalid 'time'
+                // argument:` so socket clients know which arg failed.
+                do {
+                    _ = try TimeSpec.parse(time)
+                } catch let err as TimeSpec.ParseError {
+                    return encodeResponse(success: false, error: "Invalid 'time' argument: \(err.message)")
+                }
+                let sceneID = args["scene_id"] as? String
+                // Strict parse: see `create_automation` for the rationale (distinguish
+                // absent from present-but-malformed so the "Either 'scene_id' or 'actions'…"
+                // error is reserved for the genuinely-missing case).
+                let actions: [[String: String]]?
+                do {
+                    actions = try Self.parseAccessoryRowsArg(args["actions"], fieldName: "actions")
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
+                guard sceneID != nil || (actions != nil && !actions!.isEmpty) else {
+                    return encodeResponse(success: false, error: "Either 'scene_id' or 'actions' array is required")
+                }
+                let weekdays: [Int]
+                do {
+                    weekdays = try Self.parseWeekdaysArg(args["weekdays"])
+                } catch let err as WeekdaysArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
+                let conditions: [[String: String]]
+                do {
+                    conditions = try Self.parseAccessoryRowsArg(args["conditions"], fieldName: "conditions") ?? []
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
+                let timeAfterRaw = (args["time_after"] as? [String]) ?? []
+                let timeBeforeRaw = (args["time_before"] as? [String]) ?? []
+                var timeConditions: [TimeCondition] = []
+                for raw in timeAfterRaw {
+                    guard let tc = TimeCondition.parse(raw, relation: .after) else {
+                        return encodeResponse(success: false,
+                            error: "Invalid 'time_after' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
+                    }
+                    timeConditions.append(tc)
+                }
+                for raw in timeBeforeRaw {
+                    guard let tc = TimeCondition.parse(raw, relation: .before) else {
+                        return encodeResponse(success: false,
+                            error: "Invalid 'time_before' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunrise+15').")
+                    }
+                    timeConditions.append(tc)
+                }
+                // Mirror the e6ffa1b validation pattern: distinguish absent from unparseable,
+                // and reject NSNumber-bool (`true`/`false` in JSON would otherwise become 1/0).
+                let durationSeconds: Int?
+                if let raw = args["duration_seconds"] {
+                    let isBool: Bool = {
+                        guard let nsNum = raw as? NSNumber else { return false }
+                        return CFGetTypeID(nsNum) == CFBooleanGetTypeID()
+                    }()
+                    let parsed: Int? = isBool
+                        ? nil
+                        : ((raw as? Int) ?? (raw as? String).flatMap(Int.init))
+                    guard let parsed, (1...86400).contains(parsed) else {
+                        return encodeResponse(
+                            success: false,
+                            error: "'duration_seconds' must be a positive integer between 1 and 86400 (24 hours)"
+                        )
+                    }
+                    durationSeconds = parsed
+                } else {
+                    durationSeconds = nil
+                }
+                result = try await hk.createTimeAutomation(
+                    name: name,
+                    time: time,
+                    weekdays: weekdays,
+                    conditions: conditions,
+                    timeConditions: timeConditions,
+                    durationSeconds: durationSeconds,
+                    sceneID: sceneID,
+                    actions: actions,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
                 )

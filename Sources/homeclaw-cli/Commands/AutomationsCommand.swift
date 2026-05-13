@@ -9,6 +9,7 @@ struct Automations: ParsableCommand {
             ListAutomations.self,
             GetAutomation.self,
             CreateAutomation.self,
+            CreateTimeAutomation.self,
             DeleteAutomation.self,
             EnableAutomation.self,
             DisableAutomation.self,
@@ -227,74 +228,27 @@ struct CreateAutomation: ParsableCommand {
         if let scene {
             args["scene_id"] = scene
         } else {
-            // Parse inline actions from "accessory:property:value" format
-            var parsedActions: [[String: String]] = []
-            for actionStr in action {
-                let parts = actionStr.split(separator: ":", maxSplits: 2).map(String.init)
-                guard parts.count == 3 else {
-                    throw ValidationError("Invalid action format '\(actionStr)'. Use 'accessory:property:value'")
-                }
-                parsedActions.append([
-                    "accessory": parts[0],
-                    "property": parts[1],
-                    "value": parts[2],
-                ])
-            }
-            args["actions"] = parsedActions
+            // Parse inline actions from "accessory:property:value" format.
+            // Shared with create-time via `parseActionRow` so whitespace handling
+            // matches `--condition` (trim per part, reject empty).
+            args["actions"] = try action.map { try Self.parseActionRow($0) }
         }
 
         if let serviceIndex { args["service_index"] = serviceIndex }
 
         if let days {
-            let dayMap: [String: Int] = [
-                "sun": 1, "sunday": 1,
-                "mon": 2, "monday": 2,
-                "tue": 3, "tuesday": 3,
-                "wed": 4, "wednesday": 4,
-                "thu": 5, "thursday": 5,
-                "fri": 6, "friday": 6,
-                "sat": 7, "saturday": 7,
-            ]
-            var weekdays: [Int] = []
-            for raw in days.split(separator: ",") {
-                let key = raw.trimmingCharacters(in: .whitespaces).lowercased()
-                if let n = dayMap[key] { weekdays.append(n) }
-                else if let n = Int(key), (1...7).contains(n) { weekdays.append(n) }
-                else { throw ValidationError("Invalid day '\(raw)'. Use mon/tue/wed/thu/fri/sat/sun or 1-7 (1=Sun)") }
-            }
-            args["weekdays"] = Array(Swift.Set(weekdays)).sorted()
+            args["weekdays"] = try Self.parseWeekdays(days)
         }
 
         if !condition.isEmpty {
-            // Parse "accessory:property:value" — same shape as --action.
-            // Three required parts; reject malformed input early so the user gets a
-            // clear ValidationError before we touch HomeKit.
-            var parsedConditions: [[String: String]] = []
-            for raw in condition {
-                let parts = raw.split(separator: ":", maxSplits: 2).map(String.init)
-                guard parts.count == 3 else {
-                    throw ValidationError("Invalid --condition '\(raw)'. Use 'accessory:property:value' (note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead).")
-                }
-                let accessoryPart = parts[0].trimmingCharacters(in: .whitespaces)
-                let propertyPart = parts[1].trimmingCharacters(in: .whitespaces)
-                let valuePart = parts[2].trimmingCharacters(in: .whitespaces)
-                guard !accessoryPart.isEmpty, !propertyPart.isEmpty, !valuePart.isEmpty else {
-                    throw ValidationError("Invalid --condition '\(raw)'. Each of accessory/property/value must be non-empty.")
-                }
-                parsedConditions.append([
-                    "accessory": accessoryPart,
-                    "property": propertyPart,
-                    "value": valuePart,
-                ])
-            }
-            args["conditions"] = parsedConditions
+            args["conditions"] = try condition.map { try Self.parseConditionRow($0) }
         }
 
         if !timeAfter.isEmpty {
-            args["time_after"] = try timeAfter.map { try validateTimeSpec($0, flag: "--time-after") }
+            args["time_after"] = try timeAfter.map { try Self.validateTimeSpec($0, flag: "--time-after") }
         }
         if !timeBefore.isEmpty {
-            args["time_before"] = try timeBefore.map { try validateTimeSpec($0, flag: "--time-before") }
+            args["time_before"] = try timeBefore.map { try Self.validateTimeSpec($0, flag: "--time-before") }
         }
 
         if let duration {
@@ -355,7 +309,7 @@ struct CreateAutomation: ParsableCommand {
             } else if let sceneName = result["scene"] as? String {
                 print("  Scene: \(sceneName)")
             }
-            printPredicateFields(from: result)
+            Self.printPredicateFields(from: result)
             if let durationSeconds = result["duration_seconds"] as? Int {
                 print("  Auto-off: \(Self.formatDuration(durationSeconds))")
             }
@@ -368,7 +322,7 @@ struct CreateAutomation: ParsableCommand {
                 print("Created automation '\(autoName)'")
                 print("  \(triggerDescription) → \(sceneName)")
             }
-            printPredicateFields(from: result)
+            Self.printPredicateFields(from: result)
             if let durationSeconds = result["duration_seconds"] as? Int {
                 print("  Auto-off: \(Self.formatDuration(durationSeconds))")
             }
@@ -376,7 +330,7 @@ struct CreateAutomation: ParsableCommand {
     }
 
     /// Format an array of HomeKit weekday numbers (1=Sun ... 7=Sat) as a comma-separated label.
-    private func formatWeekdays(_ weekdays: [Int]) -> String {
+    static func formatWeekdays(_ weekdays: [Int]) -> String {
         let names = ["", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
         return weekdays.compactMap { (1...7).contains($0) ? names[$0] : nil }.joined(separator: ",")
     }
@@ -384,7 +338,7 @@ struct CreateAutomation: ParsableCommand {
     /// Validate a `--time-after` / `--time-before` spec. Format: `<sunrise|sunset>[±N]`.
     /// Mirrors `TimeCondition.parse` in HomeKitManager but throws CLI-shaped errors
     /// pointing at the offending flag. Defence-in-depth: SocketServer re-validates.
-    private func validateTimeSpec(_ raw: String, flag: String) throws -> String {
+    static func validateTimeSpec(_ raw: String, flag: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         let lower = trimmed.lowercased()
         guard !lower.isEmpty else {
@@ -418,9 +372,132 @@ struct CreateAutomation: ParsableCommand {
         return lower
     }
 
+    /// Parse `--days mon,tue,...` (or numeric `1-7` where 1=Sun) into the HomeKit
+    /// weekday-number array. Throws a CLI-shaped error pointing at the offending token.
+    /// Shared by `create` and `create-time` so both surfaces have identical day semantics.
+    static func parseWeekdays(_ days: String) throws -> [Int] {
+        let dayMap: [String: Int] = [
+            "sun": 1, "sunday": 1,
+            "mon": 2, "monday": 2,
+            "tue": 3, "tuesday": 3,
+            "wed": 4, "wednesday": 4,
+            "thu": 5, "thursday": 5,
+            "fri": 6, "friday": 6,
+            "sat": 7, "saturday": 7,
+        ]
+        var weekdays: [Int] = []
+        for raw in days.split(separator: ",") {
+            let key = raw.trimmingCharacters(in: .whitespaces).lowercased()
+            if let n = dayMap[key] { weekdays.append(n) }
+            else if let n = Int(key), (1...7).contains(n) { weekdays.append(n) }
+            else { throw ValidationError("Invalid day '\(raw)'. Use mon/tue/wed/thu/fri/sat/sun or 1-7 (1=Sun)") }
+        }
+        return Array(Swift.Set(weekdays)).sorted()
+    }
+
+    /// Parse a `--condition` row string in `accessory:property:value` shape into the
+    /// dict format the socket layer expects. Throws CLI-shaped ValidationErrors so
+    /// malformed input fails before hitting HomeKit. Shared by `create` and `create-time`.
+    static func parseConditionRow(_ raw: String) throws -> [String: String] {
+        let parts = raw.split(separator: ":", maxSplits: 2).map(String.init)
+        guard parts.count == 3 else {
+            throw ValidationError("Invalid --condition '\(raw)'. Use 'accessory:property:value' (note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead).")
+        }
+        let accessoryPart = parts[0].trimmingCharacters(in: .whitespaces)
+        let propertyPart = parts[1].trimmingCharacters(in: .whitespaces)
+        let valuePart = parts[2].trimmingCharacters(in: .whitespaces)
+        guard !accessoryPart.isEmpty, !propertyPart.isEmpty, !valuePart.isEmpty else {
+            throw ValidationError("Invalid --condition '\(raw)'. Each of accessory/property/value must be non-empty.")
+        }
+        return [
+            "accessory": accessoryPart,
+            "property": propertyPart,
+            "value": valuePart,
+        ]
+    }
+
+    /// Parse a `--action` row string in `accessory:property:value` shape into the
+    /// dict format the socket layer expects. Mirrors `parseConditionRow`'s strictness
+    /// (trim per part, reject empty) so `--action` and `--condition` have identical
+    /// whitespace handling within the same command surface. Shared by `create` and `create-time`.
+    static func parseActionRow(_ raw: String) throws -> [String: String] {
+        let parts = raw.split(separator: ":", maxSplits: 2).map(String.init)
+        guard parts.count == 3 else {
+            throw ValidationError("Invalid action format '\(raw)'. Use 'accessory:property:value' (note: accessory names containing colons are not supported via --action; use the MCP actions array instead).")
+        }
+        let accessoryPart = parts[0].trimmingCharacters(in: .whitespaces)
+        let propertyPart = parts[1].trimmingCharacters(in: .whitespaces)
+        let valuePart = parts[2].trimmingCharacters(in: .whitespaces)
+        guard !accessoryPart.isEmpty, !propertyPart.isEmpty, !valuePart.isEmpty else {
+            throw ValidationError("Invalid action format '\(raw)'. Each of accessory/property/value must be non-empty.")
+        }
+        return [
+            "accessory": accessoryPart,
+            "property": propertyPart,
+            "value": valuePart,
+        ]
+    }
+
+    /// CLI-side mirror of `HomeKitManager.TimeSpec.parse(_:)`. Implements the
+    /// same rules so the CLI fails fast with friendly error messages before the
+    /// socket round-trip. SocketServer re-validates via `TimeSpec.parse`; manager
+    /// is the canonical source of truth. Keep these two in sync.
+    ///
+    /// Accepts: `HH:MM`, `sunrise`, `sunset`, `sunrise±N`, `sunset±N` (where N is
+    /// minutes, ≤ 1440). Returns the canonical lowercase string we pass to the
+    /// socket layer. Strict HH:MM (two digits each) so the user can't ambiguously
+    /// type `12:5` and silently mean `12:50`.
+    ///
+    /// This layer's job is to surface CLI-shaped error messages that say `--time`
+    /// not `time`. The SocketServer re-validates via `TimeSpec.parse` so direct
+    /// socket clients can't bypass the format check, and the manager re-runs
+    /// `TimeSpec.parse` at HomeKit-mutation time as the canonical source of truth.
+    static func validateTimeOfDaySpec(_ raw: String) throws -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            throw ValidationError("--time value is empty. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30').")
+        }
+        let lower = trimmed.lowercased()
+
+        // HH:MM
+        if lower.contains(":") {
+            let parts = lower.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else {
+                throw ValidationError("Invalid --time '\(raw)'. Use 'HH:MM' (e.g. '06:30').")
+            }
+            let hourStr = String(parts[0])
+            let minStr = String(parts[1])
+            // Reject ambiguous widths so '12:5' doesn't silently become '12:50'.
+            guard hourStr.count == 2 else {
+                throw ValidationError("Invalid --time '\(raw)'. Hour must be exactly two digits (e.g. '06:30', not '6:30').")
+            }
+            guard minStr.count == 2 else {
+                throw ValidationError("Invalid --time '\(raw)'. Minute must be exactly two digits (e.g. '06:05', not '06:5').")
+            }
+            guard let hour = Int(hourStr), (0...23).contains(hour) else {
+                throw ValidationError("Invalid --time '\(raw)'. Hour must be 0-23.")
+            }
+            guard let minute = Int(minStr), (0...59).contains(minute) else {
+                throw ValidationError("Invalid --time '\(raw)'. Minute must be 0-59.")
+            }
+            return String(format: "%02d:%02d", hour, minute)
+        }
+
+        // sunrise / sunset (with optional ±N offset). Inline-handle the
+        // unknown-prefix case (e.g. `noon`, `midnight`, `dawn`) with a tailored
+        // error listing all four valid `--time` forms. Once we know the prefix
+        // is `sunrise` or `sunset`, forward to `validateTimeSpec` for offset
+        // parsing — that path's existing error messages are correct for
+        // sun-event-with-bad-offset cases.
+        guard lower.hasPrefix("sunrise") || lower.hasPrefix("sunset") else {
+            throw ValidationError("Invalid --time '\(raw)'. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30').")
+        }
+        return try Self.validateTimeSpec(lower, flag: "--time")
+    }
+
     /// Print the conditions / time conditions / weekdays portion of a create response.
     /// Centralised so dry-run and success paths render identically.
-    private func printPredicateFields(from result: [String: Any]) {
+    static func printPredicateFields(from result: [String: Any]) {
         if let conditions = result["conditions"] as? [[String: String]], !conditions.isEmpty {
             print("  Conditions:")
             for c in conditions {
@@ -441,7 +518,7 @@ struct CreateAutomation: ParsableCommand {
             if autoFilled {
                 print("  Days: every day (auto-filled — iOS 15+ requires weekday gating on time-conditional automations)")
             } else {
-                print("  Days: \(formatWeekdays(weekdays))")
+                print("  Days: \(Self.formatWeekdays(weekdays))")
             }
         }
     }
@@ -458,6 +535,190 @@ struct CreateAutomation: ParsableCommand {
         let hours = minutes / 60
         let remMinutes = minutes % 60
         return remMinutes == 0 ? "\(hours)h" : "\(hours)h\(remMinutes)m"
+    }
+}
+
+// MARK: - Create (time-of-day)
+
+struct CreateTimeAutomation: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "create-time",
+        abstract: "Create an automation triggered by a time of day (clock or sunrise/sunset)",
+        discussion: """
+            Creates a HomeKit automation whose trigger event is a wall-clock time
+            (HMCalendarEvent) or a sun-relative event (HMSignificantTimeEvent).
+
+            --time values:
+              HH:MM        Wall-clock time, 00:00-23:59 (e.g. 06:30, 17:45)
+              sunrise      Fire at sunrise
+              sunset       Fire at sunset
+              sunrise+N    N minutes after sunrise (e.g. sunrise+15)
+              sunrise-N    N minutes before sunrise
+              sunset+N     N minutes after sunset
+              sunset-N     N minutes before sunset (e.g. sunset-30)
+
+            All predicate flags (--days, --condition, --time-after, --time-before,
+            --duration) compose with --time the same way they do on `create`. Without
+            --days, all 7 days are auto-filled — iOS 15+ marks time-conditional
+            automations without weekday gating as "unreliable".
+
+            EXAMPLES
+              # Weekday morning coffee
+              homeclaw-cli automations create-time \\
+                --name "Coffee Maker" --time "06:30" \\
+                --days mon,tue,wed,thu,fri \\
+                --action "Coffee Maker:power:1"
+
+              # Sunset porch light with 1-hour auto-off
+              homeclaw-cli automations create-time \\
+                --name "Porch Lights" --time "sunset-30" \\
+                --duration 3600 \\
+                --scene "Porch On"
+
+              # Sunset + occupancy condition
+              homeclaw-cli automations create-time \\
+                --name "Welcome Home Glow" --time "sunset" \\
+                --condition "Front Door:occupancy_detected:true" \\
+                --days mon,tue,wed,thu,fri \\
+                --scene "Welcome"
+            """
+    )
+
+    @Option(name: .long, help: "Name for the automation")
+    var name: String
+
+    @Option(name: .long, help: "Time of day the automation fires: 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30', 'sunrise+15').")
+    var time: String
+
+    @Option(name: .long, help: "Scene name or UUID to trigger (alternative to --action)")
+    var scene: String?
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use the MCP actions array instead.")
+    var action: [String] = []
+
+    @Option(name: .long, help: "Comma-separated weekdays the automation may fire on: mon,tue,wed,thu,fri,sat,sun (or numeric 1-7 where 1=Sun). When omitted, all 7 days are auto-filled — iOS 15+ requires weekday gating on time-conditional automations.")
+    var days: String?
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:occupancy_detected:true'. Note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead.")
+    var condition: [String] = []
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires after the given event. Format: '<sunrise|sunset>[±N]' where N is minutes. Composes with --time (e.g. --time 06:30 --time-after sunrise means '06:30, but only after sunrise').")
+    var timeAfter: [String] = []
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires before the given event. Same format as --time-after.")
+    var timeBefore: [String] = []
+
+    @Option(name: .long, help: "Auto-revert the trigger's actions after this many seconds via HMDurationEvent (1-86400). Useful for sunset porch lights that should turn off after an hour.")
+    var duration: Int?
+
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
+    @Flag(name: .long, help: "Preview changes without creating")
+    var dryRun = false
+
+    @Flag(name: .long, help: "Output raw JSON")
+    var json = false
+
+    func run() throws {
+        guard scene != nil || !action.isEmpty else {
+            throw ValidationError("Either --scene or --action is required")
+        }
+
+        let canonicalTime = try CreateAutomation.validateTimeOfDaySpec(time)
+
+        var args: [String: Any] = [
+            "name": name,
+            "time": canonicalTime,
+            "dry_run": dryRun,
+        ]
+
+        if let scene {
+            args["scene_id"] = scene
+        } else {
+            args["actions"] = try action.map { try CreateAutomation.parseActionRow($0) }
+        }
+
+        if let days {
+            args["weekdays"] = try CreateAutomation.parseWeekdays(days)
+        }
+
+        if !condition.isEmpty {
+            args["conditions"] = try condition.map { try CreateAutomation.parseConditionRow($0) }
+        }
+
+        if !timeAfter.isEmpty {
+            args["time_after"] = try timeAfter.map { try CreateAutomation.validateTimeSpec($0, flag: "--time-after") }
+        }
+        if !timeBefore.isEmpty {
+            args["time_before"] = try timeBefore.map { try CreateAutomation.validateTimeSpec($0, flag: "--time-before") }
+        }
+
+        if let duration {
+            guard (1...86400).contains(duration) else {
+                throw ValidationError(
+                    "--duration must be a positive integer between 1 and 86400 (24 hours)"
+                )
+            }
+            args["duration_seconds"] = duration
+        }
+
+        if let home { args["home_id"] = home }
+
+        let response = try SocketClient.sendAny(command: "create_time_automation", args: args)
+
+        guard response.success else {
+            throw ValidationError(response.error ?? "Unknown error")
+        }
+
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+
+        let isDryRun = result["dry_run"] as? Bool ?? false
+        let autoName = result["name"] as? String ?? name
+        let resolvedTime = result["time"] as? String ?? canonicalTime
+        let actionCount = result["action_count"] as? Int
+        let isInline = result["inline_actions"] as? Bool ?? false
+
+        if isDryRun {
+            print("DRY RUN — would create automation '\(autoName)'")
+            print("  Trigger: at \(resolvedTime)")
+            if isInline, let actions = result["actions"] as? [[String: String]] {
+                print("  Actions:")
+                for a in actions {
+                    let acc = a["accessory"] ?? "?"
+                    let char = a["characteristic"] ?? "?"
+                    let val = a["value"] ?? "?"
+                    print("    \(acc): \(char) = \(val)")
+                }
+            } else if let sceneName = result["scene"] as? String {
+                print("  Scene: \(sceneName)")
+            }
+            CreateAutomation.printPredicateFields(from: result)
+            if let durationSeconds = result["duration_seconds"] as? Int {
+                print("  Auto-off: \(CreateAutomation.formatDuration(durationSeconds))")
+            }
+        } else {
+            if isInline {
+                print("Created automation '\(autoName)' with \(actionCount ?? 0) inline action(s)")
+                print("  at \(resolvedTime) → \(actionCount ?? 0) action(s)")
+            } else {
+                let sceneName = result["scene"] as? String ?? "?"
+                print("Created automation '\(autoName)'")
+                print("  at \(resolvedTime) → \(sceneName)")
+            }
+            CreateAutomation.printPredicateFields(from: result)
+            if let durationSeconds = result["duration_seconds"] as? Int {
+                print("  Auto-off: \(CreateAutomation.formatDuration(durationSeconds))")
+            }
+        }
     }
 }
 

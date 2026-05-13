@@ -21015,13 +21015,13 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) with either a scene reference or inline actions, delete automations, or enable/disable them. For button triggers use press_type; for other triggers use characteristic + trigger_value. Use duration_seconds at create time to auto-revert actions after N seconds (e.g. motion-triggered lights that turn off again after a delay). List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "timer" | "unknown") and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype.',
+    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "timer" | "unknown") and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype.',
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["list", "get", "create", "delete", "enable", "disable"],
+          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable"],
           description: "Action to perform. Default: list"
         },
         home_id: {
@@ -21034,15 +21034,19 @@ var tools = [
         },
         name: {
           type: "string",
-          description: "Automation name (create action)"
+          description: "Automation name (create / create_time actions)"
         },
         accessory_id: {
           type: "string",
           description: "Trigger accessory UUID or name (create action)"
         },
+        time: {
+          type: "string",
+          description: 'Time of day the automation fires (create_time action, required). Format: "HH:MM" for a wall-clock time (e.g. "06:30", "17:45"; both fields must be zero-padded two digits \u2014 "6:30" is rejected), "sunrise"/"sunset" for sun-relative events, or "<sun-event>\xB1N" where N is minutes (e.g. "sunset-30", "sunrise+15"). Offsets larger than 1440 minutes (24h) are rejected. Implemented as HMCalendarEvent for HH:MM and HMSignificantTimeEvent for sunrise/sunset. All other predicate flags (weekdays, conditions, time_after, time_before, duration_seconds) compose with `time` the same way they do on the create action \u2014 `time` is the trigger event, those are the gating predicates.'
+        },
         scene_id: {
           type: "string",
-          description: "Scene UUID or name to trigger (create action). Alternative to actions."
+          description: "Scene UUID or name to trigger (create / create_time actions). Alternative to actions."
         },
         actions: {
           type: "array",
@@ -21056,7 +21060,7 @@ var tools = [
             },
             required: ["accessory", "property", "value"]
           },
-          description: "Inline actions for the automation (create action). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
+          description: "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
         },
         press_type: {
           type: "number",
@@ -21078,7 +21082,7 @@ var tools = [
         weekdays: {
           type: "array",
           items: { type: "number", enum: [1, 2, 3, 4, 5, 6, 7] },
-          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, the automation fires every day. iOS 15+ marks time-conditional automations without weekday gating as "unreliable", so pass weekdays explicitly when combining with time-of-day conditions. If you set time_after/time_before but omit weekdays, HomeClaw auto-fills all 7 days and sets `weekdays_auto_filled: true` in the response. (create action)'
+          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, characteristic-trigger automations (create) fire every day; time-of-day automations (create_time) auto-fill all 7 days since iOS 15+ marks time-conditional automations without weekday gating as "unreliable". Setting time_after/time_before on create with no weekdays also auto-fills all 7 days and sets `weekdays_auto_filled: true` in the response. (create / create_time actions)'
         },
         conditions: {
           type: "array",
@@ -21092,27 +21096,27 @@ var tools = [
             },
             required: ["accessory", "property", "value"]
           },
-          description: "Extra characteristic predicates ANDed into the trigger predicate (create action). The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create action)"
+          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)"
         },
         time_after: {
           type: "array",
           items: { type: "string" },
-          description: 'Sun-relative time predicates ANDed into the trigger so it only fires after the given event (create action). Format: "<sunrise|sunset>[\xB1N]" where N is minutes (e.g., "sunset-30", "sunrise+15", "sunset"). Offsets larger than 1440 minutes are rejected. Combine with time_before for a window (e.g., time_after=["sunset-30"] + time_before=["sunrise+15"] for "between dusk and dawn"). When set without explicit weekdays, HomeClaw auto-fills all 7 days; see the weekdays field. (create action)'
+          description: 'Sun-relative time predicates ANDed into the trigger so it only fires after the given event. Format: "<sunrise|sunset>[\xB1N]" where N is minutes (e.g., "sunset-30", "sunrise+15", "sunset"). Offsets larger than 1440 minutes are rejected. Combine with time_before for a window (e.g., time_after=["sunset-30"] + time_before=["sunrise+15"] for "between dusk and dawn"). On create_time these are gating predicates on top of the `time` trigger event, not the trigger itself. When set without explicit weekdays, HomeClaw auto-fills all 7 days; see the weekdays field. (create / create_time actions)'
         },
         time_before: {
           type: "array",
           items: { type: "string" },
-          description: "Sun-relative time predicates ANDed into the trigger so it only fires before the given event (create action). Same format and offset rules as time_after. (create action)"
+          description: "Sun-relative time predicates ANDed into the trigger so it only fires before the given event. Same format and offset rules as time_after. (create / create_time actions)"
         },
         duration_seconds: {
           type: "integer",
           minimum: 1,
           maximum: 86400,
-          description: "Auto-revert the trigger's actions after this many seconds (1-86400, i.e. up to 24 hours). Implemented as an HMDurationEvent attached to the trigger's endEvents \u2014 HomeKit handles the revert natively, no follow-up automation required. Common use case: motion-triggered lights that should turn off again after a delay (e.g. `duration_seconds: 300` for a 5-minute hold). (create action)"
+          description: "Auto-revert the trigger's actions after this many seconds (1-86400, i.e. up to 24 hours). Implemented as an HMDurationEvent attached to the trigger's endEvents \u2014 HomeKit handles the revert natively, no follow-up automation required. Common use cases: motion-triggered lights that should turn off again after a delay (e.g. `duration_seconds: 300` for a 5-minute hold), or sunset porch lights that should turn off after an hour. (create / create_time actions)"
         },
         dry_run: {
           type: "boolean",
-          description: "Preview changes without applying (create/delete actions)"
+          description: "Preview changes without applying (create/create_time/delete actions)"
         }
       },
       required: ["action"]
@@ -21314,6 +21318,43 @@ async function handleAutomations(args) {
       const socketArgs = { id: args.id };
       if (args.home_id) socketArgs.home_id = args.home_id;
       return sendCommand("get_automation", socketArgs);
+    }
+    case "create_time": {
+      if (!args.name) throw new Error("name is required for create_time action");
+      if (!args.time || typeof args.time !== "string" || args.time.trim() === "") {
+        throw new Error("time is required for create_time action. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>\xB1<minutes>' (e.g. 'sunset-30').");
+      }
+      if (!args.scene_id && (!args.actions || args.actions.length === 0)) {
+        throw new Error("Either scene_id or actions array is required for create_time action");
+      }
+      const socketArgs = {
+        name: args.name,
+        time: args.time
+      };
+      if (args.scene_id) socketArgs.scene_id = args.scene_id;
+      if (args.actions) socketArgs.actions = args.actions;
+      if (Array.isArray(args.weekdays) && args.weekdays.length > 0) {
+        socketArgs.weekdays = args.weekdays;
+      }
+      if (Array.isArray(args.conditions) && args.conditions.length > 0) {
+        socketArgs.conditions = args.conditions;
+      }
+      if (Array.isArray(args.time_after) && args.time_after.length > 0) {
+        socketArgs.time_after = args.time_after;
+      }
+      if (Array.isArray(args.time_before) && args.time_before.length > 0) {
+        socketArgs.time_before = args.time_before;
+      }
+      if (args.duration_seconds != null) {
+        const d = args.duration_seconds;
+        if (!Number.isInteger(d) || d < 1 || d > 86400) {
+          throw new Error("duration_seconds must be an integer between 1 and 86400 (24 hours)");
+        }
+        socketArgs.duration_seconds = String(d);
+      }
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.dry_run) socketArgs.dry_run = "true";
+      return sendCommand("create_time_automation", socketArgs);
     }
     case "create": {
       if (!args.name) throw new Error("name is required for create action");
