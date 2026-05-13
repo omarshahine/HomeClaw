@@ -1189,17 +1189,31 @@ final class HomeKitManager: NSObject, Observable {
                 }
             }
 
-            for resolved in resolvedActions {
-                let writeAction = HMCharacteristicWriteAction(
-                    characteristic: resolved.characteristic,
-                    targetValue: resolved.value as! NSCopying & NSObjectProtocol
-                )
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    newActionSet.addAction(writeAction) { error in
-                        if let error { continuation.resume(throwing: error) }
+            do {
+                for resolved in resolvedActions {
+                    let writeAction = HMCharacteristicWriteAction(
+                        characteristic: resolved.characteristic,
+                        targetValue: resolved.value as! NSCopying & NSObjectProtocol
+                    )
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        newActionSet.addAction(writeAction) { error in
+                            if let error { continuation.resume(throwing: error) }
+                            else { continuation.resume() }
+                        }
+                    }
+                }
+            } catch {
+                // Cleanup on partial-add failure: the action set already lives in
+                // `home.actionSets` from `addActionSet`, but the trigger hasn't been
+                // created yet, so a leaked orphan scene tile would persist in the
+                // Home app. Remove it before rethrowing.
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeActionSet(newActionSet) { err in
+                        if let err { continuation.resume(throwing: err) }
                         else { continuation.resume() }
                     }
                 }
+                throw error
             }
 
             actionSet = newActionSet
@@ -1481,17 +1495,31 @@ final class HomeKitManager: NSObject, Observable {
                 }
             }
 
-            for resolved in resolvedActions {
-                let writeAction = HMCharacteristicWriteAction(
-                    characteristic: resolved.characteristic,
-                    targetValue: resolved.value as! NSCopying & NSObjectProtocol
-                )
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    newActionSet.addAction(writeAction) { error in
-                        if let error { continuation.resume(throwing: error) }
+            do {
+                for resolved in resolvedActions {
+                    let writeAction = HMCharacteristicWriteAction(
+                        characteristic: resolved.characteristic,
+                        targetValue: resolved.value as! NSCopying & NSObjectProtocol
+                    )
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        newActionSet.addAction(writeAction) { error in
+                            if let error { continuation.resume(throwing: error) }
+                            else { continuation.resume() }
+                        }
+                    }
+                }
+            } catch {
+                // Cleanup on partial-add failure: the action set already lives in
+                // `home.actionSets` from `addActionSet`, but the trigger hasn't been
+                // created yet, so a leaked orphan scene tile would persist in the
+                // Home app. Remove it before rethrowing.
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    home.removeActionSet(newActionSet) { err in
+                        if let err { continuation.resume(throwing: err) }
                         else { continuation.resume() }
                     }
                 }
+                throw error
             }
 
             actionSet = newActionSet

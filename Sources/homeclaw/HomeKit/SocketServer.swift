@@ -129,6 +129,48 @@ final class SocketServer: @unchecked Sendable {
         return result
     }
 
+    /// Thrown by `parseStringArrayArg` when a `time_after` / `time_before` arg is
+    /// present but malformed. Caller maps the `.message` to `encodeResponse(success: false, error:)`.
+    /// Absent → returns `[]` (does not throw), matching the existing default-empty
+    /// behavior for the optional time-predicate flags.
+    fileprivate struct StringArrayArgError: Error {
+        let message: String
+    }
+
+    /// Strict parser for the `time_after` / `time_before` socket args. Mirrors the
+    /// `e6ffa1b` pattern: distinguish absent (returns `[]`) from present-but-malformed
+    /// (throws) so a misshapen value returns a precise error instead of silently
+    /// dropping the predicate and creating an automation without the requested gate.
+    ///
+    /// - Parameters:
+    ///   - raw: the raw arg value (typically `args["time_after"]` or `args["time_before"]`).
+    ///   - fieldName: the JSON key name, used in error messages.
+    /// - Returns: parsed `[String]`, or `[]` if the arg is absent.
+    /// - Throws: `StringArrayArgError` if the arg is present but not an array of strings.
+    fileprivate static func parseStringArrayArg(_ raw: Any?, fieldName: String) throws -> [String] {
+        guard let raw else { return [] }
+        guard let array = raw as? [Any] else {
+            throw StringArrayArgError(message: "'\(fieldName)' must be an array of strings (e.g. 'sunset-30', 'sunrise+15').")
+        }
+        var result: [String] = []
+        result.reserveCapacity(array.count)
+        for (index, element) in array.enumerated() {
+            // Reject JSON booleans explicitly (bridged as __NSCFBoolean which would
+            // otherwise cast to neither String nor a useful type).
+            if let nsNum = element as? NSNumber, CFGetTypeID(nsNum) == CFBooleanGetTypeID() {
+                throw StringArrayArgError(message: "'\(fieldName)'[\(index)] is a boolean; expected a non-empty string")
+            }
+            guard let strVal = element as? String else {
+                throw StringArrayArgError(message: "'\(fieldName)'[\(index)] must be a string")
+            }
+            guard !strVal.isEmpty else {
+                throw StringArrayArgError(message: "'\(fieldName)'[\(index)] must be a non-empty string")
+            }
+            result.append(strVal)
+        }
+        return result
+    }
+
     /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources).
     func start() {
         let path = AppConfig.socketPath
@@ -841,8 +883,14 @@ final class SocketServer: @unchecked Sendable {
                 }
                 // Parse sun-relative time predicates. The CLI/MCP layer pre-validates format,
                 // but defensively re-validate here so direct socket clients can't bypass it.
-                let timeAfterRaw = (args["time_after"] as? [String]) ?? []
-                let timeBeforeRaw = (args["time_before"] as? [String]) ?? []
+                let timeAfterRaw: [String]
+                let timeBeforeRaw: [String]
+                do {
+                    timeAfterRaw = try Self.parseStringArrayArg(args["time_after"], fieldName: "time_after")
+                    timeBeforeRaw = try Self.parseStringArrayArg(args["time_before"], fieldName: "time_before")
+                } catch let err as StringArrayArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
                 var timeConditions: [TimeCondition] = []
                 for raw in timeAfterRaw {
                     guard let tc = TimeCondition.parse(raw, relation: .after) else {
@@ -900,7 +948,7 @@ final class SocketServer: @unchecked Sendable {
                 )
 
             case "create_time_automation":
-                guard let name = args["name"] as? String, !name.isEmpty else {
+                guard let name = args["name"] as? String, !name.trimmingCharacters(in: .whitespaces).isEmpty else {
                     return encodeResponse(success: false, error: "Missing or empty 'name' argument")
                 }
                 guard let time = args["time"] as? String, !time.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -944,8 +992,14 @@ final class SocketServer: @unchecked Sendable {
                 } catch let err as AccessoryRowsArgError {
                     return encodeResponse(success: false, error: err.message)
                 }
-                let timeAfterRaw = (args["time_after"] as? [String]) ?? []
-                let timeBeforeRaw = (args["time_before"] as? [String]) ?? []
+                let timeAfterRaw: [String]
+                let timeBeforeRaw: [String]
+                do {
+                    timeAfterRaw = try Self.parseStringArrayArg(args["time_after"], fieldName: "time_after")
+                    timeBeforeRaw = try Self.parseStringArrayArg(args["time_before"], fieldName: "time_before")
+                } catch let err as StringArrayArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
                 var timeConditions: [TimeCondition] = []
                 for raw in timeAfterRaw {
                     guard let tc = TimeCondition.parse(raw, relation: .after) else {
