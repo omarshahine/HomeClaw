@@ -1679,11 +1679,23 @@ final class HomeKitManager: NSObject, Observable {
             guard !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty else {
                 throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
             }
-            let condRoom: String? = {
-                guard let raw = cond["room"] else { return nil }
+            // Defense-in-depth against a whitespace-only `room` slipping past the
+            // socket parser. Silently dropping such a value via `trim-then-nil`
+            // would widen the lookup to all rooms and could bind the condition to
+            // the wrong same-named accessory in homes with duplicates. Fail loud
+            // instead. (The socket parser `parseAccessoryRowsArg` is the primary
+            // gate; this guards any other entry point that might construct
+            // condition dicts directly.)
+            let condRoom: String?
+            if let raw = cond["room"] {
                 let t = raw.trimmingCharacters(in: .whitespaces)
-                return t.isEmpty ? nil : t
-            }()
+                guard !t.isEmpty else {
+                    throw ControlError.invalidArgument("Condition 'room' must be non-empty when provided")
+                }
+                condRoom = t
+            } else {
+                condRoom = nil
+            }
             let condAccessory: HMAccessory
             if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(condAccessoryID) == .orderedSame }) {
                 condAccessory = found

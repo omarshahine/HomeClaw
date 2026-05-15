@@ -101,13 +101,23 @@ final class SocketServer: @unchecked Sendable {
                 }
                 row[key] = strVal
             }
-            // Optional `room` field — preserve if present and string-valued.
+            // Optional `room` field — trim and reject whitespace-only at intake.
+            // A bare `.isEmpty` check would accept `"   "` and let it propagate to
+            // the resolver, where the trim-to-nil pattern would silently drop the
+            // explicit-but-malformed scope and widen the accessory lookup to all
+            // rooms — potentially binding the condition to the wrong same-named
+            // accessory. Matches the discipline applied to the required
+            // accessory/property/value fields and to the add-condition socket
+            // handler's `room` validation.
             if let roomRaw = dict["room"] {
-                if let roomStr = roomRaw as? String, !roomStr.isEmpty {
-                    row["room"] = roomStr
-                } else {
+                guard let roomStr = roomRaw as? String else {
                     throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].room must be a non-empty string when provided")
                 }
+                let trimmed = roomStr.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].room must be a non-empty string when provided")
+                }
+                row["room"] = trimmed
             }
             result.append(row)
         }
