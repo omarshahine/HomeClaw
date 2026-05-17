@@ -835,17 +835,26 @@ final class HomeKitManager: NSObject, Observable {
 
         try await homeKitAsync { accessory.updateName(newName, completionHandler: $0) }
 
-        // The Home app tile title reads HMService.name, not HMAccessory.name.
-        // Manufacturers don't always set isPrimaryService correctly, so rename
-        // every service except the internal Accessory Information service. This
-        // matches what the Home app does when renamed through its UI.
+        // The Home app tile title reads HMService.name on the primary service,
+        // not HMAccessory.name. Rename the primary service if marked; fall back
+        // to the first functional service (excluding AccessoryInformation and
+        // Battery, which are supporting services). Renaming ONE service
+        // preserves distinct per-service names on multi-button accessories
+        // ("Button 1", "Button 2") while still keeping the Home app tile title
+        // in sync.
         var renamedServices: [String] = []
-        for service in accessory.services where service.serviceType != HMServiceTypeAccessoryInformation {
+        let serviceToRename = accessory.services.first(where: { $0.isPrimaryService })
+            ?? accessory.services.first(where: {
+                $0.serviceType != HMServiceTypeAccessoryInformation
+                && $0.serviceType != HMServiceTypeBattery
+            })
+        if let service = serviceToRename {
+            let oldServiceName = service.name
             do {
                 try await homeKitAsync { service.updateName(newName, completionHandler: $0) }
-                renamedServices.append(service.name)
+                renamedServices.append(oldServiceName)
             } catch {
-                AppLogger.homekit.warning("[\(home.name)] Service rename failed on '\(newName)': \(error.localizedDescription)")
+                AppLogger.homekit.warning("[\(home.name)] Service rename failed for '\(oldServiceName)' (type \(service.serviceType)): \(error.localizedDescription)")
             }
         }
 
