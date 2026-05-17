@@ -1,5 +1,16 @@
 import HomeKit
 
+private extension NSExpression {
+    /// `NSExpression.constantValue` is only defined on the constant-expression
+    /// subclass and throws ObjC NSInvalidArgumentException on any other type
+    /// (notably NSFunctionExpression). HomeKit returns function expressions in
+    /// some automation predicates, which crashes the whole process. Guard with
+    /// expressionType.
+    var safeConstantValue: Any? {
+        expressionType == .constantValue ? constantValue : nil
+    }
+}
+
 /// Converts HomeKit objects into serializable dictionaries for MCP tool responses and CLI output.
 enum AccessoryModel {
     /// Summary of a home.
@@ -471,7 +482,7 @@ enum AccessoryModel {
                 var weekdays: [Int] = []
                 for inner in (orCompound.subpredicates as? [NSPredicate] ?? []) {
                     if let cmp = inner as? NSComparisonPredicate,
-                       let dc = (cmp.rightExpression.constantValue ?? cmp.leftExpression.constantValue) as? DateComponents,
+                       let dc = (cmp.rightExpression.safeConstantValue ?? cmp.leftExpression.safeConstantValue) as? DateComponents,
                        let wd = dc.weekday
                     {
                         weekdays.append(wd)
@@ -490,7 +501,7 @@ enum AccessoryModel {
 
             // Single-weekday predicate (rare — produced when --days has exactly one entry).
             if let cmp = sub as? NSComparisonPredicate,
-               let dc = (cmp.rightExpression.constantValue ?? cmp.leftExpression.constantValue) as? DateComponents,
+               let dc = (cmp.rightExpression.safeConstantValue ?? cmp.leftExpression.safeConstantValue) as? DateComponents,
                let wd = dc.weekday
             {
                 let names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
@@ -503,7 +514,7 @@ enum AccessoryModel {
             // when not 0/representable; the field is always present for shape stability.
             if let cmp = sub as? NSComparisonPredicate {
                 for expr in [cmp.leftExpression, cmp.rightExpression] {
-                    if let eventStr = expr.constantValue as? String,
+                    if let eventStr = expr.safeConstantValue as? String,
                        (eventStr == HMSignificantEvent.sunrise.rawValue || eventStr == HMSignificantEvent.sunset.rawValue)
                     {
                         let eventName = eventStr == HMSignificantEvent.sunrise.rawValue ? "sunrise" : "sunset"
@@ -527,9 +538,9 @@ enum AccessoryModel {
             var foundValue: String?
             for innerSub in inner {
                 guard let cmp = innerSub as? NSComparisonPredicate else { continue }
-                if let hmChar = cmp.rightExpression.constantValue as? HMCharacteristic {
+                if let hmChar = cmp.rightExpression.safeConstantValue as? HMCharacteristic {
                     foundChar = hmChar
-                } else if let val = cmp.rightExpression.constantValue {
+                } else if let val = cmp.rightExpression.safeConstantValue {
                     foundValue = "\(val)"
                 }
             }
@@ -600,8 +611,8 @@ enum AccessoryModel {
         let comparisons = subs.compactMap { $0 as? NSComparisonPredicate }
         guard comparisons.count == 2 else { return false }
         return comparisons.contains { cmp in
-            cmp.rightExpression.constantValue is HMCharacteristic
-                || cmp.leftExpression.constantValue is HMCharacteristic
+            cmp.rightExpression.safeConstantValue is HMCharacteristic
+                || cmp.leftExpression.safeConstantValue is HMCharacteristic
         }
     }
 

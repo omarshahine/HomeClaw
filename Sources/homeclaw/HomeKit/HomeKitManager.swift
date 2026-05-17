@@ -564,6 +564,26 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Scenes
 
+    /// Returns every action set reachable in a home — both the user-visible ones
+    /// in `home.actionSets` and the trigger-owned ones reachable only through
+    /// `trigger.actionSets`. Trigger-owned sets are created when the Home app
+    /// (or any client using the private `HMActionSetTypeTriggerOwned` selector)
+    /// makes a per-button automation action set — they don't show as scene tiles
+    /// and `home.actionSets` doesn't enumerate them.
+    private func allActionSets(in home: HMHome) -> [(actionSet: HMActionSet, hidden: Bool)] {
+        var seen: Set<UUID> = []
+        var result: [(HMActionSet, Bool)] = []
+        for set in home.actionSets where seen.insert(set.uniqueIdentifier).inserted {
+            result.append((set, false))
+        }
+        for trigger in home.triggers {
+            for set in trigger.actionSets where seen.insert(set.uniqueIdentifier).inserted {
+                result.append((set, true))
+            }
+        }
+        return result
+    }
+
     func listScenes(homeID: String? = nil) async -> [[String: Any]] {
         await waitForReady()
         if Self.isDemoMode {
@@ -575,9 +595,10 @@ final class HomeKitManager: NSObject, Observable {
         }
         let targetHomes = filteredHomes(homeID: homeID)
         return targetHomes.flatMap { home in
-            home.actionSets.map { actionSet in
+            allActionSets(in: home).map { (actionSet, hidden) in
                 var dict = AccessoryModel.sceneSummary(actionSet)
                 dict["home_name"] = home.name
+                if hidden { dict["hidden"] = true }
                 return dict
             }
         }
@@ -634,22 +655,24 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
         let targetHomes = filteredHomes(homeID: homeID)
 
-        // Try by UUID first
+        // Try by UUID first (across visible + trigger-owned hidden action sets)
         for home in targetHomes {
-            if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+            for (actionSet, hidden) in allActionSets(in: home)
+                where actionSet.uniqueIdentifier.uuidString == id {
                 var detail = AccessoryModel.sceneDetail(actionSet)
                 detail["home_name"] = home.name
+                if hidden { detail["hidden"] = true }
                 return detail
             }
         }
 
         // Try by name
         for home in targetHomes {
-            if let actionSet = home.actionSets.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
-            }) {
+            for (actionSet, hidden) in allActionSets(in: home)
+                where actionSet.name.localizedCaseInsensitiveCompare(id) == .orderedSame {
                 var detail = AccessoryModel.sceneDetail(actionSet)
                 detail["home_name"] = home.name
+                if hidden { detail["hidden"] = true }
                 return detail
             }
         }
@@ -812,8 +835,28 @@ final class HomeKitManager: NSObject, Observable {
 
         try await homeKitAsync { accessory.updateName(newName, completionHandler: $0) }
 
-        AppLogger.homekit.info("[\(home.name)] Renamed '\(oldName)' → '\(newName)'")
-        return ["old_name": oldName, "new_name": newName, "home": home.name, "dry_run": false] as [String: Any]
+        // The Home app tile title reads HMService.name, not HMAccessory.name.
+        // Manufacturers don't always set isPrimaryService correctly, so rename
+        // every service except the internal Accessory Information service. This
+        // matches what the Home app does when renamed through its UI.
+        var renamedServices: [String] = []
+        for service in accessory.services where service.serviceType != HMServiceTypeAccessoryInformation {
+            do {
+                try await homeKitAsync { service.updateName(newName, completionHandler: $0) }
+                renamedServices.append(service.name)
+            } catch {
+                AppLogger.homekit.warning("[\(home.name)] Service rename failed on '\(newName)': \(error.localizedDescription)")
+            }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Renamed '\(oldName)' → '\(newName)' (services: \(renamedServices.count))")
+        return [
+            "old_name": oldName,
+            "new_name": newName,
+            "home": home.name,
+            "services_renamed": renamedServices.count,
+            "dry_run": false
+        ] as [String: Any]
     }
 
     // MARK: - Room Management
@@ -1141,7 +1184,7 @@ final class HomeKitManager: NSObject, Observable {
             triggerLabel = AccessoryModel.pressTypeName(pressType)
         }
 
-        // Resolve the action set: either find an existing scene or create an inline one
+        // Resolve the action set: either find an existing scene or create an inline one.
         let actionSet: HMActionSet
         let isInlineActionSet: Bool
 
@@ -1177,9 +1220,10 @@ final class HomeKitManager: NSObject, Observable {
                 return attachPredicateFields(result)
             }
 
-            // Action sets created via the public API are always visible in the Home app
-            // (Apple uses a private API for hidden automation-only action sets).
-            // Use the automation name so the scene tile is recognizable.
+            // Inline action sets are always visible in the Home app's Scenes list —
+            // Apple's private SPI (`com.apple.homekit.private-spi-access`) is
+            // required to create trigger-owned (hidden) action sets, and is not
+            // available to third-party apps. See docs/PRIVATE_API.md.
             let inlineSetName = name
             let newActionSet = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMActionSet, Error>) in
                 home.addActionSet(withName: inlineSetName) { actionSet, error in
