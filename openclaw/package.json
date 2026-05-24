@@ -65,7 +65,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rimraf dist || rm -rf dist",
+    "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build",
     "plugin:check": "npm run build && npx --yes @openclaw/plugin-inspector inspect --no-openclaw",
     "plugin:ci": "npm run build && npx --yes @openclaw/plugin-inspector ci --no-openclaw --runtime --mock-sdk --allow-execute"

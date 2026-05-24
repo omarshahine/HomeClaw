@@ -146,21 +146,31 @@ targets:
             DEST="${APP}/Resources/openclaw"
             mkdir -p "${DEST}"
 
-            # Build TypeScript -> dist/index.js (idempotent; node_modules required)
-            if [ -d "${PROJECT_DIR}/node_modules" ] && command -v node &>/dev/null; then
-              ( cd "${OPENCLAW}" && "${PROJECT_DIR}/node_modules/.bin/tsc" -p tsconfig.json ) \
-                || echo "warning: openclaw tsc build failed; dist/ may be stale"
+            # Build TypeScript -> dist/index.js. Resolve tsc in order:
+            # plugin's own node_modules, root (hoisted), then npx fallback.
+            # Hard-fail if dist/index.js is missing — shipping without it
+            # reintroduces the install failure from issue #63.
+            if [ -x "${OPENCLAW}/node_modules/.bin/tsc" ]; then
+              TSC="${OPENCLAW}/node_modules/.bin/tsc"
+            elif [ -x "${PROJECT_DIR}/node_modules/.bin/tsc" ]; then
+              TSC="${PROJECT_DIR}/node_modules/.bin/tsc"
+            elif command -v npx &>/dev/null; then
+              TSC="npx --yes -p typescript tsc"
             else
-              echo "warning: node_modules missing — run \`npm install\` to ship openclaw/dist"
+              echo "error: cannot resolve tsc; install typescript via \`npm install\`" >&2
+              exit 1
+            fi
+            ( cd "${OPENCLAW}" && $TSC -p tsconfig.json )
+            if [ ! -f "${OPENCLAW}/dist/index.js" ]; then
+              echo "error: openclaw/dist/index.js not produced — refusing to ship broken plugin" >&2
+              exit 1
             fi
 
             cp "${OPENCLAW}/openclaw.plugin.json" "${DEST}/"
             cp "${OPENCLAW}/package.json" "${DEST}/"
             cp -R "${OPENCLAW}/src" "${DEST}/src"
             cp -R "${OPENCLAW}/skills" "${DEST}/skills"
-            if [ -d "${OPENCLAW}/dist" ]; then
-              cp -R "${OPENCLAW}/dist" "${DEST}/dist"
-            fi
+            cp -R "${OPENCLAW}/dist" "${DEST}/dist"
             if [ -d "${OPENCLAW}/agents" ]; then
               cp -R "${OPENCLAW}/agents" "${DEST}/agents"
             fi
