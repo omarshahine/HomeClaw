@@ -1,12 +1,12 @@
 {
   "name": "homeclaw",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "OpenClaw plugin for HomeKit smart home control \u2014 lights, locks, thermostats, and scenes",
   "type": "module",
   "openclaw": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ],
     "compat": {
       "pluginApi": ">=2026.3.23"
@@ -15,7 +15,10 @@
       "openclawVersion": "2026.4.15"
     }
   },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
+    "dist/",
     "src/",
     "skills/",
     "agents/",
@@ -61,7 +64,10 @@
     "openclaw": ">=2026.3.23"
   },
   "scripts": {
-    "plugin:check": "npx --yes @openclaw/plugin-inspector inspect --no-openclaw",
-    "plugin:ci": "npx --yes @openclaw/plugin-inspector ci --no-openclaw --runtime --mock-sdk --allow-execute"
+    "build": "tsc -p tsconfig.json",
+    "clean": "rimraf dist || rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build",
+    "plugin:check": "npm run build && npx --yes @openclaw/plugin-inspector inspect --no-openclaw",
+    "plugin:ci": "npm run build && npx --yes @openclaw/plugin-inspector ci --no-openclaw --runtime --mock-sdk --allow-execute"
   }
 }

@@ -138,16 +138,34 @@ targets:
           fi
 
           # Copy openclaw plugin files into Contents/Resources/openclaw/
+          # The OpenClaw installer (issue #63) requires compiled JS at
+          # ./dist/index.js when installing from a packaged path — TS source
+          # is only accepted from a source checkout. Build dist/ before copy.
           OPENCLAW="${PROJECT_DIR}/openclaw"
           if [ -d "${OPENCLAW}" ]; then
             DEST="${APP}/Resources/openclaw"
             mkdir -p "${DEST}"
+
+            # Build TypeScript -> dist/index.js (idempotent; node_modules required)
+            if [ -d "${PROJECT_DIR}/node_modules" ] && command -v node &>/dev/null; then
+              ( cd "${OPENCLAW}" && "${PROJECT_DIR}/node_modules/.bin/tsc" -p tsconfig.json ) \
+                || echo "warning: openclaw tsc build failed; dist/ may be stale"
+            else
+              echo "warning: node_modules missing — run \`npm install\` to ship openclaw/dist"
+            fi
+
             cp "${OPENCLAW}/openclaw.plugin.json" "${DEST}/"
             cp "${OPENCLAW}/package.json" "${DEST}/"
             cp -R "${OPENCLAW}/src" "${DEST}/src"
             cp -R "${OPENCLAW}/skills" "${DEST}/skills"
+            if [ -d "${OPENCLAW}/dist" ]; then
+              cp -R "${OPENCLAW}/dist" "${DEST}/dist"
+            fi
             if [ -d "${OPENCLAW}/agents" ]; then
               cp -R "${OPENCLAW}/agents" "${DEST}/agents"
+            fi
+            if [ -d "${OPENCLAW}/hooks" ]; then
+              cp -R "${OPENCLAW}/hooks" "${DEST}/hooks"
             fi
           fi
         basedOnDependencyAnalysis: false
