@@ -1,6 +1,6 @@
 {
   "name": "homeclaw",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
   "author": {
     "name": "Omar Shahine"
