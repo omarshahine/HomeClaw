@@ -2983,18 +2983,21 @@ final class HomeKitManager: NSObject, Observable {
     /// their action sets) before `home.accessories` fully populates, and it does not
     /// always re-fire `homeManagerDidUpdateHomes` once they do — leaving the menu
     /// showing scenes but no devices. When we become ready with zero accessories,
-    /// re-check and re-push a few times so the menu fills in on its own. No-ops (and
-    /// stops) as soon as accessories appear, so a genuinely empty home costs nothing.
+    /// re-warm and re-push a few times so the menu fills in on its own, then stop
+    /// once accessories appear. The push happens BEFORE the hydrated check so the
+    /// tick that observes hydration also refreshes the menu — otherwise the menu
+    /// would stay on the empty snapshot until some other refresh path ran. A
+    /// genuinely empty home just pushes the same empty snapshot a few times and stops.
     private func scheduleAccessoryHydrationRetry() {
         hydrationRetryTask?.cancel()
         hydrationRetryTask = Task { @MainActor in
             for delaySeconds in [2, 4, 8] {
                 try? await Task.sleep(for: .seconds(delaySeconds))
                 if Task.isCancelled { return }
-                guard totalAccessoryCount == 0 else { return }  // hydrated — done
-                AppLogger.homekit.info("Accessory hydration retry: still 0 accessories, re-warming + re-pushing menu")
+                AppLogger.homekit.info("Accessory hydration retry: re-warming + re-pushing menu (\(self.totalAccessoryCount) accessory(ies))")
                 await warmCache()
                 scheduleMenuDataPush()
+                if totalAccessoryCount > 0 { return }  // hydrated and pushed — done
             }
         }
     }
@@ -3283,8 +3286,10 @@ extension HomeKitManager: HMHomeManagerDelegate {
             scheduleMenuDataPush()
 
             // If homes are present but accessories haven't hydrated yet, keep
-            // re-checking so the menu fills in without needing a restart.
-            if self.totalAccessoryCount == 0 {
+            // re-checking so the menu fills in without needing a restart. Guard on
+            // !homes.isEmpty so an early "no homes yet" callback doesn't spin the
+            // retry for 14s against an empty cache.
+            if !self.homes.isEmpty && self.totalAccessoryCount == 0 {
                 scheduleAccessoryHydrationRetry()
             }
         }

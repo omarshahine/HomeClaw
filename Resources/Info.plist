@@ -26,8 +26,6 @@
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSAppSleepDisabled</key>
-	<true/>
 	<key>NSHomeKitUsageDescription</key>
 	<string>HomeClaw needs access to your HomeKit accessories to expose them via MCP and CLI.</string>
 	<key>UIApplicationSceneManifest</key>

@@ -257,6 +257,7 @@ final class SocketServer: @unchecked Sendable {
         guard bindResult == 0 else {
             AppLogger.socket.error("Failed to bind socket (errno: \(errno))")
             close(serverFD)
+            serverFD = -1
             return
         }
 
@@ -264,6 +265,7 @@ final class SocketServer: @unchecked Sendable {
         guard listen(serverFD, 16) == 0 else {
             AppLogger.socket.error("Failed to listen on socket (errno: \(errno))")
             close(serverFD)
+            serverFD = -1
             return
         }
 

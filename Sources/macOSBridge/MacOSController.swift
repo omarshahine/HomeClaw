@@ -299,7 +299,11 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             (room["accessories"] as? [[String: Any]] ?? []).contains(where: { isAccessoryVisible($0) })
         }
         if !anyAccessoryShown {
-            menu.addItem(.separator())
+            // Avoid a double rule: the scenes section may already have added a trailing
+            // separator (this is the exact late-hydration case — scenes present, no rooms).
+            if !(menu.items.last?.isSeparatorItem ?? false) {
+                menu.addItem(.separator())
+            }
             let item = NSMenuItem(
                 title: "No accessories loaded \u{2014} Refresh",
                 action: #selector(refreshTapped),
