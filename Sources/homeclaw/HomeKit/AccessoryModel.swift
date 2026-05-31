@@ -625,15 +625,19 @@ enum AccessoryModel {
                    dc.weekday == nil, let hour = dc.hour
                 {
                     let clock = String(format: "%02d:%02d", hour, dc.minute ?? 0)
-                    let op = cmp.predicateOperatorType
+                    // `now <op> dc` (constant on the right) vs `dc <op> now` (constant on the
+                    // left) invert the meaning of an ordered comparison. Operators outside the
+                    // known set fall through to `unknownCondition` rather than guessing.
                     let relation: String
-                    if op == .equalTo {
+                    switch cmp.predicateOperatorType {
+                    case .equalTo:
                         relation = "at"
-                    } else {
-                        // `now <op> dc` (constant on the right) vs `dc <op> now` (constant on the
-                        // left) invert the meaning of a less-than comparison.
-                        let isLess = op == .lessThan || op == .lessThanOrEqualTo
-                        relation = (constOnRight ? isLess : !isLess) ? "before" : "after"
+                    case .lessThan, .lessThanOrEqualTo:
+                        relation = constOnRight ? "before" : "after"
+                    case .greaterThan, .greaterThanOrEqualTo:
+                        relation = constOnRight ? "after" : "before"
+                    default:
+                        return unknownCondition(sub)
                     }
                     return [
                         "type": "time",
