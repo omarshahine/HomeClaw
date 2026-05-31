@@ -10,11 +10,20 @@ import Foundation
 ///
 /// Reference: https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/
 func shouldOutputJSON(_ flag: Bool) -> Bool {
+    shouldOutputJSON(
+        flag,
+        outputFormatEnv: ProcessInfo.processInfo.environment["OUTPUT_FORMAT"],
+        stdoutIsTTY: isatty(STDOUT_FILENO) != 0
+    )
+}
+
+/// Pure decision core, split out so the precedence (flag > env > TTY) can be
+/// unit-tested without touching the real environment or stdout. The
+/// process-reading wrapper above is the only production caller.
+func shouldOutputJSON(_ flag: Bool, outputFormatEnv: String?, stdoutIsTTY: Bool) -> Bool {
     if flag { return true }
-    if ProcessInfo.processInfo.environment["OUTPUT_FORMAT"]?.lowercased() == "json" {
-        return true
-    }
-    return isatty(STDOUT_FILENO) == 0
+    if outputFormatEnv?.lowercased() == "json" { return true }
+    return !stdoutIsTTY
 }
 
 /// Parses a duration shorthand (e.g. "1h", "30m", "2d") or ISO 8601 timestamp
