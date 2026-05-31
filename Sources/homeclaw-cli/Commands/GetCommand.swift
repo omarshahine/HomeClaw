@@ -44,6 +44,9 @@ struct Get: ParsableCommand {
         print("  Category:  \(category)")
         print("  Room:      \(room)")
         print("  Reachable: \(reachable)")
+        if detail["refreshed"] as? Bool == false {
+            print("  Note:      --no-refresh — static + last-known values only (dynamic state not live-read)")
+        }
 
         if let services = detail["services"] as? [[String: Any]] {
             for service in services {

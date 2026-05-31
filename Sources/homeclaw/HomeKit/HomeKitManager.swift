@@ -459,7 +459,17 @@ final class HomeKitManager: NSObject, Observable {
             await readAllValues(for: accessory)
             updateCacheFromAccessory(accessory)
         }
-        return AccessoryModel.accessoryDetail(accessory)
+        var detail = AccessoryModel.accessoryDetail(accessory)
+        if !refresh {
+            // Signal that dynamic characteristic values were NOT live-read this
+            // call. Without a refresh, never-read characteristics serialize as
+            // null/last-known, so callers must not mistake a stale/unread value
+            // for a fresh one. Static metadata (serial/model/firmware) is always
+            // accurate. Only emitted on the opt-in path, so default output is
+            // unchanged.
+            detail["refreshed"] = false
+        }
+        return detail
     }
 
     // MARK: - Control
