@@ -3,18 +3,14 @@ import HomeKit
 // MARK: - Time Condition
 
 /// A before/after sun-relative time predicate for automation triggers.
-/// Composes via `HMEventTrigger.predicateForEvaluatingTrigger(occurringBefore/After:applyingOffset:)`.
+/// Composes via `HMEventTrigger.predicateForEvaluatingTrigger(occurringBefore/After:)` with an
+/// `HMSignificantTimeEvent` carrying the optional offset.
 ///
 /// Format: `<sun-event>[±<minutes>]` where sun-event is `sunrise` or `sunset` and the offset
 /// is signed minutes (e.g. `sunset-30`, `sunrise+15`, `sunset`).
 struct TimeCondition {
     enum Relation { case after, before }
-    enum Event {
-        case sunrise, sunset
-        var significantEvent: String {
-            self == .sunrise ? HMSignificantEvent.sunrise.rawValue : HMSignificantEvent.sunset.rawValue
-        }
-    }
+    enum Event { case sunrise, sunset }
 
     let relation: Relation
     let event: Event
@@ -32,21 +28,16 @@ struct TimeCondition {
             dc.minute = offsetMinutes
             offset = dc
         }
-        // The string-form predicate APIs are marked deprecated in Catalyst 13.1+, but the
-        // replacement (HMSignificantTimeEvent-taking variant) is not exposed to Swift —
-        // only the DateComponents and HMPresenceEvent overloads bridge. Mirror the existing
-        // weekday predicate construction (`occurringOn:`) which is in the same boat.
+        // The non-deprecated predicate APIs take an HMSignificantTimeEvent (which carries
+        // the offset) rather than a significant-event string + separate offset. Both are
+        // available on macCatalyst 14.0+.
+        let sigEvent = event == .sunrise ? HMSignificantEvent.sunrise : HMSignificantEvent.sunset
+        let significantEvent = HMSignificantTimeEvent(significantEvent: sigEvent, offset: offset)
         switch relation {
         case .after:
-            return HMEventTrigger.predicateForEvaluatingTrigger(
-                occurringAfter: event.significantEvent,
-                applyingOffset: offset
-            )
+            return HMEventTrigger.predicateForEvaluatingTriggerOccurring(afterSignificantEvent: significantEvent)
         case .before:
-            return HMEventTrigger.predicateForEvaluatingTrigger(
-                occurringBefore: event.significantEvent,
-                applyingOffset: offset
-            )
+            return HMEventTrigger.predicateForEvaluatingTriggerOccurring(beforeSignificantEvent: significantEvent)
         }
     }
 
