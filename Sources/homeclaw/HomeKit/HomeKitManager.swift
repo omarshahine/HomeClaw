@@ -680,6 +680,12 @@ final class HomeKitManager: NSObject, Observable {
 
     func getScene(id: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let detail = DemoFixtures.getScene(id: id) else {
+                throw ControlError.accessoryNotFound("Scene not found: \(id)")
+            }
+            return detail
+        }
         let targetHomes = filteredHomes(homeID: homeID)
 
         // Try by UUID first (across visible + trigger-owned hidden action sets)
@@ -711,6 +717,12 @@ final class HomeKitManager: NSObject, Observable {
 
     func deleteScene(name: String, homeName: String? = nil, dryRun: Bool = false) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.deleteScene(name: name, dryRun: dryRun) else {
+                throw ControlError.accessoryNotFound("Scene not found: \(name)")
+            }
+            return result
+        }
         let targetHomes = filteredHomes(homeID: homeName)
 
         for home in targetHomes {
@@ -750,6 +762,7 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.assignRooms(assignments: assignments, dryRun: dryRun) }
         let home = try resolveHome(homeID: homeName)
 
         var assigned = 0
@@ -850,6 +863,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.renameAccessory(id: id, newName: newName, dryRun: dryRun) else {
+                throw ControlError.accessoryNotFound(id)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         guard let accessory = findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
@@ -903,6 +922,7 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.createRoom(name: name, dryRun: dryRun) }
         let home = try resolveHome(homeID: homeID)
 
         if dryRun {
@@ -928,6 +948,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.renameRoom(id: roomID, newName: newName, dryRun: dryRun) else {
+                throw ControlError.roomNotFound(roomID)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         guard let room = findRoom(id: roomID, in: home) else {
             throw ControlError.roomNotFound(roomID)
@@ -950,6 +976,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.removeRoom(id: roomID, dryRun: dryRun) else {
+                throw ControlError.roomNotFound(roomID)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         guard let room = findRoom(id: roomID, in: home) else {
             throw ControlError.roomNotFound(roomID)
@@ -975,6 +1007,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.removeAccessory(id: id, dryRun: dryRun) else {
+                throw ControlError.accessoryNotFound(id)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         guard let accessory = findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
@@ -1000,6 +1038,7 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.createZone(name: name, dryRun: dryRun) }
         let home = try resolveHome(homeID: homeID)
 
         if dryRun {
@@ -1024,6 +1063,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.removeZone(id: zoneID, dryRun: dryRun) else {
+                throw ControlError.zoneNotFound(zoneID)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         guard let zone = findZone(id: zoneID, in: home) else {
             throw ControlError.zoneNotFound(zoneID)
@@ -1048,6 +1093,13 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            switch DemoFixtures.addRoomToZone(roomID: roomID, zoneID: zoneID, dryRun: dryRun) {
+            case .ok(let result): return result
+            case .roomNotFound: throw ControlError.roomNotFound(roomID)
+            case .zoneNotFound: throw ControlError.zoneNotFound(zoneID)
+            }
+        }
         let home = try resolveHome(homeID: homeID)
         guard let room = findRoom(id: roomID, in: home) else {
             throw ControlError.roomNotFound(roomID)
@@ -1073,6 +1125,13 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            switch DemoFixtures.removeRoomFromZone(roomID: roomID, zoneID: zoneID, dryRun: dryRun) {
+            case .ok(let result): return result
+            case .roomNotFound: throw ControlError.roomNotFound(roomID)
+            case .zoneNotFound: throw ControlError.zoneNotFound(zoneID)
+            }
+        }
         let home = try resolveHome(homeID: homeID)
         guard let room = findRoom(id: roomID, in: home) else {
             throw ControlError.roomNotFound(roomID)
@@ -1091,10 +1150,37 @@ final class HomeKitManager: NSObject, Observable {
         return ["room": room.name, "zone": zone.name, "home": home.name, "dry_run": false] as [String: Any]
     }
 
+    // MARK: - Demo-mode helpers
+
+    /// Render `TimeCondition`s back into the `sunrise±N` / `sunset±N` echo strings
+    /// the create-automation response uses, split by relation. Mirrors the echo
+    /// logic in `createAutomation` so demo responses match the real shape.
+    static func demoTimeEchoes(_ timeConditions: [TimeCondition]) -> (after: [String], before: [String]) {
+        func render(_ tc: TimeCondition) -> String {
+            let ev = tc.event == .sunrise ? "sunrise" : "sunset"
+            if tc.offsetMinutes == 0 { return ev }
+            return tc.offsetMinutes > 0 ? "\(ev)+\(tc.offsetMinutes)" : "\(ev)\(tc.offsetMinutes)"
+        }
+        return (
+            timeConditions.filter { $0.relation == .after }.map(render),
+            timeConditions.filter { $0.relation == .before }.map(render)
+        )
+    }
+
+    /// Map a numeric press type (0/1/2) to its human label, for demo automations.
+    static func demoPressLabel(_ pressType: Int) -> String {
+        switch pressType {
+        case 1: return "double"
+        case 2: return "long"
+        default: return "single"
+        }
+    }
+
     // MARK: - Automations (HMEventTrigger)
 
     func listAutomations(homeID: String? = nil) async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.listAutomations() }
         let targetHomes = filteredHomes(homeID: homeID)
         var results: [[String: Any]] = []
         for home in targetHomes {
@@ -1109,6 +1195,12 @@ final class HomeKitManager: NSObject, Observable {
 
     func getAutomation(id: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let detail = DemoFixtures.getAutomation(id: id) else {
+                throw ControlError.triggerNotFound(id)
+            }
+            return detail
+        }
         let home = try resolveHome(homeID: homeID)
         if let trigger = findEventTrigger(id: id, in: home) {
             return AccessoryModel.automationDetail(trigger, homeName: home.name, home: home)
@@ -1136,6 +1228,33 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            let weekdaysAutoFilled = !timeConditions.isEmpty && weekdays.isEmpty
+            let effectiveWeekdays = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
+            let echoes = Self.demoTimeEchoes(timeConditions)
+            let isButton = characteristic == nil
+            guard let result = DemoFixtures.createAutomation(
+                name: name,
+                accessoryID: accessoryID,
+                triggerType: isButton ? "button" : "characteristic",
+                pressType: isButton ? Self.demoPressLabel(pressType) : nil,
+                serviceIndex: serviceIndex,
+                characteristic: characteristic,
+                triggerValue: triggerValue,
+                sceneName: sceneID,
+                actions: actions,
+                conditions: conditions,
+                timeAfter: echoes.after,
+                timeBefore: echoes.before,
+                weekdays: effectiveWeekdays,
+                weekdaysAutoFilled: weekdaysAutoFilled,
+                durationSeconds: durationSeconds,
+                dryRun: dryRun
+            ) else {
+                throw ControlError.accessoryNotFound(accessoryID)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
 
         guard let accessory = findAccessory(id: accessoryID, homeID: homeID) else {
@@ -1476,6 +1595,24 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            let weekdaysAutoFilled = weekdays.isEmpty
+            let effectiveWeekdays = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
+            let echoes = Self.demoTimeEchoes(timeConditions)
+            return DemoFixtures.createTimeAutomation(
+                name: name,
+                time: time,
+                sceneName: sceneID,
+                actions: actions,
+                conditions: conditions,
+                timeAfter: echoes.after,
+                timeBefore: echoes.before,
+                weekdays: effectiveWeekdays,
+                weekdaysAutoFilled: weekdaysAutoFilled,
+                durationSeconds: durationSeconds,
+                dryRun: dryRun
+            )
+        }
         let home = try resolveHome(homeID: homeID)
 
         // Parse the trigger time-of-day spec. Maps the strict-string ParseError
@@ -1957,6 +2094,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.deleteAutomation(id: id, dryRun: dryRun) else {
+                throw ControlError.triggerNotFound(id)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         // Use findAnyTrigger so HMTimerTrigger (Apple Home native time automations)
         // can also be deleted, not just HMEventTrigger.
@@ -1997,6 +2140,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.updateAutomation(id: id, addScenes: addSceneIDs, removeScenes: removeSceneIDs, dryRun: dryRun) else {
+                throw ControlError.triggerNotFound(id)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         guard let trigger = findTrigger(id: id, in: home) else {
             throw ControlError.triggerNotFound(id)
@@ -2138,6 +2287,13 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            switch DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: value, dryRun: dryRun) {
+            case .ok(let result): return result
+            case .automationNotFound: throw ControlError.triggerNotFound(id)
+            case .accessoryNotFound: throw ControlError.accessoryNotFound(accessoryID)
+            }
+        }
         let home = try resolveHome(homeID: homeID)
 
         // Only HMEventTrigger supports updatePredicate. Reject other trigger subclasses
@@ -2280,6 +2436,12 @@ final class HomeKitManager: NSObject, Observable {
         homeID: String? = nil
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.enableAutomation(id: id, enabled: enabled) else {
+                throw ControlError.triggerNotFound(id)
+            }
+            return result
+        }
         let home = try resolveHome(homeID: homeID)
         // Use findAnyTrigger so HMTimerTrigger automations can also be enabled/disabled.
         guard let trigger = findAnyTrigger(id: id, in: home) else {
@@ -2449,6 +2611,7 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.importScene(name: name, actions: actions, dryRun: dryRun) }
         let targetHomes = filteredHomes(homeID: homeName)
         guard let home = targetHomes.first else {
             throw ControlError.accessoryNotFound("No home found")
@@ -2557,6 +2720,12 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode {
+            guard let result = DemoFixtures.updateScene(id: nameOrID, name: nil, actions: actions, dryRun: dryRun) else {
+                throw ControlError.accessoryNotFound("Scene not found: \(nameOrID)")
+            }
+            return result
+        }
         let targetHomes = filteredHomes(homeID: homeName)
 
         var foundActionSet: HMActionSet?
@@ -2804,6 +2973,7 @@ final class HomeKitManager: NSObject, Observable {
 
     func searchAccessories(query: String, category: String? = nil, homeID: String? = nil) async -> [[String: Any]] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.searchAccessories(query: query, category: category) }
         let lowercasedQuery = query.lowercased()
         let targetHomes = filteredHomes(homeID: homeID)
 
@@ -2875,6 +3045,7 @@ final class HomeKitManager: NSObject, Observable {
 
     func deviceMap(homeID: String? = nil) async -> [String: Any] {
         await waitForReady()
+        if Self.isDemoMode { return DemoFixtures.deviceMap() }
         let targetHomes = filteredHomes(homeID: homeID)
         let result = DeviceMap.buildMap(homes: targetHomes, filter: filterAccessories, cache: cache)
         if cache.isStale { Task { await warmCache() } }

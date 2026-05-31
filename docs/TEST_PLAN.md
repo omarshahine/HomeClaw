@@ -1,16 +1,28 @@
 # HomeClaw Test Plan
 
-Status: P1 implemented (2026-05-31). Phases P2–P5 remain proposed.
+Status: P1 + P2 implemented (2026-05-31). Phases P3–P5 remain proposed.
 
-**Progress:** P1 (L1 parse/format + pure-helper tests) landed — the suite grew from
-60 to 158 tests across 7 files, all running in the existing `swift test` CI job with
-no signing infrastructure. New files: `CommandParsingTests` (parse contract for all
-30 commands), `SharedHelperTests` (`validateInput`, `parseSinceValue`,
-`shouldOutputJSON`), `AutomationsHelperTests` (`formatWeekdays`, `validateTimeSpec`),
-`TUINodeTests` (AccessoryNode display logic + `Ui.parseRooms`, guarded `#if !APP_STORE`).
-One behavior-preserving refactor: `shouldOutputJSON` gained an injectable core so the
-flag/env/TTY precedence is testable. P2 (extend `DemoFixtures`) is the next unlock for
-L3 end-to-end coverage.
+**P1 — L1 parse/format + pure-helper tests (landed).** The suite grew from 60 to 158
+tests across 7 files, all running in the existing `swift test` CI job with no signing
+infrastructure. New files: `CommandParsingTests` (parse contract for all 30 commands),
+`SharedHelperTests` (`validateInput`, `parseSinceValue`, `shouldOutputJSON`),
+`AutomationsHelperTests` (`formatWeekdays`, `validateTimeSpec`), `TUINodeTests`
+(AccessoryNode display logic + `Ui.parseRooms`, guarded `#if !APP_STORE`). One
+behavior-preserving refactor: `shouldOutputJSON` gained an injectable core so the
+flag/env/TTY precedence is testable.
+
+**P2 — DemoFixtures full mock backend (landed).** `DemoFixtures` is now a mutable
+in-memory model (rooms, accessories, scenes, zones, automations) with `resetState()`,
+and **22 new `isDemoMode` branches** were added to `HomeKitManager` so the previously
+HomeKit-only commands work end-to-end against deterministic data: scene get/import/
+update/delete, room create/rename/remove + assign, accessory rename/remove, zone
+create/remove + room membership, search, device-map, and all 8 automation commands
+(list/get/create/create-time/delete/enable/disable/rewire/add-condition). Every branch
+is gated behind `isDemoMode`, so production behavior is untouched. Verified two ways:
+(1) the Catalyst app compiles clean under Swift 6 strict concurrency with the new
+branches; (2) a standalone harness drives the `DemoFixtures` model through 47
+read/CRUD/not-found/reset/JSON-serializability checks — all pass. This unlocks **P3**
+(the end-to-end harness that boots the demo app and drives the CLI over the socket).
 
 ## 1. Why this exists
 
