@@ -3141,18 +3141,23 @@ final class HomeKitManager: NSObject, Observable {
         // first resumes the continuation; the loser is a no-op.
         let guardBox = ReadResumeGuard()
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            // Cancellable timer leg: when HomeKit responds before the deadline we
+            // cancel it, so a large readAllValues loop (50–100+ characteristics)
+            // doesn't leave a burst of no-op main-thread wakeups draining 6s later.
+            let timerWork = DispatchWorkItem {
+                guard guardBox.claim() else { return }
+                logger.warning("readValue timed out after \(timeout, format: .fixed(precision: 0))s; serving last-known value")
+                continuation.resume()
+            }
             characteristic.readValue { error in
+                timerWork.cancel()
                 guard guardBox.claim() else { return }
                 if let error {
                     logger.debug("readValue failed: \(error.localizedDescription, privacy: .public)")
                 }
                 continuation.resume()
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
-                guard guardBox.claim() else { return }
-                logger.warning("readValue timed out after \(timeout, format: .fixed(precision: 0))s; serving last-known value")
-                continuation.resume()
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timerWork)
         }
     }
 
