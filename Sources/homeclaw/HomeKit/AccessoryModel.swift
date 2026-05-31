@@ -333,6 +333,34 @@ enum AccessoryModel {
                 ] as [String: Any]
             }
         }
+        // Characteristic threshold-range event ("light level ≤ 15 lux"). This is a
+        // distinct HMEvent subclass — NOT an HMCharacteristicEvent — so the cast above
+        // fails for it and it must be handled separately (see #65).
+        else if let thresholdEvent = trigger.events.first as? HMCharacteristicThresholdRangeEvent,
+                let accessory = thresholdEvent.characteristic.service?.accessory
+        {
+            let charType = thresholdEvent.characteristic.characteristicType
+            let charName = CharacteristicMapper.name(for: charType)
+            let range = thresholdEvent.thresholdRange
+            dict["event_summary"] = "\(accessory.name) \(charName) \(thresholdRangeSummary(range, charType: charType))"
+            dict["trigger_type"] = "threshold"
+
+            var thresholdInfo: [String: Any] = [
+                "accessory_id": accessory.uniqueIdentifier.uuidString,
+                "accessory_name": accessory.name,
+                "characteristic": charName,
+            ]
+            if let minValue = range.minValue {
+                thresholdInfo["min"] = CharacteristicMapper.formatValue(minValue, for: charType)
+            }
+            if let maxValue = range.maxValue {
+                thresholdInfo["max"] = CharacteristicMapper.formatValue(maxValue, for: charType)
+            }
+            if let idx = serviceIndexForCharacteristic(thresholdEvent.characteristic) {
+                thresholdInfo["service_index"] = idx
+            }
+            dict["trigger_info"] = thresholdInfo
+        }
         // Calendar event (HH:MM time-of-day on an HMEventTrigger).
         else if let calEvent = trigger.events.first as? HMCalendarEvent {
             let dc = calEvent.fireDateComponents
@@ -390,44 +418,95 @@ enum AccessoryModel {
         return "\(seconds)s"
     }
 
+    /// Human-readable summary of a threshold range (HMCharacteristicThresholdRangeEvent).
+    /// HomeKit encodes one-sided thresholds ("≤ 15 lux") with a single bound and bounded
+    /// ranges with both. Values are formatted through CharacteristicMapper for the type.
+    private static func thresholdRangeSummary(_ range: HMNumberRange, charType: String) -> String {
+        let minStr = range.minValue.map { CharacteristicMapper.formatValue($0, for: charType) }
+        let maxStr = range.maxValue.map { CharacteristicMapper.formatValue($0, for: charType) }
+        switch (minStr, maxStr) {
+        case let (min?, max?): return "between \(min) and \(max)"
+        case let (min?, nil): return "≥ \(min)"
+        case let (nil, max?): return "≤ \(max)"
+        default: return "in range"
+        }
+    }
+
     /// Detailed view of an automation including all events and linked scenes.
     /// Pass `home` to resolve characteristic-condition predicates to accessory names.
     static func automationDetail(_ trigger: HMEventTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
         var detail = automationSummary(trigger, homeName: homeName)
 
         let events: [[String: Any]] = trigger.events.compactMap { event in
-            guard let charEvent = event as? HMCharacteristicEvent<NSCopying> else { return nil }
-            let characteristic = charEvent.characteristic
-            let charType = characteristic.characteristicType
-            let accessory = characteristic.service?.accessory
-            let isButton = charType == HMCharacteristicTypeInputEvent
+            // Characteristic equality / button event.
+            if let charEvent = event as? HMCharacteristicEvent<NSCopying> {
+                let characteristic = charEvent.characteristic
+                let charType = characteristic.characteristicType
+                let accessory = characteristic.service?.accessory
+                let isButton = charType == HMCharacteristicTypeInputEvent
 
-            var eventDict: [String: Any] = [
-                "type": "characteristic",
-                "characteristic": CharacteristicMapper.name(for: charType),
-                "trigger_type": isButton ? "button" : "characteristic",
-            ]
-            if let accessory {
-                eventDict["accessory"] = accessory.name
-                eventDict["accessory_id"] = accessory.uniqueIdentifier.uuidString
-            }
-            if let service = characteristic.service {
-                eventDict["service_type"] = CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType
-            }
-            if isButton {
-                let pressValue = (charEvent.triggerValue as? NSNumber)?.intValue
-                if let pressValue {
-                    eventDict["trigger_value"] = pressValue
-                    eventDict["press_type"] = pressTypeName(pressValue)
+                var eventDict: [String: Any] = [
+                    "type": "characteristic",
+                    "characteristic": CharacteristicMapper.name(for: charType),
+                    "trigger_type": isButton ? "button" : "characteristic",
+                ]
+                if let accessory {
+                    eventDict["accessory"] = accessory.name
+                    eventDict["accessory_id"] = accessory.uniqueIdentifier.uuidString
                 }
-            } else {
-                let formattedValue = CharacteristicMapper.formatValue(charEvent.triggerValue, for: charType)
-                eventDict["trigger_value"] = formattedValue
+                if let service = characteristic.service {
+                    eventDict["service_type"] = CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType
+                }
+                if isButton {
+                    let pressValue = (charEvent.triggerValue as? NSNumber)?.intValue
+                    if let pressValue {
+                        eventDict["trigger_value"] = pressValue
+                        eventDict["press_type"] = pressTypeName(pressValue)
+                    }
+                } else {
+                    let formattedValue = CharacteristicMapper.formatValue(charEvent.triggerValue, for: charType)
+                    eventDict["trigger_value"] = formattedValue
+                }
+                if let idx = serviceIndexForCharacteristic(characteristic) {
+                    eventDict["service_index"] = idx
+                }
+                return eventDict
             }
-            if let idx = serviceIndexForCharacteristic(characteristic) {
-                eventDict["service_index"] = idx
+
+            // Characteristic threshold-range event ("light level ≤ 15 lux"). Distinct
+            // HMEvent subclass from HMCharacteristicEvent — handled explicitly (see #65).
+            if let thresholdEvent = event as? HMCharacteristicThresholdRangeEvent {
+                let characteristic = thresholdEvent.characteristic
+                let charType = characteristic.characteristicType
+                let accessory = characteristic.service?.accessory
+                let range = thresholdEvent.thresholdRange
+
+                var eventDict: [String: Any] = [
+                    "type": "threshold",
+                    "characteristic": CharacteristicMapper.name(for: charType),
+                    "trigger_type": "threshold",
+                    "summary": thresholdRangeSummary(range, charType: charType),
+                ]
+                if let accessory {
+                    eventDict["accessory"] = accessory.name
+                    eventDict["accessory_id"] = accessory.uniqueIdentifier.uuidString
+                }
+                if let service = characteristic.service {
+                    eventDict["service_type"] = CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType
+                }
+                if let minValue = range.minValue {
+                    eventDict["min"] = CharacteristicMapper.formatValue(minValue, for: charType)
+                }
+                if let maxValue = range.maxValue {
+                    eventDict["max"] = CharacteristicMapper.formatValue(maxValue, for: charType)
+                }
+                if let idx = serviceIndexForCharacteristic(characteristic) {
+                    eventDict["service_index"] = idx
+                }
+                return eventDict
             }
-            return eventDict
+
+            return nil
         }
         detail["events"] = events
 
@@ -454,10 +533,11 @@ enum AccessoryModel {
     // MARK: - Predicate decoding
 
     /// Decode an automation trigger's NSPredicate into a structured array of conditions.
-    /// Returns dicts with a `type` discriminator: `characteristic`, `weekdays`, `time`, or
-    /// `unknown`. Each kind has its own field shape (see inline comments). Pass `home` to
-    /// resolve characteristic UUIDs to accessory names; without it characteristic conditions
-    /// fall back to a `characteristic_id` lookup hint.
+    /// Returns dicts with a `type` discriminator: `characteristic`, `weekdays`, `time`
+    /// (sun-relative or clock time-of-day), or `unknown` (a real conjunct we couldn't decode,
+    /// surfaced as a placeholder rather than dropped). Each kind has its own field shape (see
+    /// inline comments). Pass `home` to resolve characteristic UUIDs to accessory names;
+    /// without it characteristic conditions fall back to a `characteristic_id` lookup hint.
     static func extractConditions(_ predicate: NSPredicate?, in home: HMHome?) -> [[String: Any]] {
         guard let predicate else { return [] }
 
@@ -530,9 +610,43 @@ enum AccessoryModel {
                 }
             }
 
+            // Time-of-day predicate ("Time is between 16:00 and 00:00", or before/after a
+            // clock time). Home-app conditions compare the current time against a
+            // DateComponents holding hour/minute; the opposite side is an NSFunctionExpression
+            // (the "now" extraction) — the node that crashed unguarded `constantValue`
+            // traversal before #62's `safeConstantValue` guard. A "between" range is stored as
+            // an AND of an after-bound and a before-bound, which `flattenTopAnd` splits into two
+            // conjuncts that each decode here as a separate `time` condition. We read whichever
+            // side is the DateComponents constant and infer the relation from the operator,
+            // accounting for which side holds the constant.
+            if let cmp = sub as? NSComparisonPredicate {
+                let constOnRight = cmp.rightExpression.safeConstantValue is DateComponents
+                if let dc = (cmp.rightExpression.safeConstantValue ?? cmp.leftExpression.safeConstantValue) as? DateComponents,
+                   dc.weekday == nil, let hour = dc.hour
+                {
+                    let clock = String(format: "%02d:%02d", hour, dc.minute ?? 0)
+                    let op = cmp.predicateOperatorType
+                    let relation: String
+                    if op == .equalTo {
+                        relation = "at"
+                    } else {
+                        // `now <op> dc` (constant on the right) vs `dc <op> now` (constant on the
+                        // left) invert the meaning of a less-than comparison.
+                        let isLess = op == .lessThan || op == .lessThanOrEqualTo
+                        relation = (constOnRight ? isLess : !isLess) ? "before" : "after"
+                    }
+                    return [
+                        "type": "time",
+                        "relation": relation,
+                        "time": clock,
+                        "summary": relation == "at" ? "at \(clock)" : "\(relation) \(clock)",
+                    ]
+                }
+            }
+
             // Characteristic predicate: HomeKit wraps each as a 2-sub AND
             // (characteristic == <HMCharacteristic> AND characteristicValue == X).
-            guard let compound = sub as? NSCompoundPredicate, compound.compoundPredicateType == .and else { return nil }
+            guard let compound = sub as? NSCompoundPredicate, compound.compoundPredicateType == .and else { return unknownCondition(sub) }
             let inner = compound.subpredicates as? [NSPredicate] ?? []
             var foundChar: HMCharacteristic?
             var foundValue: String?
@@ -544,7 +658,7 @@ enum AccessoryModel {
                     foundValue = "\(val)"
                 }
             }
-            guard let char = foundChar, let value = foundValue else { return nil }
+            guard let char = foundChar, let value = foundValue else { return unknownCondition(sub) }
             let uuid = char.uniqueIdentifier.uuidString.uppercased()
             if let entry = charMap[uuid] {
                 return [
@@ -570,6 +684,20 @@ enum AccessoryModel {
     /// `event_summary` without paying the home-scoped lookup cost.
     private static func countConditions(_ predicate: NSPredicate?) -> Int {
         extractConditions(predicate, in: nil).count
+    }
+
+    /// Placeholder for a top-level predicate conjunct we recognize as a real condition node
+    /// but can't decode into a typed shape. Surfacing it (instead of silently dropping it via
+    /// `nil`) keeps `automations get` honest about unsupported conditions (#65). Uses
+    /// `predicateFormat` for a debugging hint — safe on `NSFunctionExpression`, unlike
+    /// `constantValue`, since the format string is built from each expression's `description`.
+    private static func unknownCondition(_ predicate: NSPredicate) -> [String: Any] {
+        var dict: [String: Any] = ["type": "unknown", "summary": "unsupported condition"]
+        let format = predicate.predicateFormat
+        if !format.isEmpty {
+            dict["predicate_format"] = format.count > 200 ? String(format.prefix(200)) + "…" : format
+        }
+        return dict
     }
 
     /// Flatten nested top-level AND compounds into a flat subpredicate list.
