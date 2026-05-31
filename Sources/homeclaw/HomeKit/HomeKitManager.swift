@@ -281,6 +281,7 @@ final class HomeKitManager: NSObject, Observable {
     private let cache = CharacteristicCache.shared
     private var isWarmingCache = false
     private var menuPushTask: Task<Void, Never>?
+    private var hydrationRetryTask: Task<Void, Never>?
 
     private(set) var homes: [HMHome] = []
 
@@ -2978,6 +2979,26 @@ final class HomeKitManager: NSObject, Observable {
         }
     }
 
+    /// Safety net for late accessory hydration. `HMHomeManager` reports homes (and
+    /// their action sets) before `home.accessories` fully populates, and it does not
+    /// always re-fire `homeManagerDidUpdateHomes` once they do — leaving the menu
+    /// showing scenes but no devices. When we become ready with zero accessories,
+    /// re-check and re-push a few times so the menu fills in on its own. No-ops (and
+    /// stops) as soon as accessories appear, so a genuinely empty home costs nothing.
+    private func scheduleAccessoryHydrationRetry() {
+        hydrationRetryTask?.cancel()
+        hydrationRetryTask = Task { @MainActor in
+            for delaySeconds in [2, 4, 8] {
+                try? await Task.sleep(for: .seconds(delaySeconds))
+                if Task.isCancelled { return }
+                guard totalAccessoryCount == 0 else { return }  // hydrated — done
+                AppLogger.homekit.info("Accessory hydration retry: still 0 accessories, re-warming + re-pushing menu")
+                await warmCache()
+                scheduleMenuDataPush()
+            }
+        }
+    }
+
     // MARK: - Cache
 
     /// Warms the cache by reading interesting values from all filtered accessories.
@@ -3260,6 +3281,12 @@ extension HomeKitManager: HMHomeManagerDelegate {
                 userInfo: ["ready": self.homesReady, "homeNames": homeNames]
             )
             scheduleMenuDataPush()
+
+            // If homes are present but accessories haven't hydrated yet, keep
+            // re-checking so the menu fills in without needing a restart.
+            if self.totalAccessoryCount == 0 {
+                scheduleAccessoryHydrationRetry()
+            }
         }
     }
 }

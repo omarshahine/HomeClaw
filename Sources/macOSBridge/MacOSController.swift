@@ -81,6 +81,13 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
     public func menuWillOpen(_ menu: NSMenu) {
         menuIsOpen = true
+        // Pull the freshest snapshot synchronously so the menu that's about to show
+        // reflects current HomeKit state — heals a stale/empty menu (e.g. after the
+        // app was App-Napped or a push was missed) without waiting for a restart.
+        if let fresh = iOSBridge?.currentMenuData(), fresh["ready"] as? Bool == true {
+            menuData = fresh
+            rebuildMenu()
+        }
         iOSBridge?.refreshData()
     }
 
@@ -284,6 +291,28 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
                 addSceneItem(scene, to: menu)
             }
         }
+
+        // Empty-state affordance: HomeKit is ready but no accessory produced a row
+        // (e.g. accessories hadn't hydrated when this snapshot was built). Offer an
+        // explicit refresh instead of silently showing only scenes.
+        let anyAccessoryShown = rooms.contains { room in
+            (room["accessories"] as? [[String: Any]] ?? []).contains(where: { isAccessoryVisible($0) })
+        }
+        if !anyAccessoryShown {
+            menu.addItem(.separator())
+            let item = NSMenuItem(
+                title: "No accessories loaded \u{2014} Refresh",
+                action: #selector(refreshTapped),
+                keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(
+                systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
+            menu.addItem(item)
+        }
+    }
+
+    @objc private func refreshTapped() {
+        iOSBridge?.refreshData()
     }
 
     private func addSceneItem(_ scene: [String: Any], to menu: NSMenu) {

@@ -12,6 +12,15 @@ final class SocketServer: @unchecked Sendable {
     private var acceptSource: DispatchSourceRead?
     private let queue = DispatchQueue(label: "com.shahine.homeclaw.socket", qos: .userInitiated)
 
+    /// Watchdog: a wedged or torn-down listener (App Nap, an unexpected dispatch
+    /// source cancel, an orphaned socket file) leaves the app alive but the socket
+    /// refusing connections. A periodic self-connect probe detects this and rebinds.
+    private let watchdogQueue = DispatchQueue(label: "com.shahine.homeclaw.socket.watchdog", qos: .utility)
+    private var watchdogTimer: DispatchSourceTimer?
+    /// Set by `stop()` so the watchdog doesn't fight an intentional shutdown.
+    private var intentionallyStopped = false
+    private let watchdogInterval: TimeInterval = 30
+
     /// Parse a boolean wire arg, distinguishing absent from present-but-unparseable.
     ///
     /// Accepts:
@@ -207,8 +216,18 @@ final class SocketServer: @unchecked Sendable {
         return result
     }
 
-    /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources).
+    /// Start the socket server synchronously (non-blocking — sets up GCD dispatch sources)
+    /// and arm the watchdog that keeps it alive.
     func start() {
+        intentionallyStopped = false
+        bringUpListener()
+        startWatchdog()
+    }
+
+    /// Bind, listen, and arm the accept dispatch source. Idempotent: unlinks any
+    /// stale socket file first, so it is safe to call repeatedly (e.g. from the
+    /// watchdog after a wedge).
+    private func bringUpListener() {
         let path = AppConfig.socketPath
 
         // Remove stale socket
@@ -265,11 +284,12 @@ final class SocketServer: @unchecked Sendable {
         source.setEventHandler { [weak self] in
             self?.acceptConnection()
         }
-        source.setCancelHandler { [weak self] in
-            if let fd = self?.serverFD, fd >= 0 {
-                close(fd)
-            }
-            unlink(AppConfig.socketPath)
+        // Close the listening fd on cancel. We deliberately do NOT unlink the path
+        // here: `bringUpListener` already unlinks-before-bind, so unlinking on cancel
+        // would race a concurrent restart and delete the freshly-bound socket file.
+        let cancelFD = serverFD
+        source.setCancelHandler {
+            if cancelFD >= 0 { close(cancelFD) }
         }
         source.resume()
         acceptSource = source
@@ -278,9 +298,61 @@ final class SocketServer: @unchecked Sendable {
     }
 
     func stop() {
+        intentionallyStopped = true
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
         acceptSource?.cancel()
         acceptSource = nil
         serverFD = -1
+        unlink(AppConfig.socketPath)
+    }
+
+    // MARK: - Watchdog
+
+    private func startWatchdog() {
+        watchdogTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        timer.schedule(deadline: .now() + watchdogInterval, repeating: watchdogInterval)
+        timer.setEventHandler { [weak self] in self?.checkListenerHealth() }
+        timer.resume()
+        watchdogTimer = timer
+    }
+
+    /// Probe the socket with a real connect(). A live listener accepts it (and our
+    /// empty request is discarded cleanly); a wedged/absent listener fails, which
+    /// triggers a rebind. Runs on the watchdog queue, independent of the accept queue.
+    private func checkListenerHealth() {
+        guard !intentionallyStopped else { return }
+        guard !canConnectToSocket() else { return }
+        AppLogger.socket.error("Socket listener unhealthy (connect failed) — rebinding")
+        queue.async { [weak self] in
+            guard let self, !self.intentionallyStopped else { return }
+            self.acceptSource?.cancel()
+            self.acceptSource = nil
+            self.serverFD = -1
+            self.bringUpListener()
+        }
+    }
+
+    private func canConnectToSocket() -> Bool {
+        let path = AppConfig.socketPath
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            path.withCString { cstr in
+                _ = memcpy(ptr, cstr, min(path.utf8.count, MemoryLayout.size(ofValue: ptr.pointee) - 1))
+            }
+        }
+        let result = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                connect(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        return result == 0
     }
 
     // MARK: - Connection Handling

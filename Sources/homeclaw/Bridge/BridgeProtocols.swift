@@ -7,6 +7,10 @@ import Foundation
     var isLaunchAtLoginEnabled: Bool { get }
     func setLaunchAtLogin(_ enabled: Bool)
     func refreshData()
+    /// Synchronously returns the current menu snapshot from the in-memory cache
+    /// (no async I/O). Lets the bridge pull fresh data when the menu opens, so a
+    /// stale menu self-heals on the next click instead of waiting for a push.
+    func currentMenuData() -> [String: Any]
     func openSettings()
     func quitApp()
     func controlAccessory(id: String, characteristic: String, value: String)

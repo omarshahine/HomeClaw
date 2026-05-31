@@ -18,6 +18,15 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     private var menuDataObserver: NSObjectProtocol?
     private var webhookCircuitObserver: NSObjectProtocol?
 
+    /// Held for the app's lifetime to opt out of App Nap. HomeClaw is an
+    /// `LSUIElement` background agent: on a headless Mac (no display/UI activity)
+    /// macOS aggressively App-Naps it, which suspends the socket accept loop and
+    /// the menu-data push task — the app stays alive but its control socket starts
+    /// refusing connections and the menu freezes until a manual restart. The
+    /// assertion uses `.allowing` idle system sleep so the Mac can still sleep
+    /// normally; it only prevents our process from being napped while awake.
+    private var appNapActivity: NSObjectProtocol?
+
     /// Set to true only by openSettings() — used to distinguish explicit
     /// settings requests from UIKit scene session restoration on launch.
     static var settingsRequested = false
@@ -57,6 +66,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         Task { @MainActor in
             _ = await HomeKitManager.shared.refreshCache()
         }
+    }
+
+    @objc func currentMenuData() -> [String: Any] {
+        HomeKitManager.shared.buildMenuData()
     }
 
     @objc func controlAccessory(id: String, characteristic: String, value: String) {
@@ -134,6 +147,13 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         AppLogger.app.info("HomeClaw starting (unified Catalyst)...")
+
+        // Opt out of App Nap for the lifetime of the process so the control socket
+        // and menu-data pipeline keep running on headless/idle Macs. `.allowing`
+        // idle system sleep keeps normal Mac sleep behavior intact.
+        appNapActivity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "HomeKit bridge and control socket")
 
         // Hide from dock — menu bar only
         #if targetEnvironment(macCatalyst)
