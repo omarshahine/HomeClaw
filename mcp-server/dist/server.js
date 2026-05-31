@@ -20866,6 +20866,10 @@ var tools = [
         service_type: {
           type: "string",
           description: "Service UUID to target when the characteristic exists on multiple services (control action). Required when an ambiguity error is returned."
+        },
+        no_refresh: {
+          type: "boolean",
+          description: "Skip live characteristic reads and return last-known + static values only (get action). Much faster and avoids per-call slowdowns when reading many accessories in sequence; safe for static metadata like serial number, model, and firmware."
         }
       }
     }
@@ -21256,6 +21260,7 @@ async function handleAccessories(args) {
       if (!args.accessory_id) throw new Error("accessory_id is required for get action");
       const socketArgs = { id: args.accessory_id };
       if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.no_refresh) socketArgs.refresh = false;
       return sendCommand("get_accessory", socketArgs);
     }
     case "search": {

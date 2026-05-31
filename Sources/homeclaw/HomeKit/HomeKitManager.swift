@@ -1,4 +1,5 @@
 import HomeKit
+import os
 
 // MARK: - Time Condition
 
@@ -257,6 +258,22 @@ fileprivate struct ResolvedCondition {
     let rawValue: String
 }
 
+/// One-shot resume guard for `HomeKitManager.readValueWithTimeout`. The HomeKit
+/// completion handler and the timeout timer race to resume the continuation; only
+/// the first `claim()` returns true, so the continuation resumes exactly once.
+/// `@unchecked Sendable` is sound because all mutable state is guarded by the lock.
+fileprivate final class ReadResumeGuard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
 /// Central HomeKit interface. Must run on @MainActor because HMHomeManager
 /// requires main-thread delegate callbacks.
 @MainActor
@@ -427,13 +444,21 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
-    func getAccessory(id: String, homeID: String? = nil) async -> [String: Any]? {
+    /// - Parameter refresh: when `true` (default) live-reads dynamic
+    ///   characteristics before serializing. Pass `false` to skip all live reads
+    ///   and return last-known + static values only. Static metadata (serial
+    ///   number, model, firmware, manufacturer) never needs a live read, so a
+    ///   non-refreshing get is instant — the right choice for whole-home metadata
+    ///   sweeps that otherwise trigger the per-call ballooning in issue #66.
+    func getAccessory(id: String, homeID: String? = nil, refresh: Bool = true) async -> [String: Any]? {
         await waitForReady()
         if Self.isDemoMode { return DemoFixtures.accessoryDetail(id: id) }
         guard let accessory = findAccessory(id: id, homeID: homeID) else { return nil }
         guard isAccessoryAllowed(accessory) else { return nil }
-        await readAllValues(for: accessory)
-        updateCacheFromAccessory(accessory)
+        if refresh {
+            await readAllValues(for: accessory)
+            updateCacheFromAccessory(accessory)
+        }
         return AccessoryModel.accessoryDetail(accessory)
     }
 
@@ -3008,7 +3033,7 @@ final class HomeKitManager: NSObject, Observable {
                 for characteristic in service.characteristics {
                     let name = CharacteristicMapper.name(for: characteristic.characteristicType)
                     if AccessoryModel.isInterestingState(name) {
-                        try? await characteristic.readValue()
+                        await readValueWithTimeout(characteristic)
                         state[name] = CharacteristicMapper.formatValue(
                             characteristic.value, for: characteristic.characteristicType
                         )
@@ -3076,7 +3101,7 @@ final class HomeKitManager: NSObject, Observable {
             for characteristic in service.characteristics {
                 let name = CharacteristicMapper.name(for: characteristic.characteristicType)
                 if AccessoryModel.isInterestingState(name) {
-                    try? await characteristic.readValue()
+                    await readValueWithTimeout(characteristic)
                 }
             }
         }
@@ -3089,8 +3114,44 @@ final class HomeKitManager: NSObject, Observable {
         for service in accessory.services {
             for characteristic in service.characteristics {
                 if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
-                    try? await characteristic.readValue()
+                    await readValueWithTimeout(characteristic)
                 }
+            }
+        }
+    }
+
+    /// Hard ceiling for a single HomeKit characteristic read.
+    private static let readTimeout: TimeInterval = 6
+
+    /// Best-effort refresh of `characteristic.value` with a hard timeout.
+    ///
+    /// HomeKit's `readValue` can leave its completion handler pending
+    /// indefinitely under load (large bridges, many accessories — issue #66).
+    /// The async `readValue()` is an auto-imported completion-handler API and
+    /// does NOT honor Swift task cancellation, so a structured timeout can't
+    /// unblock it — we must use the completion form and race it against a timer.
+    /// Because the socket dispatcher serializes on the main actor, one stuck
+    /// read otherwise stalls every later request: the "first call fast, later
+    /// calls balloon to ~95s / hang" signature in the bug report. A timed-out
+    /// read simply leaves the previously cached `characteristic.value` in place.
+    private func readValueWithTimeout(_ characteristic: HMCharacteristic) async {
+        let timeout = Self.readTimeout
+        let logger = AppLogger.homekit
+        // One-shot guard: whichever of the HomeKit completion or the timer fires
+        // first resumes the continuation; the loser is a no-op.
+        let guardBox = ReadResumeGuard()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            characteristic.readValue { error in
+                guard guardBox.claim() else { return }
+                if let error {
+                    logger.debug("readValue failed: \(error.localizedDescription, privacy: .public)")
+                }
+                continuation.resume()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+                guard guardBox.claim() else { return }
+                logger.warning("readValue timed out after \(timeout, format: .fixed(precision: 0))s; serving last-known value")
+                continuation.resume()
             }
         }
     }

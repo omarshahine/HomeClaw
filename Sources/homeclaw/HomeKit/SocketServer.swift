@@ -425,7 +425,11 @@ final class SocketServer: @unchecked Sendable {
                 guard let id = args["id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' argument")
                 }
-                guard let accessory = await hk.getAccessory(id: id, homeID: args["home_id"] as? String) else {
+                // `refresh: false` skips live characteristic reads — instant, and
+                // all that's needed for serial-number / model / firmware sweeps.
+                // Defaults to true to preserve prior behavior.
+                let refresh = parseBool(args, key: "refresh", default: true)
+                guard let accessory = await hk.getAccessory(id: id, homeID: args["home_id"] as? String, refresh: refresh) else {
                     return encodeResponse(success: false, error: "Accessory not found: \(id)")
                 }
                 result = accessory
