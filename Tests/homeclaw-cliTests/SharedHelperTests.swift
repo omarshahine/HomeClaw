@@ -76,9 +76,11 @@ struct ParseSinceValueTests {
 
     @Test("a longer duration resolves further into the past than a shorter one")
     func durationOrdering() throws {
-        let oneHour = ISO8601DateFormatter().date(from: try parseSinceValue("1h"))
-        let oneDay = ISO8601DateFormatter().date(from: try parseSinceValue("24h"))
-        if let oneHour, let oneDay { #expect(oneDay < oneHour) }
+        // #require (not `if let`) so the ordering assertion fails loudly rather
+        // than vacuously passing if parseSinceValue ever emits a non-ISO string.
+        let oneHour = try #require(ISO8601DateFormatter().date(from: try parseSinceValue("1h")))
+        let oneDay = try #require(ISO8601DateFormatter().date(from: try parseSinceValue("24h")))
+        #expect(oneDay < oneHour)
     }
 
     @Test("unrecognised format throws and names the offending value")
