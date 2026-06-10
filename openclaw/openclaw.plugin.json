@@ -2,7 +2,7 @@
   "id": "homeclaw",
   "name": "HomeClaw",
   "description": "HomeKit smart home control and monitoring",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "configSchema": {
     "type": "object",
     "properties": {

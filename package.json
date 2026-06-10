@@ -1,6 +1,6 @@
 {
   "name": "homeclaw",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "HomeClaw — MCP server and CLI for HomeKit smart home control",
   "type": "module",

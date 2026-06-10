@@ -1,6 +1,6 @@
 {
   "name": "homeclaw",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "OpenClaw plugin for HomeKit smart home control — lights, locks, thermostats, and scenes",
   "type": "module",

@@ -1,17 +1,27 @@
 {
   "name": "homeclaw",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
   "author": {
     "name": "Omar Shahine"
   },
   "license": "MIT",
-  "keywords": ["homekit", "smart-home", "lights", "locks", "thermostats", "scenes", "automation"],
+  "keywords": [
+    "homekit",
+    "smart-home",
+    "lights",
+    "locks",
+    "thermostats",
+    "scenes",
+    "automation"
+  ],
   "mcpServers": {
     "homekit": {
       "type": "stdio",
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/server.js"]
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/server.js"
+      ]
     }
   }
 }
