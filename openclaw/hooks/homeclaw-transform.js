@@ -16,7 +16,7 @@ export function transform(ctx) {
 	const { text, mode } = ctx.payload;
 	const message = typeof text === 'string' ? text.trim() : '';
 
-	// Test/connectivity events — log silently, don't deliver
+	// Test/connectivity events — log silently, don't deliver.
 	if (!message || message.includes('Webhook test event')) {
 		return {
 			action: 'agent',
@@ -30,10 +30,9 @@ export function transform(ctx) {
 
 	return {
 		action: 'agent',
-		message: `[HomeClaw] ${message}`,
+		message: `[HomeClaw] ${message}\n\nMonitor this event. Notify the user only for meaningful safety, security, occupancy, or gateway-health changes by using an explicit message tool target; otherwise finish silently.`,
 		name: 'HomeClaw',
 		wakeMode: mode === 'next-heartbeat' ? 'next-heartbeat' : 'now',
-		deliver: true,
-		channel: 'last'
+		deliver: false
 	};
 }
