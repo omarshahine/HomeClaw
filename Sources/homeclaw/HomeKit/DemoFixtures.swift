@@ -733,14 +733,21 @@ enum DemoFixtures {
         }
 
         /// Scene references in the uniform list/get shape (issue #76) —
-        /// mirrors AccessoryModel.triggerActionSetSummaries.
+        /// mirrors AccessoryModel.triggerActionSetSummaries, including the "id"
+        /// key (resolved from the demo scene list when the name matches).
+        @MainActor
         private func actionSetSummaries() -> [[String: Any]] {
             attachedSceneNames.map { sceneName in
-                ["name": sceneName, "action_count": inlineActions ? actions.count : 1]
+                var dict: [String: Any] = ["name": sceneName, "action_count": inlineActions ? actions.count : 1]
+                if let scene = DemoFixtures.scenes.first(where: { $0.name == sceneName }) {
+                    dict["id"] = scene.id
+                }
+                return dict
             }
         }
 
         /// list shape — mirrors AccessoryModel.automationSummary.
+        @MainActor
         func summaryDict() -> [String: Any] {
             [
                 "id": id,
@@ -755,6 +762,7 @@ enum DemoFixtures {
         }
 
         /// get shape — events[] + action_sets[].
+        @MainActor
         func detailDict() -> [String: Any] {
             var events: [[String: Any]] = []
             switch triggerType {

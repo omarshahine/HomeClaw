@@ -10,6 +10,12 @@ import ArgumentParser
 /// via stdin is the escape hatch that works from any directory.
 func readCommandInputData(_ path: String) throws -> Data {
     if path == "-" {
+        // If stdin is an interactive terminal (nothing piped in), readDataToEndOfFile()
+        // would block silently until EOF. Tell the user what's happening instead of
+        // appearing to hang.
+        if isatty(STDIN_FILENO) == 1 {
+            FileHandle.standardError.write(Data("Reading JSON from stdin — press Ctrl-D when done, or Ctrl-C to abort.\n".utf8))
+        }
         return FileHandle.standardInput.readDataToEndOfFile()
     }
     do {

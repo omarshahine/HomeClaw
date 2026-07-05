@@ -27,7 +27,8 @@ struct UpdateScene: ParsableCommand {
         else {
             throw ValidationError(
                 "JSON input must contain 'actions' array of "
-                    + "{\"accessory\": \"...\", \"property\": \"...\", \"value\": \"...\"} objects, "
+                    + "{\"accessory\": \"...\", \"property\": \"...\", \"value\": \"...\"} objects "
+                    + "('characteristic' is accepted as an alias for 'property'), "
                     + "plus either 'id' (preferred) or 'name' to identify the scene"
             )
         }
