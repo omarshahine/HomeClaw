@@ -58,9 +58,8 @@ struct ListAutomations: ParsableCommand {
             let name = auto["name"] as? String ?? "Unknown"
             let enabled = auto["enabled"] as? Bool ?? false
             let summary = auto["event_summary"] as? String ?? ""
-            let scenes = auto["scenes"] as? [String] ?? []
             let status = enabled ? "enabled" : "disabled"
-            let sceneStr = scenes.joined(separator: ", ")
+            let sceneStr = formatSceneReferences(auto)
             print("  [\(status)] \(name)")
             if !summary.isEmpty { print("    Event: \(summary)") }
             if !sceneStr.isEmpty { print("    Scene: \(sceneStr)") }
@@ -68,6 +67,21 @@ struct ListAutomations: ParsableCommand {
 
         print("\n\(automations.count) automation(s)")
     }
+}
+
+/// Render an automation's scene references from the structured `action_sets`
+/// array (name + hidden flag), falling back to the legacy `scenes` name array.
+/// Shared by `list` and `get` so both surfaces print scenes identically.
+func formatSceneReferences(_ automation: [String: Any]) -> String {
+    if let actionSets = automation["action_sets"] as? [[String: Any]] {
+        return actionSets.map { set in
+            let name = set["name"] as? String ?? set["id"] as? String ?? "?"
+            let hidden = set["hidden"] as? Bool ?? false
+            return hidden ? "\(name) (hidden)" : name
+        }.joined(separator: ", ")
+    }
+    let scenes = automation["scenes"] as? [String] ?? []
+    return scenes.joined(separator: ", ")
 }
 
 // MARK: - Get
@@ -128,10 +142,16 @@ struct GetAutomation: ParsableCommand {
 
         if let actionSets = result["action_sets"] as? [[String: Any]] {
             print("\nScenes:")
+            if actionSets.isEmpty {
+                print("  (none)")
+            }
             for scene in actionSets {
                 let sceneName = scene["name"] as? String ?? "?"
                 let actionCount = scene["action_count"] as? Int ?? 0
-                print("  \(sceneName) (\(actionCount) action(s))")
+                let hidden = scene["hidden"] as? Bool ?? false
+                var line = "  \(sceneName) (\(actionCount) action(s))"
+                if hidden { line += " [hidden]" }
+                print(line)
             }
         }
     }

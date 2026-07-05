@@ -7,7 +7,11 @@ struct AssignRooms: ParsableCommand {
         abstract: "Assign accessories to rooms from a JSON file"
     )
 
-    @Argument(help: "Path to JSON file with assignments array [{\"accessory\": \"...\", \"room\": \"...\"}] or [{\"uuid\": \"...\", \"room\": \"...\"}]")
+    @Argument(help: """
+        Path to JSON file, or '-' to read from stdin. Accepts a bare array \
+        [{"accessory": "...", "room": "..."}] (or [{"uuid": "...", "room": "..."}]), \
+        or the same array wrapped as {"assignments": [...]}
+        """)
     var file: String
 
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
@@ -19,15 +23,29 @@ struct AssignRooms: ParsableCommand {
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
-    func run() throws {
-        // Read and parse the JSON file
-        let url = URL(fileURLWithPath: file)
-        let data = try Data(contentsOf: url)
-        guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let assignments = parsed["assignments"] as? [[String: String]]
-        else {
-            throw ValidationError("JSON file must contain an 'assignments' array of {\"accessory\": \"...\", \"room\": \"...\"} or {\"uuid\": \"...\", \"room\": \"...\"} objects")
+    /// Parse assignment JSON. Accepts a bare array of assignment objects or an
+    /// `{"assignments": [...]}` wrapper — the help text documented the bare array
+    /// while the parser required the wrapper (issue #76), so we accept both.
+    static func parseAssignments(_ data: Data) throws -> [[String: String]] {
+        let parsed = try JSONSerialization.jsonObject(with: data)
+        if let bare = parsed as? [[String: String]] {
+            return bare
         }
+        if let wrapped = parsed as? [String: Any],
+           let assignments = wrapped["assignments"] as? [[String: String]]
+        {
+            return assignments
+        }
+        throw ValidationError(
+            "JSON input must be an array of {\"accessory\": \"...\", \"room\": \"...\"} or "
+                + "{\"uuid\": \"...\", \"room\": \"...\"} objects (optionally wrapped as {\"assignments\": [...]})"
+        )
+    }
+
+    func run() throws {
+        // Read and parse the JSON input (file path or stdin)
+        let data = try readCommandInputData(file)
+        let assignments = try Self.parseAssignments(data)
 
         var args: [String: Any] = [
             "assignments": assignments,

@@ -191,15 +191,36 @@ enum AccessoryModel {
 
     // MARK: - Automations (Triggers)
 
+    /// Uniform scene (action set) references for a trigger, shared by list and get
+    /// so both surfaces emit the same representation (issue #76): `id` + `name` +
+    /// `action_count`, plus `hidden: true` for trigger-owned action sets that the
+    /// Home app excludes from `home.actionSets` (their names are opaque UUID
+    /// strings, which is why a "name" can look like a UUID).
+    static func triggerActionSetSummaries(_ trigger: HMTrigger, home: HMHome?) -> [[String: Any]] {
+        let visibleIDs = home.map { Set($0.actionSets.map(\.uniqueIdentifier)) }
+        return trigger.actionSets.map { actionSet in
+            var dict: [String: Any] = [
+                "id": actionSet.uniqueIdentifier.uuidString,
+                "name": actionSet.name,
+                "action_count": actionSet.actions.count,
+            ]
+            if let visibleIDs, !visibleIDs.contains(actionSet.uniqueIdentifier) {
+                dict["hidden"] = true
+            }
+            return dict
+        }
+    }
+
     /// Dispatch summary by trigger subclass. Routes HMEventTrigger to `automationSummary`,
     /// HMTimerTrigger to `timerTriggerSummary`, and returns a minimal placeholder for any
     /// other HMTrigger subclass so unknown triggers are still visible to callers.
-    static func triggerSummary(_ trigger: HMTrigger, homeName: String) -> [String: Any] {
+    /// Pass `home` to flag trigger-owned hidden action sets in the scene references.
+    static func triggerSummary(_ trigger: HMTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
         if let event = trigger as? HMEventTrigger {
-            return automationSummary(event, homeName: homeName)
+            return automationSummary(event, homeName: homeName, home: home)
         }
         if let timer = trigger as? HMTimerTrigger {
-            return timerTriggerSummary(timer, homeName: homeName)
+            return timerTriggerSummary(timer, homeName: homeName, home: home)
         }
         return [
             "id": trigger.uniqueIdentifier.uuidString,
@@ -212,7 +233,7 @@ enum AccessoryModel {
 
     /// Summary of a time-based timer trigger (Apple Home native time automation,
     /// created via the iOS Home app).
-    static func timerTriggerSummary(_ trigger: HMTimerTrigger, homeName: String) -> [String: Any] {
+    static func timerTriggerSummary(_ trigger: HMTimerTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
         var dict: [String: Any] = [
             "id": trigger.uniqueIdentifier.uuidString,
             "name": trigger.name,
@@ -221,6 +242,7 @@ enum AccessoryModel {
             "trigger_type": "timer",
             "scene_count": trigger.actionSets.count,
             "scenes": trigger.actionSets.map { $0.name },
+            "action_sets": triggerActionSetSummaries(trigger, home: home),
         ]
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
@@ -241,10 +263,11 @@ enum AccessoryModel {
 
     /// Detailed view of a timer trigger including full scene/action breakdown,
     /// matching the richness of `automationDetail` for HMEventTriggers.
-    static func timerTriggerDetail(_ trigger: HMTimerTrigger, homeName: String) -> [String: Any] {
-        var detail = timerTriggerSummary(trigger, homeName: homeName)
+    static func timerTriggerDetail(_ trigger: HMTimerTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
+        var detail = timerTriggerSummary(trigger, homeName: homeName, home: home)
 
-        let actionSets: [[String: Any]] = trigger.actionSets.map { actionSet in
+        // Enrich the shared summary shape with each scene's resolved actions.
+        let actionSets: [[String: Any]] = zip(trigger.actionSets, triggerActionSetSummaries(trigger, home: home)).map { actionSet, summary in
             let actions: [[String: String]] = actionSet.actions.compactMap { action in
                 guard let writeAction = action as? HMCharacteristicWriteAction<NSCopying> else { return nil }
                 let characteristic = writeAction.characteristic
@@ -256,12 +279,9 @@ enum AccessoryModel {
                     "value": "\(writeAction.targetValue)",
                 ]
             }
-            return [
-                "id": actionSet.uniqueIdentifier.uuidString,
-                "name": actionSet.name,
-                "action_count": actionSet.actions.count,
-                "actions": actions,
-            ]
+            var dict = summary
+            dict["actions"] = actions
+            return dict
         }
         detail["action_sets"] = actionSets
 
@@ -287,7 +307,8 @@ enum AccessoryModel {
     }
 
     /// Summary of an automation (event trigger) for list views.
-    static func automationSummary(_ trigger: HMEventTrigger, homeName: String) -> [String: Any] {
+    /// Pass `home` to flag trigger-owned hidden action sets in `action_sets`.
+    static func automationSummary(_ trigger: HMEventTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
         var dict: [String: Any] = [
             "id": trigger.uniqueIdentifier.uuidString,
             "name": trigger.name,
@@ -295,6 +316,7 @@ enum AccessoryModel {
             "home": homeName,
             "scene_count": trigger.actionSets.count,
             "scenes": trigger.actionSets.map { $0.name },
+            "action_sets": triggerActionSetSummaries(trigger, home: home),
         ]
 
         // Build a human-readable event summary from the first event.
@@ -435,7 +457,7 @@ enum AccessoryModel {
     /// Detailed view of an automation including all events and linked scenes.
     /// Pass `home` to resolve characteristic-condition predicates to accessory names.
     static func automationDetail(_ trigger: HMEventTrigger, homeName: String, home: HMHome? = nil) -> [String: Any] {
-        var detail = automationSummary(trigger, homeName: homeName)
+        var detail = automationSummary(trigger, homeName: homeName, home: home)
 
         let events: [[String: Any]] = trigger.events.compactMap { event in
             // Characteristic equality / button event.
@@ -510,14 +532,8 @@ enum AccessoryModel {
         }
         detail["events"] = events
 
-        let actionSets: [[String: Any]] = trigger.actionSets.map { actionSet in
-            [
-                "id": actionSet.uniqueIdentifier.uuidString,
-                "name": actionSet.name,
-                "action_count": actionSet.actions.count,
-            ]
-        }
-        detail["action_sets"] = actionSets
+        // `action_sets` is already populated by `automationSummary` via
+        // `triggerActionSetSummaries`, keeping list and get identical (issue #76).
 
         // Decode the trigger predicate into structured conditions. Skipped when there's no
         // predicate at all, or when nothing decodes (rather than emitting an empty array

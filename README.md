@@ -431,7 +431,7 @@ HomeClaw supports the full range of HomeKit accessory categories:
 | **Sensors** | motion, contact, temperature, humidity, light level, battery (all read-only) |
 | **Doorbells** | ring detection via input_event (single/double/long press), motion (read-only) |
 | **Programmable Switches** | button press detection (single/double/long press) (read-only) |
-| **Scenes** | trigger by name or UUID, inspect actions, import from JSON, delete by name |
+| **Scenes** | trigger by name or UUID, inspect actions, import from JSON, delete by name or UUID |
 
 ### Scene Import Format
 
@@ -448,16 +448,24 @@ The `import-scene` command accepts a JSON file defining a scene and its actions:
 }
 ```
 
+Action objects also accept `characteristic` as an alias for `property` (read commands emit `characteristic`, so their output round-trips as input).
+
 The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan):
 
 ```json
-{
-  "assignments": [
-    {"accessory": "Kitchen Light", "room": "Kitchen"},
-    {"uuid": "790A359D-27A6-5738-A92E-F4380CC6BA07", "room": "Front Door"},
-    {"accessory": "Desk Lamp", "room": "Office"}
-  ]
-}
+[
+  {"accessory": "Kitchen Light", "room": "Kitchen"},
+  {"uuid": "790A359D-27A6-5738-A92E-F4380CC6BA07", "room": "Front Door"},
+  {"accessory": "Desk Lamp", "room": "Office"}
+]
+```
+
+The same array wrapped as `{"assignments": [...]}` is also accepted.
+
+All file-taking commands (`import-scene`, `update-scene`, `assign-rooms`) accept `-` in place of the file path to read JSON from stdin — the recommended path for the sandboxed App Store build, which can only read files from its own container:
+
+```bash
+echo '[{"accessory": "Desk Lamp", "room": "Office"}]' | homeclaw-cli assign-rooms -
 ```
 
 Both commands support `--dry-run` to preview changes without modifying HomeKit.

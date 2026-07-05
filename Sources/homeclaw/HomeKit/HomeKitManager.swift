@@ -644,34 +644,26 @@ final class HomeKitManager: NSObject, Observable {
         }
         let targetHomes = filteredHomes(homeID: homeID)
 
-        for home in targetHomes {
-            if let actionSet = home.actionSets.first(where: { $0.uniqueIdentifier.uuidString == id }) {
-                try await home.executeActionSet(actionSet)
-                AppLogger.homekit.info("[\(home.name)] Triggered scene: \(actionSet.name)")
-                HomeEventLogger.shared.logSceneTriggered(
-                    sceneID: actionSet.uniqueIdentifier.uuidString,
-                    sceneName: actionSet.name,
-                    homeName: home.name,
-                    homeID: home.uniqueIdentifier.uuidString
-                )
-                return AccessoryModel.sceneSummary(actionSet)
-            }
-        }
-
-        // Try by name
-        for home in targetHomes {
-            if let actionSet = home.actionSets.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
-            }) {
-                try await home.executeActionSet(actionSet)
-                AppLogger.homekit.info("[\(home.name)] Triggered scene: \(actionSet.name)")
-                HomeEventLogger.shared.logSceneTriggered(
-                    sceneID: actionSet.uniqueIdentifier.uuidString,
-                    sceneName: actionSet.name,
-                    homeName: home.name,
-                    homeID: home.uniqueIdentifier.uuidString
-                )
-                return AccessoryModel.sceneSummary(actionSet)
+        // UUID first, then name — across visible + trigger-owned hidden action
+        // sets, matching get_scene's lookup (issue #76). Executing a hidden set
+        // uses the same public executeActionSet API as visible ones.
+        for byUUID in [true, false] {
+            for home in targetHomes {
+                for (actionSet, _) in allActionSets(in: home) {
+                    let matched = byUUID
+                        ? actionSet.uniqueIdentifier.uuidString.caseInsensitiveCompare(id) == .orderedSame
+                        : actionSet.name.localizedCaseInsensitiveCompare(id) == .orderedSame
+                    guard matched else { continue }
+                    try await home.executeActionSet(actionSet)
+                    AppLogger.homekit.info("[\(home.name)] Triggered scene: \(actionSet.name)")
+                    HomeEventLogger.shared.logSceneTriggered(
+                        sceneID: actionSet.uniqueIdentifier.uuidString,
+                        sceneName: actionSet.name,
+                        homeName: home.name,
+                        homeID: home.uniqueIdentifier.uuidString
+                    )
+                    return AccessoryModel.sceneSummary(actionSet)
+                }
             }
         }
 
@@ -725,9 +717,13 @@ final class HomeKitManager: NSObject, Observable {
         }
         let targetHomes = filteredHomes(homeID: homeName)
 
+        // Accept UUID or name (issue #76: scene commands key uniformly on either).
+        // Only visible action sets are deletable — removing trigger-owned hidden
+        // sets is gated behind an Apple-only SPI entitlement (docs/PRIVATE_API.md).
         for home in targetHomes {
             if let actionSet = home.actionSets.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+                $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(name) == .orderedSame
+                    || $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
             }) {
                 if dryRun {
                     return [
@@ -846,14 +842,16 @@ final class HomeKitManager: NSObject, Observable {
             ])
         }
 
-        return [
+        var result: [String: Any] = [
             "home": home.name,
-            "dry_run": dryRun,
             "assigned": assigned,
             "skipped": skipped,
             "not_found": notFound,
             "details": details,
-        ] as [String: Any]
+        ]
+        // No "dry_run" echo on real runs — readers default the absent key to false (issue #76).
+        if dryRun { result["dry_run"] = true }
+        return result
     }
 
     func renameAccessory(
@@ -1187,7 +1185,7 @@ final class HomeKitManager: NSObject, Observable {
             // Iterate all triggers (event, timer, and any other HMTrigger subclass)
             // so HMTimerTrigger automations created via the iOS Home app are visible.
             for trigger in home.triggers {
-                results.append(AccessoryModel.triggerSummary(trigger, homeName: home.name))
+                results.append(AccessoryModel.triggerSummary(trigger, homeName: home.name, home: home))
             }
         }
         return results
@@ -1206,7 +1204,7 @@ final class HomeKitManager: NSObject, Observable {
             return AccessoryModel.automationDetail(trigger, homeName: home.name, home: home)
         }
         if let timer = findTimerTrigger(id: id, in: home) {
-            return AccessoryModel.timerTriggerDetail(timer, homeName: home.name)
+            return AccessoryModel.timerTriggerDetail(timer, homeName: home.name, home: home)
         }
         throw ControlError.triggerNotFound(id)
     }
@@ -1891,7 +1889,7 @@ final class HomeKitManager: NSObject, Observable {
             // discipline so the same input fails the same way at every entry
             // point. (Tightens behavior of PR #56's existing parser.)
             let condAccessoryID = (cond["accessory"] ?? "").trimmingCharacters(in: .whitespaces)
-            let condProperty = (cond["property"] ?? "").trimmingCharacters(in: .whitespaces)
+            let condProperty = (cond["property"] ?? cond["characteristic"] ?? "").trimmingCharacters(in: .whitespaces)
             let condValueStr = (cond["value"] ?? "").trimmingCharacters(in: .whitespaces)
             guard !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty else {
                 throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
@@ -2055,8 +2053,10 @@ final class HomeKitManager: NSObject, Observable {
         var resolved: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
 
         for action in actions {
+            // 'property' is canonical; 'characteristic' is a documented alias
+            // (read paths emit "characteristic", so accept it on write too — issue #76).
             guard let accessoryID = action["accessory"],
-                  let property = action["property"],
+                  let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
                 throw ControlError.writeFailed("Action missing required fields (accessory, property, value): \(action)")
@@ -2126,7 +2126,8 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         AppLogger.homekit.info("[\(home.name)] Deleted automation '\(triggerName)'")
-        return ["name": triggerName, "home": home.name, "dry_run": false] as [String: Any]
+        // No "dry_run" echo on real runs — readers default the absent key to false (issue #76).
+        return ["name": triggerName, "home": home.name] as [String: Any]
     }
 
     /// Mutates the action sets attached to an existing automation trigger.
@@ -2623,7 +2624,7 @@ final class HomeKitManager: NSObject, Observable {
 
         for action in actions {
             guard let accessoryID = action["accessory"],
-                  let property = action["property"],
+                  let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
                 warnings.append("Skipping action with missing fields: \(action)")
@@ -2749,7 +2750,7 @@ final class HomeKitManager: NSObject, Observable {
 
         for action in actions {
             guard let accessoryID = action["accessory"],
-                  let property = action["property"],
+                  let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
                 warnings.append("Skipping action with missing fields: \(action)")

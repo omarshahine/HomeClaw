@@ -74,13 +74,16 @@ homeclaw-cli get-scene "<name>" --json  # Full detail: all actions (accessory, r
 homeclaw-cli trigger "<scene-name>"     # Run a scene
 homeclaw-cli import-scene scene.json --dry-run   # Preview scene import
 homeclaw-cli import-scene scene.json              # Create scene from JSON
-homeclaw-cli delete-scene "<name>" --dry-run      # Preview deletion
-homeclaw-cli delete-scene "<name>"                # Delete a scene
+echo '{"name": "...", "actions": [...]}' | homeclaw-cli import-scene -   # Read JSON from stdin (works from any directory, sandbox-safe)
+homeclaw-cli delete-scene "<name-or-uuid>" --dry-run   # Preview deletion
+homeclaw-cli delete-scene "<name-or-uuid>"             # Delete a scene
 
 # Room assignment — supports UUID for duplicate names
 homeclaw-cli assign-rooms rooms.json --dry-run    # Preview room assignments
 homeclaw-cli assign-rooms rooms.json              # Assign accessories to rooms
-# JSON format: {"assignments": [{"uuid": "...", "room": "..."} or {"accessory": "...", "room": "..."}]}
+echo '[{"accessory": "...", "room": "..."}]' | homeclaw-cli assign-rooms -   # stdin also works here
+# JSON format: bare array [{"uuid": "...", "room": "..."} or {"accessory": "...", "room": "..."}]
+#              (or the same array wrapped as {"assignments": [...]})
 # Use "uuid" when multiple accessories share the same name (e.g., ceiling fan + light)
 
 # Management — rename, rooms, zones

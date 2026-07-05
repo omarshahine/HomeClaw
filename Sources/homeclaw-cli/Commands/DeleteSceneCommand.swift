@@ -4,10 +4,10 @@ import Foundation
 struct DeleteScene: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "delete-scene",
-        abstract: "Delete a HomeKit scene by name"
+        abstract: "Delete a HomeKit scene by name or UUID"
     )
 
-    @Argument(help: "Scene name to delete")
+    @Argument(help: "Scene name or UUID to delete")
     var name: String
 
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")

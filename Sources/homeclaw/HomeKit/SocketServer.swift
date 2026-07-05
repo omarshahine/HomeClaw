@@ -790,8 +790,10 @@ final class SocketServer: @unchecked Sendable {
                 result = triggerToDict(trigger)
 
             case "delete_scene":
-                guard let name = args["name"] as? String else {
-                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                // 'name' accepts a scene name or UUID; 'id' is an alias so scene
+                // commands key uniformly on either identifier (issue #76).
+                guard let name = args["name"] as? String ?? args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' or 'id' argument")
                 }
                 result = try await hk.deleteScene(
                     name: name,

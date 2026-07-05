@@ -7,7 +7,7 @@ struct ImportScene: ParsableCommand {
         abstract: "Import a HomeKit scene from a JSON file"
     )
 
-    @Argument(help: "Path to JSON file with scene definition")
+    @Argument(help: "Path to JSON file with scene definition, or '-' to read from stdin")
     var file: String
 
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
@@ -20,15 +20,14 @@ struct ImportScene: ParsableCommand {
     var json = false
 
     func run() throws {
-        // Read and parse the JSON file
-        let url = URL(fileURLWithPath: file)
-        let data = try Data(contentsOf: url)
+        // Read and parse the JSON input (file path or stdin)
+        let data = try readCommandInputData(file)
         guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let name = parsed["name"] as? String,
               let actions = parsed["actions"] as? [[String: String]]
         else {
             throw ValidationError(
-                "JSON file must contain 'name' (string) and 'actions' array of "
+                "JSON input must contain 'name' (string) and 'actions' array of "
                     + "{\"accessory\": \"...\", \"property\": \"...\", \"value\": \"...\"} objects"
             )
         }

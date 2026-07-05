@@ -331,14 +331,16 @@ enum DemoFixtures {
             details.append(["accessory": accessories[accIdx].name, "room": room.name, "status": "assigned"])
         }
 
-        return [
+        var result: [String: Any] = [
             "home": homeName,
-            "dry_run": dryRun,
             "assigned": assigned,
             "skipped": skipped,
             "not_found": notFound,
             "details": details,
         ]
+        // Mirrors HomeKitManager.assignRooms: no "dry_run" echo on real runs (issue #76).
+        if dryRun { result["dry_run"] = true }
+        return result
     }
 
     // MARK: - Accessory (rename / remove)
@@ -730,6 +732,14 @@ enum DemoFixtures {
             }
         }
 
+        /// Scene references in the uniform list/get shape (issue #76) —
+        /// mirrors AccessoryModel.triggerActionSetSummaries.
+        private func actionSetSummaries() -> [[String: Any]] {
+            attachedSceneNames.map { sceneName in
+                ["name": sceneName, "action_count": inlineActions ? actions.count : 1]
+            }
+        }
+
         /// list shape — mirrors AccessoryModel.automationSummary.
         func summaryDict() -> [String: Any] {
             [
@@ -740,6 +750,7 @@ enum DemoFixtures {
                 "trigger_type": triggerType,
                 "event_summary": eventSummary,
                 "scenes": attachedSceneNames,
+                "action_sets": actionSetSummaries(),
             ]
         }
 
@@ -756,9 +767,6 @@ enum DemoFixtures {
                 if let serviceIndex { e["service_index"] = serviceIndex }
                 events.append(e)
             }
-            let actionSets: [[String: Any]] = attachedSceneNames.map { sceneName in
-                ["name": sceneName, "action_count": inlineActions ? actions.count : 1]
-            }
             return [
                 "id": id,
                 "name": name,
@@ -766,7 +774,7 @@ enum DemoFixtures {
                 "home": homeName,
                 "trigger_type": triggerType,
                 "events": events,
-                "action_sets": actionSets,
+                "action_sets": actionSetSummaries(),
             ]
         }
 
