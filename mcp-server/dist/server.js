@@ -21058,11 +21058,13 @@ var tools = [
             type: "object",
             properties: {
               accessory: { type: "string", description: "Target accessory UUID (strongly preferred) or name" },
-              property: { type: "string", description: 'Characteristic to set (e.g., power, brightness, color_temperature). "characteristic" is accepted as an alias for this field.' },
+              property: { type: "string", description: "Characteristic to set (e.g., power, brightness, color_temperature)" },
+              characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
               value: { type: "string", description: 'Target value as string (e.g., "true", "50", "344")' },
               room: { type: "string", description: "Room name for disambiguation (optional)" }
             },
-            required: ["accessory", "property", "value"]
+            required: ["accessory", "value"],
+            anyOf: [{ required: ["property"] }, { required: ["characteristic"] }]
           },
           description: "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
         },
@@ -21094,11 +21096,13 @@ var tools = [
             type: "object",
             properties: {
               accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
-              property: { type: "string", description: 'Characteristic name (e.g., contact_state, occupancy_detected, power). "characteristic" is accepted as an alias for this field.' },
+              property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
+              characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
               value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
               room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" }
             },
-            required: ["accessory", "property", "value"]
+            required: ["accessory", "value"],
+            anyOf: [{ required: ["property"] }, { required: ["characteristic"] }]
           },
           description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)"
         },
@@ -21122,11 +21126,13 @@ var tools = [
           type: "object",
           properties: {
             accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
-            property: { type: "string", description: 'Characteristic name (e.g., contact_state, occupancy_detected, power). "characteristic" is accepted as an alias for this field.' },
+            property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
+            characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
             value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
             room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" }
           },
-          required: ["accessory", "property", "value"],
+          required: ["accessory", "value"],
+          anyOf: [{ required: ["property"] }, { required: ["characteristic"] }],
           description: "Single characteristic condition (object \u2014 note the singular field name, distinct from the plural `conditions` array used by create / create_time) to append (ANDed) to an existing automation's trigger predicate. To add multiple conditions, call add_condition repeatedly \u2014 each call preserves the trigger UUID, so physical button bindings, Siri references, and other UUID-keyed integrations survive every modification. The read-side decoder (list/get) surfaces the new condition automatically. To replace an existing condition set, delete the automation and recreate it. (add_condition action)"
         },
         dry_run: {
@@ -21439,12 +21445,13 @@ async function handleAutomations(args) {
       if (!args.condition || typeof args.condition !== "object") {
         throw new Error("condition object is required for add_condition action");
       }
-      const { accessory, property, value, room } = args.condition;
+      const { accessory, value, room } = args.condition;
+      const property = args.condition.property ?? args.condition.characteristic;
       if (typeof accessory !== "string" || accessory.trim() === "") {
         throw new Error("condition.accessory is required (must be a non-empty string)");
       }
       if (typeof property !== "string" || property.trim() === "") {
-        throw new Error("condition.property is required (must be a non-empty string)");
+        throw new Error('condition.property is required (must be a non-empty string; "characteristic" is accepted as an alias)');
       }
       if (typeof value !== "string" || value.trim() === "") {
         throw new Error("condition.value must be a non-empty string");
