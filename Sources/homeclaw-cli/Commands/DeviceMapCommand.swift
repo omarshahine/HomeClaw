@@ -94,8 +94,9 @@ struct DeviceMapCmd: ParsableCommand {
                         let summary = dev["state_summary"] as? String ?? ""
                         let reachable = dev["reachable"] as? Bool ?? false
                         let prefix = reachable ? "+" : "-"
+                        let bridgeStr = bridgeDisplayName(in: dev).map { " via \($0)" } ?? ""
                         let stateStr = summary.isEmpty || summary == "unknown" ? "" : " — \(summary)"
-                        lines.append("      \(prefix) \(nameStr) [\(semType)]\(stateStr)")
+                        lines.append("      \(prefix) \(nameStr) [\(semType)]\(bridgeStr)\(stateStr)")
                     }
                 }
             }
@@ -146,6 +147,9 @@ struct DeviceMapCmd: ParsableCommand {
                         ]
                         if let reachable = dev["reachable"] as? Bool, !reachable {
                             entry["unreachable"] = true
+                        }
+                        if let bridge = bridgeDisplayName(in: dev) {
+                            entry["bridge"] = bridge
                         }
                         // Include home/zone only when there are multiple homes
                         if homes.count > 1 {
@@ -227,8 +231,8 @@ struct DeviceMapCmd: ParsableCommand {
                     let devices = room["devices"] as? [[String: Any]] ?? []
                     md.append("#### \(roomName)")
                     md.append("")
-                    md.append("| Device | ID | Type | State | Controls |")
-                    md.append("|--------|----|------|-------|----------|")
+                    md.append("| Device | ID | Type | Bridge | State | Controls |")
+                    md.append("|--------|----|------|--------|-------|----------|")
 
                     for dev in devices {
                         let name = dev["display_name"] as? String ?? dev["name"] as? String ?? "?"
@@ -241,8 +245,9 @@ struct DeviceMapCmd: ParsableCommand {
                             .filter { $0 != "identify" }
                             .joined(separator: ", ")
 
+                        let bridge = bridgeDisplayName(in: dev) ?? ""
                         let stateStr = reachable ? state : "**unreachable**"
-                        md.append("| \(name) | `\(shortID)` | \(semType) | \(stateStr) | \(controls) |")
+                        md.append("| \(name) | `\(shortID)` | \(semType) | \(bridge) | \(stateStr) | \(controls) |")
                     }
                     md.append("")
                 }

@@ -277,6 +277,14 @@ enum DeviceMap {
         // Global computations across all filtered accessories
         let allFiltered = homes.flatMap { filter($0.accessories) }
         let displayNames = computeDisplayNames(for: allFiltered)
+        // Bridge metadata must honor the same filter the caller applied — otherwise
+        // a filtered-out bridge would leak its name/model into visible children's
+        // JSON, and a visible bridge would leak the UUIDs of hidden children.
+        let allowedAccessoryIDs = Set(allFiltered.map(\.uniqueIdentifier))
+        let bridgeMetadata = BridgeMetadata(
+            homes: homes,
+            isAccessoryVisible: { allowedAccessoryIDs.contains($0.uniqueIdentifier) }
+        )
 
         // Stats
         var semanticTypeCounts: [String: Int] = [:]
@@ -342,6 +350,15 @@ enum DeviceMap {
                         }
                         if let manufacturer = accessory.manufacturer {
                             device["manufacturer"] = manufacturer
+                        }
+                        if let bridge = bridgeMetadata.bridgeSummary(for: accessory) {
+                            device["bridge"] = bridge
+                        }
+                        let bridgedAccessoryIDs = bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+                        if !bridgedAccessoryIDs.isEmpty {
+                            device["is_bridge"] = true
+                            device["bridged_accessory_count"] = bridgedAccessoryIDs.count
+                            device["bridged_accessory_ids"] = bridgedAccessoryIDs
                         }
 
                         devicesList.append(device)

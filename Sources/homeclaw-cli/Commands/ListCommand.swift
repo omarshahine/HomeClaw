@@ -74,8 +74,9 @@ struct List: ParsableCommand {
             if let state = accessory["state"] as? [String: String] {
                 stateStr = state.map { "\($0.key)=\($0.value)" }.joined(separator: ", ")
             }
+            let bridgeStr = bridgeDisplayName(in: accessory).map { " via \($0)" } ?? ""
 
-            print("\(reachable) \(name) [\(category)] in \(room)\(stateStr.isEmpty ? "" : " — \(stateStr)")")
+            print("\(reachable) \(name) [\(category)] in \(room)\(bridgeStr)\(stateStr.isEmpty ? "" : " — \(stateStr)")")
         }
     }
 }

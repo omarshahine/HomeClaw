@@ -88,6 +88,34 @@ struct ParseAssignmentsTests {
     }
 }
 
+// MARK: - bridgeDisplayName
+
+@Suite("bridgeDisplayName")
+struct BridgeDisplayNameTests {
+    @Test("uses bridge name when present")
+    func name() {
+        let accessory: [String: Any] = [
+            "bridge": ["id": "bridge-id", "name": "Hue Bridge"]
+        ]
+
+        #expect(bridgeDisplayName(in: accessory) == "Hue Bridge")
+    }
+
+    @Test("falls back to bridge id")
+    func idFallback() {
+        let accessory: [String: Any] = [
+            "bridge": ["id": "bridge-id"]
+        ]
+
+        #expect(bridgeDisplayName(in: accessory) == "bridge-id")
+    }
+
+    @Test("returns nil without bridge metadata")
+    func missingBridge() {
+        #expect(bridgeDisplayName(in: [:]) == nil)
+    }
+}
+
 // MARK: - formatSceneReferences (uniform list/get scene rendering)
 
 @Suite("formatSceneReferences")

@@ -44,6 +44,12 @@ struct Get: ParsableCommand {
         print("  Category:  \(category)")
         print("  Room:      \(room)")
         print("  Reachable: \(reachable)")
+        if let bridge = bridgeDisplayName(in: detail) {
+            print("  Bridge:    \(bridge)")
+        }
+        if let bridgedAccessoryCount = detail["bridged_accessory_count"] as? Int {
+            print("  Bridged:   \(bridgedAccessoryCount) accessory(ies)")
+        }
         if detail["refreshed"] as? Bool == false {
             print("  Note:      --no-refresh — static + last-known values only (dynamic state not live-read)")
         }

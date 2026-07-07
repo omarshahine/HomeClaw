@@ -52,3 +52,11 @@ func printJSON(_ value: Any?) {
     // Fallback
     print("\(value)")
 }
+
+/// Returns a stable display name for an accessory's bridge metadata.
+func bridgeDisplayName(in dict: [String: Any]) -> String? {
+    guard let bridge = dict["bridge"] as? [String: Any] else {
+        return nil
+    }
+    return bridge["name"] as? String ?? bridge["id"] as? String
+}

@@ -46,7 +46,8 @@ struct Search: ParsableCommand {
             let name = accessory["name"] as? String ?? "Unknown"
             let category = accessory["category"] as? String ?? "unknown"
             let room = accessory["room"] as? String ?? "No Room"
-            print("  \(name) [\(category)] in \(room)")
+            let bridgeStr = bridgeDisplayName(in: accessory).map { " via \($0)" } ?? ""
+            print("  \(name) [\(category)] in \(room)\(bridgeStr)")
         }
     }
 }

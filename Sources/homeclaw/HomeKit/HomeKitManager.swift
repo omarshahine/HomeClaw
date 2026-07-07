@@ -373,6 +373,7 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
         if Self.isDemoMode { return DemoFixtures.roomSummaries() }
         let targetHomes = filteredHomes(homeID: homeID)
+        let bridgeMetadata = BridgeMetadata(homes: targetHomes, isAccessoryVisible: isAccessoryAllowed)
         var result: [[String: Any]] = []
         for home in targetHomes {
             for room in home.rooms {
@@ -381,7 +382,12 @@ final class HomeKitManager: NSObject, Observable {
                 dict["accessory_count"] = filtered.count
                 dict["accessories"] = filtered.map { accessory in
                     let id = accessory.uniqueIdentifier.uuidString
-                    return AccessoryModel.accessorySummary(accessory, cachedState: cache.cachedState(for: id))
+                    return AccessoryModel.accessorySummary(
+                        accessory,
+                        cachedState: cache.cachedState(for: id),
+                        bridge: bridgeMetadata.bridgeSummary(for: accessory),
+                        bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+                    )
                 }
                 result.append(dict)
             }
@@ -419,6 +425,7 @@ final class HomeKitManager: NSObject, Observable {
         let allFiltered = targetHomes.flatMap { filterAccessories($0.accessories) }
         let displayNames = DeviceMap.computeDisplayNames(for: allFiltered)
         let roomZones = buildRoomZoneLookup(for: targetHomes)
+        let bridgeMetadata = BridgeMetadata(homes: targetHomes, isAccessoryVisible: isAccessoryAllowed)
 
         let result = filtered.map { accessory in
             let id = accessory.uniqueIdentifier
@@ -429,7 +436,9 @@ final class HomeKitManager: NSObject, Observable {
                 cachedState: cache.cachedState(for: id.uuidString),
                 zone: zone,
                 displayName: displayNames[id],
-                semanticType: semanticType.rawValue
+                semanticType: semanticType.rawValue,
+                bridge: bridgeMetadata.bridgeSummary(for: accessory),
+                bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
             )
         }
         if cache.isStale { Task { await warmCache() } }
@@ -451,7 +460,15 @@ final class HomeKitManager: NSObject, Observable {
             await readAllValues(for: accessory)
             updateCacheFromAccessory(accessory)
         }
-        var detail = AccessoryModel.accessoryDetail(accessory)
+        let bridgeMetadata = BridgeMetadata(
+            homes: findHome(for: accessory).map { [$0] } ?? filteredHomes(homeID: homeID),
+            isAccessoryVisible: isAccessoryAllowed
+        )
+        var detail = AccessoryModel.accessoryDetail(
+            accessory,
+            bridge: bridgeMetadata.bridgeSummary(for: accessory),
+            bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+        )
         if !refresh {
             // Signal that dynamic characteristic values were NOT live-read this
             // call. Without a refresh, never-read characteristics serialize as
@@ -586,7 +603,15 @@ final class HomeKitManager: NSObject, Observable {
         // Read back current values, update cache, and return updated state
         await readInterestingValues(for: accessory)
         updateCacheFromAccessory(accessory)
-        return AccessoryModel.accessorySummary(accessory)
+        let bridgeMetadata = BridgeMetadata(
+            homes: findHome(for: accessory).map { [$0] } ?? filteredHomes(homeID: homeID),
+            isAccessoryVisible: isAccessoryAllowed
+        )
+        return AccessoryModel.accessorySummary(
+            accessory,
+            bridge: bridgeMetadata.bridgeSummary(for: accessory),
+            bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+        )
     }
 
     // MARK: - Scenes
@@ -3042,6 +3067,7 @@ final class HomeKitManager: NSObject, Observable {
 
         let filtered = filterAccessories(results)
         let roomZones = buildRoomZoneLookup(for: targetHomes)
+        let bridgeMetadata = BridgeMetadata(homes: targetHomes, isAccessoryVisible: isAccessoryAllowed)
 
         let output = filtered.map { accessory in
             let id = accessory.uniqueIdentifier
@@ -3052,7 +3078,9 @@ final class HomeKitManager: NSObject, Observable {
                 cachedState: cache.cachedState(for: id.uuidString),
                 zone: zone,
                 displayName: displayNames[id],
-                semanticType: semanticType.rawValue
+                semanticType: semanticType.rawValue,
+                bridge: bridgeMetadata.bridgeSummary(for: accessory),
+                bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
             )
         }
         if cache.isStale { Task { await warmCache() } }
@@ -3077,6 +3105,7 @@ final class HomeKitManager: NSObject, Observable {
     func listAllAccessories() async -> [[String: Any]] {
         await waitForReady()
         if Self.isDemoMode { return DemoFixtures.allAccessoriesWithHome() }
+        let bridgeMetadata = BridgeMetadata(homes: homes)
         return homes.flatMap { home in
             home.accessories.map { accessory in
                 let id = accessory.uniqueIdentifier.uuidString
@@ -3099,6 +3128,14 @@ final class HomeKitManager: NSObject, Observable {
                 if let cachedState = cache.cachedState(for: id), !cachedState.isEmpty {
                     dict["state"] = cachedState
                 }
+                if let bridge = bridgeMetadata.bridgeSummary(for: accessory) {
+                    dict["bridge"] = bridge
+                }
+                let bridgedAccessoryIDs = bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+                if !bridgedAccessoryIDs.isEmpty {
+                    dict["is_bridge"] = true
+                    dict["bridged_accessory_count"] = bridgedAccessoryIDs.count
+                }
                 return dict
             }
         }
@@ -3116,6 +3153,7 @@ final class HomeKitManager: NSObject, Observable {
         guard let selectedHome = targetHomes.first else {
             return ["ready": true, "selected_home": "", "homes": [], "scenes": [], "rooms": []]
         }
+        let bridgeMetadata = BridgeMetadata(homes: [selectedHome], isAccessoryVisible: isAccessoryAllowed)
 
         let homesList: [[String: Any]] = homes.map { home in
             [
@@ -3145,7 +3183,11 @@ final class HomeKitManager: NSObject, Observable {
                 .map { accessory in
                     let id = accessory.uniqueIdentifier.uuidString
                     return AccessoryModel.accessorySummary(
-                        accessory, cachedState: cache.cachedState(for: id))
+                        accessory,
+                        cachedState: cache.cachedState(for: id),
+                        bridge: bridgeMetadata.bridgeSummary(for: accessory),
+                        bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+                    )
                 }
                 .sorted { a, b in
                     let catA = a["category"] as? String ?? "other"

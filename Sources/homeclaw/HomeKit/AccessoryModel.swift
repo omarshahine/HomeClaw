@@ -45,7 +45,9 @@ enum AccessoryModel {
         cachedState: [String: String]? = nil,
         zone: String? = nil,
         displayName: String? = nil,
-        semanticType: String? = nil
+        semanticType: String? = nil,
+        bridge: [String: Any]? = nil,
+        bridgedAccessoryIDs: [String] = []
     ) -> [String: Any] {
         var dict: [String: Any] = [
             "id": accessory.uniqueIdentifier.uuidString,
@@ -68,6 +70,7 @@ enum AccessoryModel {
         if let displayName, displayName != accessory.name { dict["display_name"] = displayName }
         if let semanticType { dict["semantic_type"] = semanticType }
         if let manufacturer = accessory.manufacturer { dict["manufacturer"] = manufacturer }
+        addBridgeMetadata(to: &dict, bridge: bridge, bridgedAccessoryIDs: bridgedAccessoryIDs)
 
         // Use cached state if provided, otherwise read from characteristic objects
         let state: [String: String]
@@ -95,7 +98,11 @@ enum AccessoryModel {
     }
 
     /// Full detail of an accessory (for get views).
-    static func accessoryDetail(_ accessory: HMAccessory) -> [String: Any] {
+    static func accessoryDetail(
+        _ accessory: HMAccessory,
+        bridge: [String: Any]? = nil,
+        bridgedAccessoryIDs: [String] = []
+    ) -> [String: Any] {
         var dict: [String: Any] = [
             "id": accessory.uniqueIdentifier.uuidString,
             "name": accessory.name,
@@ -110,6 +117,12 @@ enum AccessoryModel {
         if let manufacturer = accessory.manufacturer { dict["manufacturer"] = manufacturer }
         if let model = accessory.model { dict["model"] = model }
         if let firmware = accessory.firmwareVersion { dict["firmware"] = firmware }
+        addBridgeMetadata(
+            to: &dict,
+            bridge: bridge,
+            bridgedAccessoryIDs: bridgedAccessoryIDs,
+            includeBridgedAccessoryIDs: true
+        )
 
         // Services and their characteristics
         var services: [[String: Any]] = []
@@ -148,6 +161,24 @@ enum AccessoryModel {
         dict["services"] = services
 
         return dict
+    }
+
+    private static func addBridgeMetadata(
+        to dict: inout [String: Any],
+        bridge: [String: Any]?,
+        bridgedAccessoryIDs: [String],
+        includeBridgedAccessoryIDs: Bool = false
+    ) {
+        if let bridge {
+            dict["bridge"] = bridge
+        }
+
+        guard !bridgedAccessoryIDs.isEmpty else { return }
+        dict["is_bridge"] = true
+        dict["bridged_accessory_count"] = bridgedAccessoryIDs.count
+        if includeBridgedAccessoryIDs {
+            dict["bridged_accessory_ids"] = bridgedAccessoryIDs
+        }
     }
 
     /// Summary of a scene (action set).
