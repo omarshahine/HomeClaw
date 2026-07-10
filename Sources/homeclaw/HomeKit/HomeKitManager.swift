@@ -2055,23 +2055,20 @@ final class HomeKitManager: NSObject, Observable {
         for action in actions {
             // 'property' is canonical; 'characteristic' is a documented alias
             // (read paths emit "characteristic", so accept it on write too — issue #76).
-            guard let accessoryID = action["accessory"],
-                  let property = action["property"] ?? action["characteristic"],
+            guard let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
                 throw ControlError.writeFailed("Action missing required fields (accessory, property, value): \(action)")
             }
 
-            // Try UUID first, then name with optional room disambiguator
             let accessory: HMAccessory
-            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(accessoryID) == .orderedSame }) {
-                accessory = found
-            } else {
-                let roomName = action["room"]
-                guard let found = findAccessoryByName(accessoryID, room: roomName, in: home) else {
-                    throw ControlError.accessoryNotFound(accessoryID + (action["room"].map { " in \($0)" } ?? ""))
-                }
-                accessory = found
+            switch resolveActionAccessory(from: action, in: home) {
+            case .found(let a):
+                accessory = a
+            case .notFound(let identifier, let roomName):
+                throw ControlError.accessoryNotFound(identifier + (roomName.map { " in \($0)" } ?? ""))
+            case .missingReference:
+                throw ControlError.writeFailed("Action missing accessory reference (need accessory_id or accessory): \(action)")
             }
 
             guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
@@ -2623,25 +2620,23 @@ final class HomeKitManager: NSObject, Observable {
         var warnings: [String] = []
 
         for action in actions {
-            guard let accessoryID = action["accessory"],
-                  let property = action["property"] ?? action["characteristic"],
+            guard let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
                 warnings.append("Skipping action with missing fields: \(action)")
                 continue
             }
 
-            // Try UUID first, then name with optional room disambiguator
             let accessory: HMAccessory
-            if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(accessoryID) == .orderedSame }) {
-                accessory = found
-            } else {
-                let roomName = action["room"]
-                guard let found = findAccessoryByName(accessoryID, room: roomName, in: home) else {
-                    warnings.append("Accessory not found: \(accessoryID)" + (roomName.map { " in \($0)" } ?? ""))
-                    continue
-                }
-                accessory = found
+            switch resolveActionAccessory(from: action, in: home) {
+            case .found(let a):
+                accessory = a
+            case .notFound(let identifier, let roomName):
+                warnings.append("Accessory not found: \(identifier)" + (roomName.map { " in \($0)" } ?? ""))
+                continue
+            case .missingReference:
+                warnings.append("Skipping action with no accessory reference: \(action)")
+                continue
             }
 
             guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
@@ -2667,6 +2662,7 @@ final class HomeKitManager: NSObject, Observable {
                 "actions": resolvedActions.map { action in
                     [
                         "accessory": action.accessory.name,
+                        "accessory_id": action.accessory.uniqueIdentifier.uuidString,
                         "room": action.accessory.room?.name ?? "Default Room",
                         "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
                         "value": "\(action.value)",
@@ -2766,8 +2762,7 @@ final class HomeKitManager: NSObject, Observable {
         var warnings: [String] = []
 
         for action in actions {
-            guard let accessoryID = action["accessory"],
-                  let property = action["property"] ?? action["characteristic"],
+            guard let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
                 warnings.append("Skipping action with missing fields: \(action)")
@@ -2775,17 +2770,15 @@ final class HomeKitManager: NSObject, Observable {
             }
 
             let accessory: HMAccessory
-            if let found = home.accessories.first(where: {
-                $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(accessoryID) == .orderedSame
-            }) {
-                accessory = found
-            } else {
-                let roomName = action["room"]
-                guard let found = findAccessoryByName(accessoryID, room: roomName, in: home) else {
-                    warnings.append("Accessory not found: \(accessoryID)" + (roomName.map { " in \($0)" } ?? ""))
-                    continue
-                }
-                accessory = found
+            switch resolveActionAccessory(from: action, in: home) {
+            case .found(let a):
+                accessory = a
+            case .notFound(let identifier, let roomName):
+                warnings.append("Accessory not found: \(identifier)" + (roomName.map { " in \($0)" } ?? ""))
+                continue
+            case .missingReference:
+                warnings.append("Skipping action with no accessory reference: \(action)")
+                continue
             }
 
             guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
@@ -2813,6 +2806,7 @@ final class HomeKitManager: NSObject, Observable {
                 "actions": resolvedActions.map { action in
                     [
                         "accessory": action.accessory.name,
+                        "accessory_id": action.accessory.uniqueIdentifier.uuidString,
                         "room": action.accessory.room?.name ?? "Default Room",
                         "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
                         "value": "\(action.value)",
@@ -2828,22 +2822,65 @@ final class HomeKitManager: NSObject, Observable {
                 "All \(actions.count) action(s) failed to resolve; scene '\(actionSet.name)' not modified.")
         }
 
-        // Snapshot the pre-existing actions BEFORE any mutation. Used to drive
-        // the remove loop below. We can't rely on `actionSet.actions.subtracting(addedActions)`
-        // post-add because HomeKit may wrap/replace the HMAction we provide
-        // before storing it; the reference we hold in `addedActions` may not
-        // match the one in `actionSet.actions` by identity, and HMAction is
-        // hashed/equated as NSObject (reference equality).
         let oldActions = Array(actionSet.actions)
+        let oldWriteActions = oldActions.compactMap {
+            $0 as? HMCharacteristicWriteAction<NSCopying>
+        }
+        let desiredCharacteristicIDs = Set(resolvedActions.map { $0.characteristic.uniqueIdentifier })
 
-        // Add new actions BEFORE removing the old ones. If `addAction` throws
-        // partway through, the original actions are still attached, so the
-        // scene retains its prior behavior (and the partial adds will trigger
-        // alongside the originals — redundant but not destructive). We then
-        // best-effort clean up any partial adds before propagating the error.
+        var seenCharacteristicIDs = Set<UUID>()
+        for resolved in resolvedActions {
+            guard seenCharacteristicIDs.insert(resolved.characteristic.uniqueIdentifier).inserted else {
+                throw ControlError.invalidArgument(
+                    "Scene '\(actionSet.name)' contains more than one requested action for "
+                        + "\(resolved.accessory.name)'s "
+                        + "\(CharacteristicMapper.name(for: resolved.characteristic.characteristicType)) characteristic."
+                )
+            }
+        }
+
+        var additions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
+        var targetUpdates: [(
+            action: HMCharacteristicWriteAction<NSCopying>,
+            previousValue: NSCopying,
+            desiredValue: NSCopying
+        )] = []
+
+        for resolved in resolvedActions {
+            let existingAction = oldWriteActions.first {
+                $0.characteristic.uniqueIdentifier == resolved.characteristic.uniqueIdentifier
+            }
+            guard let existingAction else {
+                additions.append(resolved)
+                continue
+            }
+
+            let previousObject = existingAction.targetValue as? NSObjectProtocol
+            let desiredObject = resolved.value as? NSObjectProtocol
+            guard previousObject?.isEqual(desiredObject) != true else { continue }
+
+            targetUpdates.append((
+                action: existingAction,
+                previousValue: existingAction.targetValue,
+                desiredValue: resolved.value as! NSCopying
+            ))
+        }
+
+        let removals = oldActions.filter { action in
+            guard let writeAction = action as? HMCharacteristicWriteAction<NSCopying> else {
+                return true
+            }
+            return !desiredCharacteristicIDs.contains(writeAction.characteristic.uniqueIdentifier)
+        }
+
         var addedActions: [HMAction] = []
+        var appliedTargetUpdates: [(
+            action: HMCharacteristicWriteAction<NSCopying>,
+            previousValue: NSCopying
+        )] = []
+        var removedActions: [HMAction] = []
         do {
-            for resolved in resolvedActions {
+            for resolved in additions {
                 let writeAction = HMCharacteristicWriteAction(
                     characteristic: resolved.characteristic,
                     targetValue: resolved.value as! NSCopying & NSObjectProtocol
@@ -2856,8 +2893,39 @@ final class HomeKitManager: NSObject, Observable {
                 }
                 addedActions.append(writeAction)
             }
+
+            for update in targetUpdates {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    update.action.updateTargetValue(update.desiredValue) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+                appliedTargetUpdates.append((update.action, update.previousValue))
+            }
+
+            for action in removals {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    actionSet.removeAction(action) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
+                    }
+                }
+                removedActions.append(action)
+            }
         } catch {
-            // Roll back the partial adds so the scene returns to its prior state.
+            // Roll back each completed delta so a partial failure leaves the
+            // scene behaving as it did before the update.
+            for action in removedActions {
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    actionSet.addAction(action) { _ in continuation.resume() }
+                }
+            }
+            for update in appliedTargetUpdates.reversed() {
+                try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    update.action.updateTargetValue(update.previousValue) { _ in continuation.resume() }
+                }
+            }
             for action in addedActions {
                 try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                     actionSet.removeAction(action) { _ in continuation.resume() }
@@ -2866,20 +2934,10 @@ final class HomeKitManager: NSObject, Observable {
             throw error
         }
         let addedCount = addedActions.count
-
-        // Remove only the pre-snapshotted originals.
-        for action in oldActions {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                actionSet.removeAction(action) { error in
-                    if let error { continuation.resume(throwing: error) }
-                    else { continuation.resume() }
-                }
-            }
-        }
-        let removedCount = oldActions.count
+        let removedCount = removedActions.count
 
         AppLogger.homekit.info(
-            "[\(home.name)] Updated scene '\(actionSet.name)': added \(addedCount), removed \(removedCount)")
+            "[\(home.name)] Updated scene '\(actionSet.name)': added \(addedCount), updated \(appliedTargetUpdates.count), removed \(removedCount)")
 
         return [
             "updated": true,
@@ -2888,11 +2946,52 @@ final class HomeKitManager: NSObject, Observable {
             "home": home.name,
             "removed_action_count": removedCount,
             "added_action_count": addedCount,
+            "updated_action_count": appliedTargetUpdates.count,
             "warnings": warnings,
         ] as [String: Any]
     }
 
     // MARK: - Scene Management Helpers
+
+    /// Result of resolving an action's accessory reference against a home.
+    enum ActionAccessoryLookup {
+        case found(HMAccessory)
+        case notFound(identifier: String, room: String?)
+        case missingReference
+    }
+
+    /// Resolve an action dictionary to a live HMAccessory in the given home.
+    ///
+    /// Prefers `accessory_id` (unambiguous UUID emitted by `get-scene` and
+    /// friends) so round-tripping a scene is exact. Falls back to `accessory`
+    /// (either a legacy UUID or a name, optionally disambiguated by `room`) so
+    /// exported JSON survives being replayed against a home where the original
+    /// accessory has been replaced or reset — the stale UUID misses and the
+    /// name lookup rescues it.
+    func resolveActionAccessory(from action: [String: String], in home: HMHome) -> ActionAccessoryLookup {
+        if let uuid = action["accessory_id"],
+           let found = home.accessories.first(where: {
+               $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(uuid) == .orderedSame
+           }) {
+            return .found(found)
+        }
+
+        guard let identifier = action["accessory"] else {
+            return .missingReference
+        }
+
+        if let found = home.accessories.first(where: {
+            $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(identifier) == .orderedSame
+        }) {
+            return .found(found)
+        }
+
+        let roomName = action["room"]
+        if let found = findAccessoryByName(identifier, room: roomName, in: home) {
+            return .found(found)
+        }
+        return .notFound(identifier: identifier, room: roomName)
+    }
 
     /// Find an accessory by name and optional room within a specific home.
     private func findAccessoryByName(_ name: String, room roomName: String?, in home: HMHome) -> HMAccessory? {

@@ -179,6 +179,7 @@ enum AccessoryModel {
             let accessory = characteristic.service?.accessory
             return [
                 "accessory": accessory?.name ?? "Unknown",
+                "accessory_id": accessory?.uniqueIdentifier.uuidString ?? "",
                 "room": accessory?.room?.name ?? "Default Room",
                 "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
                 "value": "\(writeAction.targetValue)",

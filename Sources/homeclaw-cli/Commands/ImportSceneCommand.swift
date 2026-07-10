@@ -28,7 +28,8 @@ struct ImportScene: ParsableCommand {
         else {
             throw ValidationError(
                 "JSON input must contain 'name' (string) and 'actions' array of "
-                    + "{\"accessory\": \"...\", \"property\": \"...\", \"value\": \"...\"} objects "
+                    + "{\"accessory\": \"...\", \"accessory_id\": \"optional UUID\", "
+                    + "\"property\": \"...\", \"value\": \"...\"} objects "
                     + "('characteristic' is accepted as an alias for 'property')"
             )
         }

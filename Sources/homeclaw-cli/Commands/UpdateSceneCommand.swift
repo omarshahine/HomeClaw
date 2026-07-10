@@ -27,7 +27,8 @@ struct UpdateScene: ParsableCommand {
         else {
             throw ValidationError(
                 "JSON input must contain 'actions' array of "
-                    + "{\"accessory\": \"...\", \"property\": \"...\", \"value\": \"...\"} objects "
+                    + "{\"accessory\": \"...\", \"accessory_id\": \"optional UUID\", "
+                    + "\"property\": \"...\", \"value\": \"...\"} objects "
                     + "('characteristic' is accepted as an alias for 'property'), "
                     + "plus either 'id' (preferred) or 'name' to identify the scene"
             )
@@ -74,8 +75,8 @@ struct UpdateScene: ParsableCommand {
             print("DRY RUN — no changes made\n")
             print("Scene: \(sceneName) [\(sceneID)]")
             print("Home: \(homeName)")
-            print("Existing actions: \(existingCount) (will be removed)")
-            print("New actions:      \(resolvedCount) (will be added)")
+            print("Existing actions:  \(existingCount)")
+            print("Requested actions: \(resolvedCount)")
 
             if let actions = result["actions"] as? [[String: String]] {
                 for action in actions {
@@ -89,8 +90,9 @@ struct UpdateScene: ParsableCommand {
         } else {
             let removed = result["removed_action_count"] as? Int ?? 0
             let added = result["added_action_count"] as? Int ?? 0
+            let updated = result["updated_action_count"] as? Int ?? 0
             print(
-                "Updated scene '\(sceneName)' in \(homeName): removed \(removed), added \(added) action(s)"
+                "Updated scene '\(sceneName)' in \(homeName): added \(added), updated \(updated), removed \(removed) action(s)"
             )
             print("UUID preserved: \(sceneID)")
         }
