@@ -454,10 +454,11 @@ enum AccessoryModel {
 
         // Brief condition count in the event summary so list views show the predicate is non-trivial.
         // Full structured conditions are surfaced by `automationDetail` and `extractConditions`.
-        // We pass `home: nil` here because this summary path doesn't have access to it; weekdays
-        // and time predicates are still counted, characteristic accessory names just won't resolve.
+        // We pass `home: nil` here because this summary path doesn't have access to it; weekday
+        // recurrences and time predicates are still counted, characteristic accessory names just won't resolve.
         // (`automationDetail` uses the home-scoped variant for richer output.)
-        let conditionCount = countConditions(trigger.predicate)
+        let hasWeekdayRestriction = !(trigger.recurrences ?? []).compactMap(\.weekday).isEmpty
+        let conditionCount = countConditions(trigger.predicate) + (hasWeekdayRestriction ? 1 : 0)
         if conditionCount > 0, let existing = dict["event_summary"] as? String {
             dict["event_summary"] = existing + " (+\(conditionCount) condition\(conditionCount == 1 ? "" : "s"))"
         }
@@ -570,7 +571,16 @@ enum AccessoryModel {
         // Decode the trigger predicate into structured conditions. Skipped when there's no
         // predicate at all, or when nothing decodes (rather than emitting an empty array
         // — keeps existing JSON consumers from seeing a new-but-always-empty key).
-        let conditions = extractConditions(trigger.predicate, in: home)
+        var conditions = extractConditions(trigger.predicate, in: home)
+        let weekdays = Array(Set((trigger.recurrences ?? []).compactMap(\.weekday).filter { (1...7).contains($0) })).sorted()
+        if !weekdays.isEmpty {
+            let names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+            conditions.insert([
+                "type": "weekdays",
+                "weekdays": weekdays,
+                "summary": weekdays.map { names[$0 - 1] }.joined(separator: ", "),
+            ], at: 0)
+        }
         if !conditions.isEmpty {
             detail["conditions"] = conditions
         }

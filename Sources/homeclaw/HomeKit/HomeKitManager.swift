@@ -1474,17 +1474,26 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.writeFailed("Either 'scene_id' or 'actions' must be provided")
         }
 
-        // Create the event trigger
+        // Build the complete trigger before adding it to the home. HomeKit exposes
+        // weekdays through `recurrences`; encoding them as an OR predicate and then
+        // mutating the persisted trigger via `updatePredicate` is rejected by some
+        // HomeKit runtimes when combined with significant-time predicates.
         let event = HMCharacteristicEvent(
             characteristic: triggerChar,
             triggerValue: triggerNSValue
         )
+        let triggerPredicate = buildCombinedPredicate(
+            existing: nil,
+            resolvedConditions: resolvedConditions,
+            timeConditions: timeConditions
+        )
+        let triggerRecurrences = weekdayRecurrences(effectiveWeekdays)
         let trigger = HMEventTrigger(
             name: name,
             events: [event],
             end: nil,
-            recurrences: nil,
-            predicate: nil
+            recurrences: triggerRecurrences,
+            predicate: triggerPredicate
         )
 
         // Step 1: Add trigger to home. On failure, clean up the inline action set
@@ -1512,20 +1521,7 @@ final class HomeKitManager: NSObject, Observable {
             throw error
         }
 
-        // Step 1b: Build & apply the combined trigger predicate (weekdays + conditions +
-        // time conditions). Shared with `createTimeAutomation`. On failure, the helper
-        // tears down the orphan trigger and inline action set if applicable.
-        try await applyCombinedPredicate(
-            to: trigger,
-            weekdays: effectiveWeekdays,
-            resolvedConditions: resolvedConditions,
-            timeConditions: timeConditions,
-            isInlineActionSet: isInlineActionSet,
-            actionSet: actionSet,
-            in: home
-        )
-
-        // Step 1c: Attach an HMDurationEvent end-event so HomeKit reverts the
+        // Step 1b: Attach an HMDurationEvent end-event so HomeKit reverts the
         // trigger's actions after N seconds (e.g. motion-triggered light auto-off).
         if let durationSeconds {
             do {
@@ -1790,14 +1786,21 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.writeFailed("Either 'scene_id' or 'actions' must be provided")
         }
 
-        // Build the trigger from the time spec.
+        // Build the complete trigger before adding it to the home. Weekday gates
+        // belong in `recurrences`; the remaining conditions belong in `predicate`.
         let triggerEvent = timeSpec.makeEvent()
+        let triggerPredicate = buildCombinedPredicate(
+            existing: nil,
+            resolvedConditions: resolvedConditions,
+            timeConditions: timeConditions
+        )
+        let triggerRecurrences = weekdayRecurrences(effectiveWeekdays)
         let trigger = HMEventTrigger(
             name: name,
             events: [triggerEvent],
             end: nil,
-            recurrences: nil,
-            predicate: nil
+            recurrences: triggerRecurrences,
+            predicate: triggerPredicate
         )
 
         // Step 1: Add trigger to home. On failure, clean up the inline action set
@@ -1821,18 +1824,7 @@ final class HomeKitManager: NSObject, Observable {
             throw error
         }
 
-        // Step 1b: predicate composition + cleanup-on-failure. Shared with createAutomation.
-        try await applyCombinedPredicate(
-            to: trigger,
-            weekdays: effectiveWeekdays,
-            resolvedConditions: resolvedConditions,
-            timeConditions: timeConditions,
-            isInlineActionSet: isInlineActionSet,
-            actionSet: actionSet,
-            in: home
-        )
-
-        // Step 1c: optional HMDurationEvent. Same cleanup pattern as Step 1b.
+        // Step 1b: optional HMDurationEvent.
         if let durationSeconds {
             do {
                 try await applyDuration(seconds: durationSeconds, to: trigger)
@@ -1961,33 +1953,40 @@ final class HomeKitManager: NSObject, Observable {
         return resolved
     }
 
-    /// Build the AND-combined trigger predicate from weekdays + characteristic
-    /// conditions + sun-relative time conditions.
+    /// Convert an explicit weekday restriction to HomeKit recurrences. An empty
+    /// list means every day, which HomeKit represents with nil recurrences.
     ///
-    /// Returns nil if all inputs are empty (no `updatePredicate` call needed).
+    /// Do NOT collapse an all-seven-weekdays list to nil: `createAutomation` and
+    /// `createTimeAutomation` deliberately auto-fill `[1...7]` when time
+    /// conditions are present without explicit `--days`, because iOS 15+ marks
+    /// time-conditional automations without a weekday gate as "unreliable" and
+    /// silently declines to fire them. That workaround only holds if the gate
+    /// is actually persisted on the trigger — collapsing all-seven back to nil
+    /// here would revert the auto-fill and re-introduce the reliability bug.
+    /// See the `weekdaysAutoFilled` sites for the reasoning.
+    fileprivate func weekdayRecurrences(_ weekdays: [Int]) -> [DateComponents]? {
+        let uniqueWeekdays = Array(Set(weekdays)).sorted()
+        guard !uniqueWeekdays.isEmpty else { return nil }
+        return uniqueWeekdays.map { weekday in
+            var components = DateComponents()
+            components.weekday = weekday
+            return components
+        }
+    }
+
+    /// Build the AND-combined trigger predicate from characteristic conditions
+    /// and sun-relative time conditions.
+    ///
+    /// Returns nil if all inputs are empty.
     /// Returns the single subpredicate directly if only one is present, or an
-    /// `NSCompoundPredicate(andPredicateWithSubpredicates:)` otherwise. Mirrors
-    /// the structure documented in `createAutomation`'s Step 1b.
+    /// `NSCompoundPredicate(andPredicateWithSubpredicates:)` otherwise.
     fileprivate func buildCombinedPredicate(
         existing: NSPredicate?,
-        weekdays: [Int],
         resolvedConditions: [ResolvedCondition],
         timeConditions: [TimeCondition]
     ) -> NSPredicate? {
         var subpredicates: [NSPredicate] = []
         if let existing { subpredicates.append(existing) }
-        if !weekdays.isEmpty {
-            let dayPredicates: [NSPredicate] = weekdays.map { weekday in
-                var dc = DateComponents()
-                dc.weekday = weekday
-                return HMEventTrigger.predicateForEvaluatingTrigger(occurringOn: dc)
-            }
-            subpredicates.append(
-                dayPredicates.count == 1
-                    ? dayPredicates[0]
-                    : NSCompoundPredicate(orPredicateWithSubpredicates: dayPredicates)
-            )
-        }
         for cond in resolvedConditions {
             subpredicates.append(
                 HMEventTrigger.predicateForEvaluatingTrigger(
@@ -2003,33 +2002,6 @@ final class HomeKitManager: NSObject, Observable {
         if subpredicates.isEmpty { return nil }
         if subpredicates.count == 1 { return subpredicates[0] }
         return NSCompoundPredicate(andPredicateWithSubpredicates: subpredicates)
-    }
-
-    /// Compose + apply the combined predicate to the trigger. On failure, clean
-    /// up the orphan trigger and inline action set (if applicable) before rethrowing.
-    /// Shared with `createTimeAutomation` so both call sites use the same Step 1b shape.
-    fileprivate func applyCombinedPredicate(
-        to trigger: HMEventTrigger,
-        weekdays: [Int],
-        resolvedConditions: [ResolvedCondition],
-        timeConditions: [TimeCondition],
-        isInlineActionSet: Bool,
-        actionSet: HMActionSet,
-        in home: HMHome
-    ) async throws {
-        let combinedPredicate = buildCombinedPredicate(
-            existing: trigger.predicate,
-            weekdays: weekdays,
-            resolvedConditions: resolvedConditions,
-            timeConditions: timeConditions
-        )
-        guard let combinedPredicate else { return }
-        do {
-            try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
-        } catch {
-            await cleanupOrphans(trigger: trigger, isInlineActionSet: isInlineActionSet, actionSet: actionSet, in: home)
-            throw error
-        }
     }
 
     /// Tear down an orphan trigger (and inline action set if we created one)
