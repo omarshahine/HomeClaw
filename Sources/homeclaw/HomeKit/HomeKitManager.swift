@@ -189,6 +189,13 @@ enum TimeSpec: Equatable {
             throw ParseError.unknownFormat(raw)
         }
 
+        // Tolerate whitespace anywhere in the offset (`sunset -30`, `sunset- 30`,
+        // `sunset - 30`). The pre-#81 condition parser trimmed the leading side, and
+        // the MCP layer forwards raw strings without format validation, so callers
+        // (including LLMs writing `"sunset -30"`) could and did rely on it. Stripping
+        // all whitespace here is a superset of both pre-#81 parsers, so unifying the
+        // grammar can't reject anything either surface used to accept.
+        rest = rest.filter { !$0.isWhitespace }
         if rest.isEmpty { return .significantTime(event: event, offsetMinutes: 0) }
 
         guard let sign = rest.first, sign == "+" || sign == "-" else { throw ParseError.badOffsetSign(raw) }

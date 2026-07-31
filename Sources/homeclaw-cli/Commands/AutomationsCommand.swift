@@ -395,16 +395,23 @@ struct CreateAutomation: ParsableCommand {
             return String(format: "%02d:%02d", hour, minute)
         }
 
-        let rest: String
+        let event: String
+        var rest: String
         if lower.hasPrefix("sunrise") {
+            event = "sunrise"
             rest = String(lower.dropFirst("sunrise".count))
         } else if lower.hasPrefix("sunset") {
+            event = "sunset"
             rest = String(lower.dropFirst("sunset".count))
         } else {
             throw ValidationError("Invalid \(flag) '\(raw)'. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (noon/midnight not supported).")
         }
 
-        if rest.isEmpty { return lower }
+        // Tolerate whitespace anywhere in the offset (`sunset -30`, `sunset - 30`) and
+        // normalize it away, so the value we put on the wire is canonical. Mirrors the
+        // same tolerance in `TimeSpec.parse`; see the note there for why it exists.
+        rest = rest.filter { !$0.isWhitespace }
+        if rest.isEmpty { return event }
 
         guard let sign = rest.first, sign == "+" || sign == "-" else {
             throw ValidationError("Invalid \(flag) '\(raw)'. Offset must start with + or - (e.g. 'sunset-30').")
@@ -419,7 +426,7 @@ struct CreateAutomation: ParsableCommand {
         if magnitude > 1440 {
             throw ValidationError("Invalid \(flag) '\(raw)'. Offsets larger than 1440 minutes (24h) are rejected — that's almost certainly a typo; use --days for weekday gating.")
         }
-        return lower
+        return event + rest
     }
 
     /// Parse `--days mon,tue,...` (or numeric `1-7` where 1=Sun) into the HomeKit

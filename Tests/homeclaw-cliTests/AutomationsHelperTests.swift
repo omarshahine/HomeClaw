@@ -62,6 +62,19 @@ struct ValidateTimeSpecTests {
         #expect(try CreateAutomation.validateTimeSpec("sunrise+0", flag: "--time-after") == "sunrise+0")
     }
 
+    @Test("whitespace inside a sun offset is tolerated and normalized away")
+    func spacedOffsets() throws {
+        // The pre-#81 socket-side condition parser trimmed the leading side of the
+        // offset, so `sunset -30` reached HomeKit fine via MCP (which forwards raw
+        // strings unvalidated). Unifying the grammar must not regress that, and the
+        // value we put on the wire should be canonical either way.
+        #expect(try CreateAutomation.validateTimeSpec("sunset -30", flag: "--time-after") == "sunset-30")
+        #expect(try CreateAutomation.validateTimeSpec("sunrise +15", flag: "--time-before") == "sunrise+15")
+        #expect(try CreateAutomation.validateTimeSpec("sunset - 30", flag: "--time-after") == "sunset-30")
+        #expect(try CreateAutomation.validateTimeSpec("sunset- 30", flag: "--time-after") == "sunset-30")
+        #expect(try CreateAutomation.validateTimeSpec("  SUNRISE + 15  ", flag: "--time") == "sunrise+15")
+    }
+
     @Test("offset at the 1440-minute cap accepted, beyond it rejected")
     func offsetCap() throws {
         #expect(try CreateAutomation.validateTimeSpec("sunset+1440", flag: "--time-after") == "sunset+1440")
