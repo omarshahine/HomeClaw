@@ -6,8 +6,9 @@ import Testing
 // and FormatDurationTests covers formatDuration. The two helpers below were
 // previously untested:
 //   - formatWeekdays: the inverse of parseWeekdays, used to render list/get output
-//   - validateTimeSpec: the --time-after / --time-before parser (distinct from the
-//     --time parser, which is validateTimeOfDaySpec and rejects HH:MM here)
+//   - validateTimeSpec: the --time-after / --time-before parser. Since #81 it shares
+//     its grammar with the --time parser (validateTimeOfDaySpec now delegates to it),
+//     so both clock times and sun events are accepted.
 
 // MARK: - formatWeekdays (HomeKit weekday numbers → label)
 
@@ -69,13 +70,25 @@ struct ValidateTimeSpecTests {
         }
     }
 
-    @Test("HH:MM is NOT a valid sun-relative spec (that's --time, not --time-after)")
-    func clockTimeRejected() {
-        // validateTimeSpec only accepts sunrise/sunset forms — a wall-clock time
-        // belongs to validateTimeOfDaySpec. This guards against the two parsers
-        // being accidentally swapped.
-        #expect(throws: (any Error).self) {
-            _ = try CreateAutomation.validateTimeSpec("06:30", flag: "--time-after")
+    @Test("HH:MM clock times accepted as conditions (#81)")
+    func clockTimeAccepted() throws {
+        // Gating a sensor automation to a fixed time-of-day window is the whole
+        // point of #81 — `--time-after 07:00 --time-before 20:30`.
+        #expect(try CreateAutomation.validateTimeSpec("07:00", flag: "--time-after") == "07:00")
+        #expect(try CreateAutomation.validateTimeSpec("20:30", flag: "--time-before") == "20:30")
+        #expect(try CreateAutomation.validateTimeSpec("00:00", flag: "--time-after") == "00:00")
+        #expect(try CreateAutomation.validateTimeSpec("23:59", flag: "--time-before") == "23:59")
+        #expect(try CreateAutomation.validateTimeSpec("  09:15  ", flag: "--time-after") == "09:15")
+    }
+
+    @Test("clock times keep the strict two-digit / in-range rules of --time")
+    func clockTimeStrictness() {
+        // Same rules as validateTimeOfDaySpec: '6:30' must not be silently widened,
+        // and '12:5' must not become '12:50'.
+        for bad in ["6:30", "12:5", "12:345", "25:00", "24:00", "12:60", "12:ab", ":30", "12:", ":"] {
+            #expect(throws: (any Error).self) {
+                _ = try CreateAutomation.validateTimeSpec(bad, flag: "--time-after")
+            }
         }
     }
 

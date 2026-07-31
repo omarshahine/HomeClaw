@@ -997,8 +997,9 @@ final class SocketServer: @unchecked Sendable {
                 } catch let err as AccessoryRowsArgError {
                     return encodeResponse(success: false, error: err.message)
                 }
-                // Parse sun-relative time predicates. The CLI/MCP layer pre-validates format,
-                // but defensively re-validate here so direct socket clients can't bypass it.
+                // Parse time predicates (clock times and sun-relative events). The CLI/MCP
+                // layer pre-validates format, but defensively re-validate here so direct
+                // socket clients can't bypass it.
                 let timeAfterRaw: [String]
                 let timeBeforeRaw: [String]
                 do {
@@ -1011,14 +1012,14 @@ final class SocketServer: @unchecked Sendable {
                 for raw in timeAfterRaw {
                     guard let tc = TimeCondition.parse(raw, relation: .after) else {
                         return encodeResponse(success: false,
-                            error: "Invalid 'time_after' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
+                            error: "Invalid 'time_after' value '\(raw)'. Use a clock time 'HH:MM' (zero-padded, e.g. '07:00') or sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
                     }
                     timeConditions.append(tc)
                 }
                 for raw in timeBeforeRaw {
                     guard let tc = TimeCondition.parse(raw, relation: .before) else {
                         return encodeResponse(success: false,
-                            error: "Invalid 'time_before' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunrise+15').")
+                            error: "Invalid 'time_before' value '\(raw)'. Use a clock time 'HH:MM' (zero-padded, e.g. '20:30') or sunrise/sunset with optional ±N minutes (e.g. 'sunrise+15').")
                     }
                     timeConditions.append(tc)
                 }
@@ -1120,14 +1121,14 @@ final class SocketServer: @unchecked Sendable {
                 for raw in timeAfterRaw {
                     guard let tc = TimeCondition.parse(raw, relation: .after) else {
                         return encodeResponse(success: false,
-                            error: "Invalid 'time_after' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
+                            error: "Invalid 'time_after' value '\(raw)'. Use a clock time 'HH:MM' (zero-padded, e.g. '07:00') or sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
                     }
                     timeConditions.append(tc)
                 }
                 for raw in timeBeforeRaw {
                     guard let tc = TimeCondition.parse(raw, relation: .before) else {
                         return encodeResponse(success: false,
-                            error: "Invalid 'time_before' value '\(raw)'. Use sunrise/sunset with optional ±N minutes (e.g. 'sunrise+15').")
+                            error: "Invalid 'time_before' value '\(raw)'. Use a clock time 'HH:MM' (zero-padded, e.g. '20:30') or sunrise/sunset with optional ±N minutes (e.g. 'sunrise+15').")
                     }
                     timeConditions.append(tc)
                 }

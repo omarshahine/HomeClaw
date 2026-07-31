@@ -195,10 +195,10 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:contact_state:0'. Note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead.")
     var condition: [String] = []
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires after the given event. Format: '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunset-30'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires after the given time. Format: 'HH:MM' (zero-padded, e.g. '07:00') or '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunset-30'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
     var timeAfter: [String] = []
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires before the given event. Format: '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunrise+15'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires before the given time. Format: 'HH:MM' (zero-padded, e.g. '20:30') or '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunrise+15'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
     var timeBefore: [String] = []
 
     @Option(name: .long, help: "Auto-revert the trigger's actions after this many seconds via HMDurationEvent (1-86400). Useful for motion-triggered lights that should turn off again after a delay.")
@@ -356,14 +356,43 @@ struct CreateAutomation: ParsableCommand {
         return weekdays.compactMap { (1...7).contains($0) ? names[$0] : nil }.joined(separator: ",")
     }
 
-    /// Validate a `--time-after` / `--time-before` spec. Format: `<sunrise|sunset>[±N]`.
-    /// Mirrors `TimeCondition.parse` in HomeKitManager but throws CLI-shaped errors
+    /// Validate a time spec: `HH:MM` (zero-padded, 24-hour) or `<sunrise|sunset>[±N]`.
+    /// Mirrors `TimeSpec.parse` in HomeKitManager (the manager-side source of truth,
+    /// which `TimeCondition.parse` also routes through) but throws CLI-shaped errors
     /// pointing at the offending flag. Defence-in-depth: SocketServer re-validates.
+    ///
+    /// Shared by `--time` (the trigger event, via `validateTimeOfDaySpec`) and
+    /// `--time-after` / `--time-before` (gating predicates), which accept the same
+    /// vocabulary — clock times became valid conditions in #81.
     static func validateTimeSpec(_ raw: String, flag: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
         let lower = trimmed.lowercased()
         guard !lower.isEmpty else {
-            throw ValidationError("\(flag) value is empty. Use 'sunrise', 'sunset', or '<sun-event>±<minutes>'.")
+            throw ValidationError("\(flag) value is empty. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30').")
+        }
+
+        // HH:MM clock time
+        if lower.contains(":") {
+            let parts = lower.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else {
+                throw ValidationError("Invalid \(flag) '\(raw)'. Use 'HH:MM' (e.g. '06:30').")
+            }
+            let hourStr = String(parts[0])
+            let minStr = String(parts[1])
+            // Reject ambiguous widths so '12:5' doesn't silently become '12:50'.
+            guard hourStr.count == 2 else {
+                throw ValidationError("Invalid \(flag) '\(raw)'. Hour must be exactly two digits (e.g. '06:30', not '6:30').")
+            }
+            guard minStr.count == 2 else {
+                throw ValidationError("Invalid \(flag) '\(raw)'. Minute must be exactly two digits (e.g. '06:05', not '06:5').")
+            }
+            guard let hour = Int(hourStr), (0...23).contains(hour) else {
+                throw ValidationError("Invalid \(flag) '\(raw)'. Hour must be 0-23.")
+            }
+            guard let minute = Int(minStr), (0...59).contains(minute) else {
+                throw ValidationError("Invalid \(flag) '\(raw)'. Minute must be 0-59.")
+            }
+            return String(format: "%02d:%02d", hour, minute)
         }
 
         let rest: String
@@ -372,7 +401,7 @@ struct CreateAutomation: ParsableCommand {
         } else if lower.hasPrefix("sunset") {
             rest = String(lower.dropFirst("sunset".count))
         } else {
-            throw ValidationError("Invalid \(flag) '\(raw)'. Sun event must be 'sunrise' or 'sunset' (noon/midnight not supported).")
+            throw ValidationError("Invalid \(flag) '\(raw)'. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (noon/midnight not supported).")
         }
 
         if rest.isEmpty { return lower }
@@ -459,61 +488,18 @@ struct CreateAutomation: ParsableCommand {
         ]
     }
 
-    /// CLI-side mirror of `HomeKitManager.TimeSpec.parse(_:)`. Implements the
-    /// same rules so the CLI fails fast with friendly error messages before the
-    /// socket round-trip. SocketServer re-validates via `TimeSpec.parse`; manager
-    /// is the canonical source of truth. Keep these two in sync.
+    /// The `--time` trigger-event spec for `create-time`. Same grammar as the
+    /// `--time-after` / `--time-before` conditions, so this is `validateTimeSpec`
+    /// with the flag name bound — kept as a named entry point because the call
+    /// sites read better and the two flags are conceptually distinct (`--time` is
+    /// the trigger event; `--time-after`/`--time-before` gate it).
     ///
     /// Accepts: `HH:MM`, `sunrise`, `sunset`, `sunrise±N`, `sunset±N` (where N is
     /// minutes, ≤ 1440). Returns the canonical lowercase string we pass to the
     /// socket layer. Strict HH:MM (two digits each) so the user can't ambiguously
     /// type `12:5` and silently mean `12:50`.
-    ///
-    /// This layer's job is to surface CLI-shaped error messages that say `--time`
-    /// not `time`. The SocketServer re-validates via `TimeSpec.parse` so direct
-    /// socket clients can't bypass the format check, and the manager re-runs
-    /// `TimeSpec.parse` at HomeKit-mutation time as the canonical source of truth.
     static func validateTimeOfDaySpec(_ raw: String) throws -> String {
-        let trimmed = raw.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
-            throw ValidationError("--time value is empty. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30').")
-        }
-        let lower = trimmed.lowercased()
-
-        // HH:MM
-        if lower.contains(":") {
-            let parts = lower.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else {
-                throw ValidationError("Invalid --time '\(raw)'. Use 'HH:MM' (e.g. '06:30').")
-            }
-            let hourStr = String(parts[0])
-            let minStr = String(parts[1])
-            // Reject ambiguous widths so '12:5' doesn't silently become '12:50'.
-            guard hourStr.count == 2 else {
-                throw ValidationError("Invalid --time '\(raw)'. Hour must be exactly two digits (e.g. '06:30', not '6:30').")
-            }
-            guard minStr.count == 2 else {
-                throw ValidationError("Invalid --time '\(raw)'. Minute must be exactly two digits (e.g. '06:05', not '06:5').")
-            }
-            guard let hour = Int(hourStr), (0...23).contains(hour) else {
-                throw ValidationError("Invalid --time '\(raw)'. Hour must be 0-23.")
-            }
-            guard let minute = Int(minStr), (0...59).contains(minute) else {
-                throw ValidationError("Invalid --time '\(raw)'. Minute must be 0-59.")
-            }
-            return String(format: "%02d:%02d", hour, minute)
-        }
-
-        // sunrise / sunset (with optional ±N offset). Inline-handle the
-        // unknown-prefix case (e.g. `noon`, `midnight`, `dawn`) with a tailored
-        // error listing all four valid `--time` forms. Once we know the prefix
-        // is `sunrise` or `sunset`, forward to `validateTimeSpec` for offset
-        // parsing — that path's existing error messages are correct for
-        // sun-event-with-bad-offset cases.
-        guard lower.hasPrefix("sunrise") || lower.hasPrefix("sunset") else {
-            throw ValidationError("Invalid --time '\(raw)'. Use 'HH:MM' (e.g. '06:30'), 'sunrise', 'sunset', or '<sun-event>±<minutes>' (e.g. 'sunset-30').")
-        }
-        return try Self.validateTimeSpec(lower, flag: "--time")
+        try Self.validateTimeSpec(raw, flag: "--time")
     }
 
     /// Print the conditions / time conditions / weekdays portion of a create response.
@@ -623,10 +609,10 @@ struct CreateTimeAutomation: ParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:occupancy_detected:true'. Note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead.")
     var condition: [String] = []
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires after the given event. Format: '<sunrise|sunset>[±N]' where N is minutes. Composes with --time (e.g. --time 06:30 --time-after sunrise means '06:30, but only after sunrise').")
+    @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires after the given time. Format: 'HH:MM' or '<sunrise|sunset>[±N]' where N is minutes. Composes with --time (e.g. --time 06:30 --time-after sunrise means '06:30, but only after sunrise').")
     var timeAfter: [String] = []
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Sun-relative time predicate (repeatable): trigger only fires before the given event. Same format as --time-after.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires before the given time. Same format as --time-after.")
     var timeBefore: [String] = []
 
     @Option(name: .long, help: "Auto-revert the trigger's actions after this many seconds via HMDurationEvent (1-86400). Useful for sunset porch lights that should turn off after an hour.")

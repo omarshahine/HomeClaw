@@ -3,77 +3,77 @@ import os
 
 // MARK: - Time Condition
 
-/// A before/after sun-relative time predicate for automation triggers.
-/// Composes via `HMEventTrigger.predicateForEvaluatingTrigger(occurringBefore/After:)` with an
-/// `HMSignificantTimeEvent` carrying the optional offset.
+/// A before/after time predicate gating an automation trigger.
 ///
-/// Format: `<sun-event>[±<minutes>]` where sun-event is `sunrise` or `sunset` and the offset
-/// is signed minutes (e.g. `sunset-30`, `sunrise+15`, `sunset`).
+/// The moment itself is a `TimeSpec` — either a wall-clock `HH:MM` or a sun event
+/// (`sunrise`/`sunset`, optionally offset by ±N minutes) — so `--time-after` /
+/// `--time-before` accept exactly the same vocabulary as the `--time` trigger event.
+///
+/// Composes via:
+/// - `HMEventTrigger.predicateForEvaluatingTrigger(occurringBefore/After:)` with an
+///   `HMSignificantTimeEvent` for sun events
+/// - the `DateComponents` overloads of the same factories for clock times
 struct TimeCondition {
     enum Relation { case after, before }
     enum Event { case sunrise, sunset }
 
     let relation: Relation
-    let event: Event
-    let offsetMinutes: Int   // positive = after the event, negative = before
+    let spec: TimeSpec
 
     /// Reject offsets larger than 24h — almost certainly a typo (the user probably meant a
     /// `--days` filter). Smaller-than-24h but suspicious offsets (>720m / 12h) are allowed
     /// to keep the parser permissive; the CLI flag layer surfaces them in `--help`.
     static let maxOffsetMinutes = 1440
 
+    /// Canonical echo form (`06:30`, `sunset`, `sunrise+15`) — what the create
+    /// response reports back and what `AccessoryModel` renders on read-back.
+    var canonicalString: String { spec.canonicalString }
+
     func predicate() -> NSPredicate? {
-        var offset: DateComponents? = nil
-        if offsetMinutes != 0 {
+        switch spec {
+        case .significantTime(let event, let offsetMinutes):
+            var offset: DateComponents? = nil
+            if offsetMinutes != 0 {
+                var dc = DateComponents()
+                dc.minute = offsetMinutes
+                offset = dc
+            }
+            // The non-deprecated predicate APIs take an HMSignificantTimeEvent (which carries
+            // the offset) rather than a significant-event string + separate offset. Both are
+            // available on macCatalyst 14.0+.
+            let sigEvent = event == .sunrise ? HMSignificantEvent.sunrise : HMSignificantEvent.sunset
+            let significantEvent = HMSignificantTimeEvent(significantEvent: sigEvent, offset: offset)
+            switch relation {
+            case .after:
+                return HMEventTrigger.predicateForEvaluatingTriggerOccurring(afterSignificantEvent: significantEvent)
+            case .before:
+                return HMEventTrigger.predicateForEvaluatingTriggerOccurring(beforeSignificantEvent: significantEvent)
+            }
+        case .calendar(let hour, let minute):
+            // Clock-time conditions use the `...DateWithComponents:` sibling factories.
+            // This is the same predicate shape the Home app writes for its "Time is
+            // between X and Y" conditions, which `AccessoryModel.extractConditions`
+            // already decodes on read-back.
             var dc = DateComponents()
-            dc.minute = offsetMinutes
-            offset = dc
-        }
-        // The non-deprecated predicate APIs take an HMSignificantTimeEvent (which carries
-        // the offset) rather than a significant-event string + separate offset. Both are
-        // available on macCatalyst 14.0+.
-        let sigEvent = event == .sunrise ? HMSignificantEvent.sunrise : HMSignificantEvent.sunset
-        let significantEvent = HMSignificantTimeEvent(significantEvent: sigEvent, offset: offset)
-        switch relation {
-        case .after:
-            return HMEventTrigger.predicateForEvaluatingTriggerOccurring(afterSignificantEvent: significantEvent)
-        case .before:
-            return HMEventTrigger.predicateForEvaluatingTriggerOccurring(beforeSignificantEvent: significantEvent)
+            dc.hour = hour
+            dc.minute = minute
+            switch relation {
+            case .after:
+                return HMEventTrigger.predicateForEvaluatingTrigger(occurringAfter: dc)
+            case .before:
+                return HMEventTrigger.predicateForEvaluatingTrigger(occurringBefore: dc)
+            }
         }
     }
 
-    /// Parse a sun-relative time spec. Returns nil for malformed input;
-    /// throws via the caller's `ValidationError` boundary.
-    /// Accepts: `sunrise`, `sunset`, `sunrise+15`, `sunset-30`. Rejects: bare offsets,
-    /// `noon`/`midnight`, missing-numeric offset (`sunset+`), unknown events.
+    /// Parse a time-condition spec. Returns nil for malformed input; the caller
+    /// maps that to its own validation-error shape.
+    /// Accepts everything `TimeSpec.parse` accepts: `06:30`, `sunrise`, `sunset`,
+    /// `sunrise+15`, `sunset-30`. Rejects bare offsets, `noon`/`midnight`,
+    /// non-zero-padded clock times (`6:30`), and missing offset magnitudes (`sunset+`).
     static func parse(_ raw: String, relation: Relation) -> TimeCondition? {
-        let s = raw.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !s.isEmpty else { return nil }
-
-        let event: Event
-        var rest: String
-        if s.hasPrefix("sunrise") {
-            event = .sunrise
-            rest = String(s.dropFirst("sunrise".count))
-        } else if s.hasPrefix("sunset") {
-            event = .sunset
-            rest = String(s.dropFirst("sunset".count))
-        } else {
-            return nil
-        }
-
-        rest = rest.trimmingCharacters(in: .whitespaces)
-        if rest.isEmpty {
-            return TimeCondition(relation: relation, event: event, offsetMinutes: 0)
-        }
-
-        // Must start with + or -, followed by a positive integer (minutes).
-        guard let sign = rest.first, sign == "+" || sign == "-" else { return nil }
-        let numStr = String(rest.dropFirst())
-        guard !numStr.isEmpty, let magnitude = Int(numStr), magnitude >= 0 else { return nil }
-        if magnitude > maxOffsetMinutes { return nil }
-        let offset = sign == "+" ? magnitude : -magnitude
-        return TimeCondition(relation: relation, event: event, offsetMinutes: offset)
+        guard let spec = try? TimeSpec.parse(raw) else { return nil }
+        return TimeCondition(relation: relation, spec: spec)
     }
 }
 
@@ -1173,22 +1173,17 @@ final class HomeKitManager: NSObject, Observable {
         return ["room": room.name, "zone": zone.name, "home": home.name, "dry_run": false] as [String: Any]
     }
 
-    // MARK: - Demo-mode helpers
-
-    /// Render `TimeCondition`s back into the `sunrise±N` / `sunset±N` echo strings
-    /// the create-automation response uses, split by relation. Mirrors the echo
-    /// logic in `createAutomation` so demo responses match the real shape.
-    static func demoTimeEchoes(_ timeConditions: [TimeCondition]) -> (after: [String], before: [String]) {
-        func render(_ tc: TimeCondition) -> String {
-            let ev = tc.event == .sunrise ? "sunrise" : "sunset"
-            if tc.offsetMinutes == 0 { return ev }
-            return tc.offsetMinutes > 0 ? "\(ev)+\(tc.offsetMinutes)" : "\(ev)\(tc.offsetMinutes)"
-        }
+    /// Render `TimeCondition`s back into the `HH:MM` / `sunrise±N` / `sunset±N` echo
+    /// strings the create-automation response uses, split by relation. Shared by the
+    /// real and demo create paths so both responses have the same shape.
+    static func timeEchoes(_ timeConditions: [TimeCondition]) -> (after: [String], before: [String]) {
         return (
-            timeConditions.filter { $0.relation == .after }.map(render),
-            timeConditions.filter { $0.relation == .before }.map(render)
+            timeConditions.filter { $0.relation == .after }.map(\.canonicalString),
+            timeConditions.filter { $0.relation == .before }.map(\.canonicalString)
         )
     }
+
+    // MARK: - Demo-mode helpers
 
     /// Map a numeric press type (0/1/2) to its human label, for demo automations.
     static func demoPressLabel(_ pressType: Int) -> String {
@@ -1254,7 +1249,7 @@ final class HomeKitManager: NSObject, Observable {
         if Self.isDemoMode {
             let weekdaysAutoFilled = !timeConditions.isEmpty && weekdays.isEmpty
             let effectiveWeekdays = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
-            let echoes = Self.demoTimeEchoes(timeConditions)
+            let echoes = Self.timeEchoes(timeConditions)
             let isButton = characteristic == nil
             guard let result = DemoFixtures.createAutomation(
                 name: name,
@@ -1310,18 +1305,7 @@ final class HomeKitManager: NSObject, Observable {
                 "value": $0.rawValue,
             ]
         }
-        let timeAfterEcho: [String] = timeConditions.compactMap {
-            guard $0.relation == .after else { return nil }
-            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
-            if $0.offsetMinutes == 0 { return ev }
-            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
-        }
-        let timeBeforeEcho: [String] = timeConditions.compactMap {
-            guard $0.relation == .before else { return nil }
-            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
-            if $0.offsetMinutes == 0 { return ev }
-            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
-        }
+        let (timeAfterEcho, timeBeforeEcho) = Self.timeEchoes(timeConditions)
         // Closure used by both dry-run and success paths to attach predicate-related fields.
         // Keeping the shape identical between paths means callers/tests don't need to special-case.
         let attachPredicateFields: ([String: Any]) -> [String: Any] = { existing in
@@ -1617,7 +1601,7 @@ final class HomeKitManager: NSObject, Observable {
         if Self.isDemoMode {
             let weekdaysAutoFilled = weekdays.isEmpty
             let effectiveWeekdays = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
-            let echoes = Self.demoTimeEchoes(timeConditions)
+            let echoes = Self.timeEchoes(timeConditions)
             return DemoFixtures.createTimeAutomation(
                 name: name,
                 time: time,
@@ -1663,18 +1647,7 @@ final class HomeKitManager: NSObject, Observable {
                 "value": $0.rawValue,
             ]
         }
-        let timeAfterEcho: [String] = timeConditions.compactMap {
-            guard $0.relation == .after else { return nil }
-            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
-            if $0.offsetMinutes == 0 { return ev }
-            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
-        }
-        let timeBeforeEcho: [String] = timeConditions.compactMap {
-            guard $0.relation == .before else { return nil }
-            let ev = $0.event == .sunrise ? "sunrise" : "sunset"
-            if $0.offsetMinutes == 0 { return ev }
-            return $0.offsetMinutes > 0 ? "\(ev)+\($0.offsetMinutes)" : "\(ev)\($0.offsetMinutes)"
-        }
+        let (timeAfterEcho, timeBeforeEcho) = Self.timeEchoes(timeConditions)
 
         // Derive the read-side trigger_type tag to match what
         // `AccessoryModel.automationSummary` will render on subsequent list/get.
@@ -1975,7 +1948,7 @@ final class HomeKitManager: NSObject, Observable {
     }
 
     /// Build the AND-combined trigger predicate from characteristic conditions
-    /// and sun-relative time conditions.
+    /// and time conditions (clock times and sun-relative events).
     ///
     /// Returns nil if all inputs are empty.
     /// Returns the single subpredicate directly if only one is present, or an
