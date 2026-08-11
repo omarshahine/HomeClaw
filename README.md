@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fomarshahine%2FHomeClaw.svg)](https://mcptoplist.com/server/glama%2Fomarshahine%2FHomeClaw)
+
 <p align="center"><img src="docs/images/homeclaw-icon.png" width="200" alt="HomeClaw icon"></p>
 
 <h1 align="center">HomeClaw</h1>
