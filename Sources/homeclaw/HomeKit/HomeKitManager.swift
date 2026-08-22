@@ -550,8 +550,15 @@ final class HomeKitManager: NSObject, Observable {
         await waitForReady()
 
         if Self.isDemoMode {
-            guard let result = DemoFixtures.control(id: id, characteristic: characteristic, value: value) else {
+            guard var result = DemoFixtures.control(id: id, characteristic: characteristic, value: value) else {
                 throw ControlError.accessoryNotFound(id)
+            }
+            // Demo writes always land, but honor `verify` so an explicitly unverified
+            // write doesn't come back claiming it was confirmed by a readback.
+            if verify {
+                result["verified"] = true
+            } else {
+                result["verification_skipped"] = "disabled"
             }
             scheduleMenuDataPush()
             return result
@@ -715,22 +722,33 @@ final class HomeKitManager: NSObject, Observable {
     /// immediate read would report a false failure.
     private static let verifyAttempts = 3
     private static let verifyRetryDelay: Duration = .milliseconds(250)
+    /// Verification runs on top of a full `readInterestingValues` refresh, inside a
+    /// control call that clients give ~30s. Retrying at the 6s `readTimeout` used for
+    /// normal reads could blow that budget and turn an applied write into a request
+    /// timeout — the failure mode of issue #66 — so verification reads get a much
+    /// tighter per-read ceiling and an overall wall-clock cap on top of it.
+    private static let verifyReadTimeout: TimeInterval = 1.5
+    private static let verifyBudget: Duration = .seconds(3)
 
     private func confirmWrite(
         of parsedValue: Any, on characteristic: HMCharacteristic
     ) async -> WriteVerification {
         let step = characteristic.metadata?.stepValue?.doubleValue
+        let deadline = ContinuousClock.now + Self.verifyBudget
         var anyReadSucceeded = false
         for attempt in 0..<Self.verifyAttempts {
             if attempt > 0 {
+                guard ContinuousClock.now < deadline else { break }
                 try? await Task.sleep(for: Self.verifyRetryDelay)
             }
-            let readSucceeded = await readValueWithTimeout(characteristic)
+            let readSucceeded = await readValueWithTimeout(
+                characteristic, timeout: Self.verifyReadTimeout
+            )
             anyReadSucceeded = anyReadSucceeded || readSucceeded
-            guard readSucceeded else { continue }
-            if Self.valuesMatch(characteristic.value, parsedValue, step: step) {
+            if readSucceeded, Self.valuesMatch(characteristic.value, parsedValue, step: step) {
                 return .matched
             }
+            guard ContinuousClock.now < deadline else { break }
         }
         guard anyReadSucceeded else { return .unreadable }
         let actual = characteristic.value.map {
@@ -3581,8 +3599,9 @@ final class HomeKitManager: NSObject, Observable {
     /// `characteristic.value` now holds a fresh device read. On false the cached
     /// value is stale and callers must not treat it as evidence of anything.
     @discardableResult
-    private func readValueWithTimeout(_ characteristic: HMCharacteristic) async -> Bool {
-        let timeout = Self.readTimeout
+    private func readValueWithTimeout(
+        _ characteristic: HMCharacteristic, timeout: TimeInterval = HomeKitManager.readTimeout
+    ) async -> Bool {
         let logger = AppLogger.homekit
         // One-shot guard: whichever of the HomeKit completion or the timer fires
         // first resumes the continuation; the loser is a no-op.

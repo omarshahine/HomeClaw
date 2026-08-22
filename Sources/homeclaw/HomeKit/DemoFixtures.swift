@@ -174,9 +174,10 @@ enum DemoFixtures {
         // Match the real control response shape. Demo accessories are single-service,
         // so there is nothing to disambiguate and the write always "lands" — but the
         // fields have to be present or demo output would look like an older build.
+        // The caller fills in verified / verification_skipped, since only it knows
+        // whether verification was asked for.
         result["characteristic"] = characteristic
         result["value"] = value
-        result["verified"] = true
         result["service"] = ["id": acc.id, "name": acc.name, "type": acc.category]
         return result
     }

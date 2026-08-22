@@ -377,7 +377,6 @@ const TOOLS: ToolDef[] = [
 				String(params.press ?? 'single'),
 			];
 			optionalFlag(args, '--service-index', params.service_index);
-			if (params.verify === false) args.push('--no-verify');
 			optionalFlag(args, '--dry-run', params.dry_run);
 			args.push('--json');
 			return args;
