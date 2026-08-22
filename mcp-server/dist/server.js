@@ -20865,7 +20865,23 @@ var tools = [
         },
         service_type: {
           type: "string",
-          description: "Service UUID to target when the characteristic exists on multiple services (control action). Required when an ambiguity error is returned."
+          description: "Service TYPE UUID to narrow the target when the characteristic exists on multiple services (control action). Note: every channel of a multi-gang switch shares one service type, so this alone cannot pick a channel \u2014 use service_name or service_index for that."
+        },
+        service_name: {
+          type: "string",
+          description: "Name or unique UUID of the specific service to write to (control action). This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+        },
+        service_id: {
+          type: "string",
+          description: "Unique UUID of the specific service to write to (control action). Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+        },
+        service_index: {
+          type: "number",
+          description: "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang (control action). Listed as `index` in the get action output when the accessory reports one."
+        },
+        verify: {
+          type: "boolean",
+          description: 'Default true (control action). After writing, the value is read back and a write the device did not apply is returned as an error rather than a success. Set false only for accessories whose readback is unreliable; the response then carries verification_skipped: "disabled".'
         },
         no_refresh: {
           type: "boolean",
@@ -21287,6 +21303,10 @@ async function handleAccessories(args) {
       };
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.service_type) socketArgs.service_type = args.service_type;
+      if (args.service_name) socketArgs.service_name = args.service_name;
+      if (args.service_id) socketArgs.service_id = args.service_id;
+      if (args.verify === false) socketArgs.verify = "false";
+      if (args.service_index != null) socketArgs.service_index = String(args.service_index);
       return sendCommand("control", socketArgs);
     }
     default:

@@ -505,6 +505,7 @@ final class HomeKitManager: NSObject, Observable {
         case sceneNotFound(String)
         case serviceNotFound(String)
         case invalidArgument(String)
+        case writeNotApplied(String)
 
         var errorDescription: String? {
             switch self {
@@ -515,7 +516,12 @@ final class HomeKitManager: NSObject, Observable {
             case .invalidValue(let detail): "Invalid value: \(detail)"
             case .writeFailed(let detail): "Write failed: \(detail)"
             case .ambiguousCharacteristic(let name, let options):
-                "Ambiguous: '\(name)' exists on multiple services. Use service_type to disambiguate:\n\(options)"
+                """
+                Ambiguous: '\(name)' exists on multiple services. \
+                Pass service_name, service_index, or service_id to pick one \
+                (service_type is identical across channels on multi-gang accessories):
+                \(options)
+                """
             case .homeNotFound(let id): "Home not found: \(id)"
             case .roomNotFound(let id): "Room not found: \(id)"
             case .zoneNotFound(let id): "Zone not found: \(id)"
@@ -523,11 +529,24 @@ final class HomeKitManager: NSObject, Observable {
             case .sceneNotFound(let id): "Scene not found: \(id)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
             case .invalidArgument(let detail): "Invalid argument: \(detail)"
+            case .writeNotApplied(let detail):
+                "Write not applied: \(detail). Pass verify=false to accept unconfirmed writes."
             }
         }
     }
 
-    func controlAccessory(id: String, characteristic: String, value: String, homeID: String? = nil, serviceType: String? = nil, dryRun: Bool = false) async throws -> [String: Any] {
+    func controlAccessory(
+        id: String,
+        characteristic: String,
+        value: String,
+        homeID: String? = nil,
+        serviceType: String? = nil,
+        serviceName: String? = nil,
+        serviceID: String? = nil,
+        serviceIndex: Int? = nil,
+        dryRun: Bool = false,
+        verify: Bool = true
+    ) async throws -> [String: Any] {
         await waitForReady()
 
         if Self.isDemoMode {
@@ -550,14 +569,32 @@ final class HomeKitManager: NSObject, Observable {
 
         // Find the characteristic by human-readable name or UUID
         let hmCharacteristic: HMCharacteristic
-        switch findCharacteristic(named: characteristic, on: accessory, serviceType: serviceType) {
-        case .found(let c, _):
+        let targetService: ServiceDescriptor
+        switch findCharacteristic(
+            named: characteristic,
+            on: accessory,
+            serviceType: serviceType,
+            serviceName: serviceName,
+            serviceID: serviceID,
+            serviceIndex: serviceIndex
+        ) {
+        case .found(let c, _, let service):
             hmCharacteristic = c
+            targetService = service
         case .notFound:
             throw ControlError.characteristicNotFound(characteristic)
-        case .ambiguous(let matches):
-            let options = matches.map { "  - service_type: \($0.serviceType) (service: \($0.service))" }.joined(separator: "\n")
+        case .ambiguous(let services):
+            let options = services.map(\.selectorHint).joined(separator: "\n")
             throw ControlError.ambiguousCharacteristic(characteristic, options)
+        case .noServiceMatched(let services):
+            let options = services.map(\.selectorHint).joined(separator: "\n")
+            throw ControlError.serviceNotFound(
+                """
+                No service on '\(accessory.name)' matches the given selectors. \
+                '\(characteristic)' is on:
+                \(options)
+                """
+            )
         }
 
         // Check writability via properties
@@ -583,6 +620,7 @@ final class HomeKitManager: NSObject, Observable {
                 "current_value": currentValue,
                 "new_value": value,
                 "parsed_value": "\(parsedValue)",
+                "service": targetService.dictionary,
             ]
             if let home = findHome(for: accessory) {
                 result["home"] = home.name
@@ -594,7 +632,9 @@ final class HomeKitManager: NSObject, Observable {
         do {
             try await hmCharacteristic.writeValue(parsedValue)
             let home = findHome(for: accessory)
-            AppLogger.homekit.info("[\(home?.name ?? "?")] Set \(accessory.name).\(characteristic) = \(value)")
+            AppLogger.homekit.info(
+                "[\(home?.name ?? "?")] Set \(accessory.name).\(targetService.name).\(characteristic) = \(value)"
+            )
             HomeEventLogger.shared.logAccessoryControlled(
                 accessoryID: accessory.uniqueIdentifier.uuidString,
                 accessoryName: accessory.name,
@@ -607,18 +647,113 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.writeFailed("\(error.localizedDescription)")
         }
 
-        // Read back current values, update cache, and return updated state
+        // Refresh the accessory, then confirm the written characteristic last so its
+        // outcome is the authoritative one behind `verified`. The explicit read is
+        // needed on top of `readInterestingValues` because that only refreshes the
+        // subset it considers interesting, and it discards whether a read succeeded.
         await readInterestingValues(for: accessory)
+        let isReadable = hmCharacteristic.properties.contains(HMCharacteristicPropertyReadable)
+        let verification = verify && isReadable
+            ? await confirmWrite(of: parsedValue, on: hmCharacteristic)
+            : nil
         updateCacheFromAccessory(accessory)
+
+        // The whole point of issue #85: HomeKit accepted the write and the device did
+        // not change. Returning success here is what made the failure silent for every
+        // automation built on top, so this is an error, not a note in the payload.
+        if case .mismatched(let actual) = verification {
+            throw ControlError.writeNotApplied(
+                "\(accessory.name).\(targetService.name).\(characteristic) still reads \(actual) after writing \(value)"
+            )
+        }
+
         let bridgeMetadata = BridgeMetadata(
             homes: findHome(for: accessory).map { [$0] } ?? filteredHomes(homeID: homeID),
             isAccessoryVisible: isAccessoryAllowed
         )
-        return AccessoryModel.accessorySummary(
+        var result = AccessoryModel.accessorySummary(
             accessory,
             bridge: bridgeMetadata.bridgeSummary(for: accessory),
             bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
         )
+
+        // The summary's flat `state` map keys on characteristic name, so on a multi-gang
+        // accessory every channel collapses into one entry and the caller can't tell
+        // which channel was written. Report the targeted service and its post-write
+        // readback explicitly.
+        result["characteristic"] = characteristic
+        result["service"] = targetService.dictionary
+        if let current = hmCharacteristic.value {
+            result["value"] = CharacteristicMapper.formatValue(
+                current, for: hmCharacteristic.characteristicType
+            )
+        }
+        // A mismatch already threw above, so the only outcomes left are "confirmed" and
+        // "couldn't tell". Never report the second as the first: a write-only
+        // characteristic, a failed read, or an explicit opt-out says so by name.
+        switch verification {
+        case .matched:
+            result["verified"] = true
+        case .unreadable:
+            result["verification_skipped"] = "read_failed"
+        default:
+            result["verification_skipped"] = verify ? "not_readable" : "disabled"
+        }
+        return result
+    }
+
+    /// Outcome of reading a characteristic back after writing it.
+    private enum WriteVerification {
+        case matched
+        case mismatched(String)
+        /// No fresh read came back, so nothing can be concluded.
+        case unreadable
+    }
+
+    /// How many times to re-read before declaring a write unapplied. Some accessories
+    /// acknowledge a write and only publish the new value a moment later, so a single
+    /// immediate read would report a false failure.
+    private static let verifyAttempts = 3
+    private static let verifyRetryDelay: Duration = .milliseconds(250)
+
+    private func confirmWrite(
+        of parsedValue: Any, on characteristic: HMCharacteristic
+    ) async -> WriteVerification {
+        let step = characteristic.metadata?.stepValue?.doubleValue
+        var anyReadSucceeded = false
+        for attempt in 0..<Self.verifyAttempts {
+            if attempt > 0 {
+                try? await Task.sleep(for: Self.verifyRetryDelay)
+            }
+            let readSucceeded = await readValueWithTimeout(characteristic)
+            anyReadSucceeded = anyReadSucceeded || readSucceeded
+            guard readSucceeded else { continue }
+            if Self.valuesMatch(characteristic.value, parsedValue, step: step) {
+                return .matched
+            }
+        }
+        guard anyReadSucceeded else { return .unreadable }
+        let actual = characteristic.value.map {
+            CharacteristicMapper.formatValue($0, for: characteristic.characteristicType)
+        } ?? "unknown"
+        return .mismatched(actual)
+    }
+
+    /// Compares a post-write readback against the value we asked HomeKit to write.
+    ///
+    /// Numbers get a tolerance of *half* the characteristic's step: an accessory that
+    /// snaps a write to its step grid lands within half a step, while a value that
+    /// never changed sits a full step or more away. A full-step tolerance would call
+    /// brightness 0 a successful write of brightness 1. Everything else is compared by
+    /// string description.
+    static func valuesMatch(_ readBack: Any?, _ written: Any, step: Double? = nil) -> Bool {
+        guard let readBack else { return false }
+        if let a = readBack as? NSNumber, let b = written as? NSNumber {
+            // Bools bridge to NSNumber too, and there `1 == true` is exactly what we want.
+            let tolerance = max((step ?? 0) / 2, 0.0001)
+            return abs(a.doubleValue - b.doubleValue) <= tolerance
+        }
+        return String(describing: readBack) == String(describing: written)
     }
 
     // MARK: - Scenes
@@ -3441,20 +3576,25 @@ final class HomeKitManager: NSObject, Observable {
     /// read otherwise stalls every later request: the "first call fast, later
     /// calls balloon to ~95s / hang" signature in the bug report. A timed-out
     /// read simply leaves the previously cached `characteristic.value` in place.
-    private func readValueWithTimeout(_ characteristic: HMCharacteristic) async {
+    ///
+    /// Returns true only when HomeKit answered without an error, i.e. when
+    /// `characteristic.value` now holds a fresh device read. On false the cached
+    /// value is stale and callers must not treat it as evidence of anything.
+    @discardableResult
+    private func readValueWithTimeout(_ characteristic: HMCharacteristic) async -> Bool {
         let timeout = Self.readTimeout
         let logger = AppLogger.homekit
         // One-shot guard: whichever of the HomeKit completion or the timer fires
         // first resumes the continuation; the loser is a no-op.
         let guardBox = ReadResumeGuard()
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             // Cancellable timer leg: when HomeKit responds before the deadline we
             // cancel it, so a large readAllValues loop (50–100+ characteristics)
             // doesn't leave a burst of no-op main-thread wakeups draining 6s later.
             let timerWork = DispatchWorkItem {
                 guard guardBox.claim() else { return }
                 logger.warning("readValue timed out after \(timeout, format: .fixed(precision: 0))s; serving last-known value")
-                continuation.resume()
+                continuation.resume(returning: false)
             }
             characteristic.readValue { error in
                 timerWork.cancel()
@@ -3462,7 +3602,7 @@ final class HomeKitManager: NSObject, Observable {
                 if let error {
                     logger.debug("readValue failed: \(error.localizedDescription, privacy: .public)")
                 }
-                continuation.resume()
+                continuation.resume(returning: error == nil)
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timerWork)
         }
@@ -3548,45 +3688,150 @@ final class HomeKitManager: NSObject, Observable {
         return nil
     }
 
+    /// Identifying details for a single service, used to disambiguate characteristics
+    /// that appear on several services of the same accessory (multi-gang switches,
+    /// multi-button remotes) and to describe the service a write landed on.
+    struct ServiceDescriptor {
+        let name: String
+        let type: String
+        let id: String
+        let index: Int?
+
+        init(_ service: HMService) {
+            name = service.name
+            type = service.serviceType
+            id = service.uniqueIdentifier.uuidString
+            index = Self.labelIndex(of: service)
+        }
+
+        /// The ServiceLabelIndex value, i.e. which physical channel/button this is.
+        /// Multi-gang accessories expose it; single-service accessories usually don't.
+        static func labelIndex(of service: HMService) -> Int? {
+            AccessoryModel.serviceLabelIndex(of: service)
+        }
+
+        /// One line describing how to address this specific service.
+        var selectorHint: String {
+            var parts = ["service_name: \"\(name)\""]
+            if let index { parts.append("service_index: \(index)") }
+            parts.append("service_id: \(id)")
+            parts.append("service_type: \(type)")
+            return "  - " + parts.joined(separator: ", ")
+        }
+
+        var dictionary: [String: Any] {
+            var dict: [String: Any] = ["name": name, "type": type, "id": id]
+            if let index { dict["index"] = index }
+            return dict
+        }
+    }
+
     /// Result of a characteristic lookup, which may be ambiguous.
     enum CharacteristicLookup {
-        case found(HMCharacteristic, String)
-        case ambiguous([(service: String, serviceType: String, characteristicName: String)])
+        case found(HMCharacteristic, String, ServiceDescriptor)
+        case ambiguous([ServiceDescriptor])
         case notFound
+        /// The characteristic exists on the accessory, but the service selectors
+        /// excluded every service carrying it. Carries the services that do have it,
+        /// so the error can say what the caller could have asked for.
+        case noServiceMatched([ServiceDescriptor])
+    }
+
+    /// True when `characteristic` is addressed by `name`, given either as its
+    /// human-readable name (`power`) or its type UUID.
+    private static func characteristic(_ characteristic: HMCharacteristic, matches name: String) -> Bool {
+        CharacteristicMapper.name(for: characteristic.characteristicType)
+            .localizedCaseInsensitiveCompare(name) == .orderedSame
+            || characteristic.characteristicType.localizedCaseInsensitiveCompare(name) == .orderedSame
+    }
+
+    /// True when `service` matches every caller-supplied selector. An unset selector
+    /// matches everything, so selectors combine with AND.
+    ///
+    /// `name` also accepts the service's UUID, so a caller that pasted the wrong field
+    /// out of the ambiguity error still lands on the right service; `id` matches the
+    /// UUID only.
+    private func serviceMatches(
+        _ service: HMService, type: String?, name: String?, id: String?, index: Int?
+    ) -> Bool {
+        let uuid = service.uniqueIdentifier.uuidString
+        if let type, service.serviceType.localizedCaseInsensitiveCompare(type) != .orderedSame {
+            return false
+        }
+        if let id, uuid.localizedCaseInsensitiveCompare(id) != .orderedSame {
+            return false
+        }
+        if let name {
+            let matchesName = service.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+            let matchesID = uuid.localizedCaseInsensitiveCompare(name) == .orderedSame
+            if !matchesName && !matchesID { return false }
+        }
+        if let index, ServiceDescriptor.labelIndex(of: service) != index {
+            return false
+        }
+        return true
     }
 
     /// Find a characteristic on an accessory by human-readable name or UUID.
-    /// When `serviceType` is provided, only matches within that service.
-    /// When nil and multiple services have a matching characteristic, returns `.ambiguous`.
+    ///
+    /// The optional `serviceType` / `serviceName` / `serviceID` / `serviceIndex`
+    /// selectors narrow the search to one service. Multi-gang switches expose several
+    /// services that share a `serviceType`, so `serviceType` alone cannot pick a
+    /// channel — `serviceName`, `serviceID`, or `serviceIndex` (ServiceLabelIndex) can.
+    ///
+    /// Returns `.ambiguous` whenever the surviving matches span more than one service,
+    /// rather than silently writing to whichever service happens to come first.
     private func findCharacteristic(
-        named name: String, on accessory: HMAccessory, serviceType: String? = nil
+        named name: String,
+        on accessory: HMAccessory,
+        serviceType: String? = nil,
+        serviceName: String? = nil,
+        serviceID: String? = nil,
+        serviceIndex: Int? = nil
     ) -> CharacteristicLookup {
-        var matches: [(characteristic: HMCharacteristic, humanName: String, serviceName: String, serviceType: String)] = []
+        var matches: [(characteristic: HMCharacteristic, humanName: String, service: HMService)] = []
 
         for service in accessory.services {
-            if let filter = serviceType, service.serviceType.localizedCaseInsensitiveCompare(filter) != .orderedSame { continue }
-            for characteristic in service.characteristics {
-                let humanName = CharacteristicMapper.name(for: characteristic.characteristicType)
-                if humanName.localizedCaseInsensitiveCompare(name) == .orderedSame
-                    || characteristic.characteristicType == name
-                {
-                    matches.append((characteristic, humanName, service.name, service.serviceType))
-                }
+            guard serviceMatches(
+                service, type: serviceType, name: serviceName, id: serviceID, index: serviceIndex
+            ) else { continue }
+            for characteristic in service.characteristics
+            where Self.characteristic(characteristic, matches: name) {
+                matches.append((
+                    characteristic,
+                    CharacteristicMapper.name(for: characteristic.characteristicType),
+                    service
+                ))
             }
         }
 
-        switch matches.count {
-        case 0:
-            return .notFound
-        case 1:
-            return .found(matches[0].characteristic, matches[0].humanName)
-        default:
-            if serviceType != nil {
-                // Filter was provided but still matched multiple in the same service — take first
-                return .found(matches[0].characteristic, matches[0].humanName)
+        guard let first = matches.first else {
+            // Distinguish "this accessory has no such characteristic" from "your
+            // selectors excluded the service(s) that do have it" — the second one is a
+            // fixable mistake and deserves to say so.
+            let hadSelector = serviceType != nil || serviceName != nil || serviceID != nil || serviceIndex != nil
+            guard hadSelector else { return .notFound }
+            let carriers = accessory.services.filter { service in
+                service.characteristics.contains { Self.characteristic($0, matches: name) }
             }
-            return .ambiguous(matches.map { (service: $0.serviceName, serviceType: $0.serviceType, characteristicName: $0.humanName) })
+            guard !carriers.isEmpty else { return .notFound }
+            return .noServiceMatched(carriers.map(ServiceDescriptor.init))
         }
+
+        // Only a spread across *different* services is ambiguous. Two matches inside a
+        // single service (same characteristic listed twice, aliased names) are equivalent
+        // for writing purposes, so the first is fine.
+        let distinctServices = Set(matches.map(\.service.uniqueIdentifier))
+        guard distinctServices.count > 1 else {
+            return .found(first.characteristic, first.humanName, ServiceDescriptor(first.service))
+        }
+
+        var seen: Set<UUID> = []
+        let descriptors = matches.compactMap { match -> ServiceDescriptor? in
+            guard seen.insert(match.service.uniqueIdentifier).inserted else { return nil }
+            return ServiceDescriptor(match.service)
+        }
+        return .ambiguous(descriptors)
     }
 }
 

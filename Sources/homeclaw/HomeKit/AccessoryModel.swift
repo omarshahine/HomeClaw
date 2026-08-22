@@ -152,11 +152,17 @@ enum AccessoryModel {
                 chars.append(charDict)
             }
 
-            services.append([
+            // `id` and `index` are what `control` accepts as service_id / service_index to
+            // target one channel of a multi-gang accessory, where `type` is identical
+            // across channels and `name` may repeat.
+            var serviceDict: [String: Any] = [
+                "id": service.uniqueIdentifier.uuidString,
                 "name": service.name,
                 "type": service.serviceType,
                 "characteristics": chars,
-            ])
+            ]
+            if let index = serviceLabelIndex(of: service) { serviceDict["index"] = index }
+            services.append(serviceDict)
         }
         dict["services"] = services
 
@@ -819,6 +825,11 @@ enum AccessoryModel {
     /// Reads the ServiceLabelIndex value from the same service as the given characteristic.
     private static func serviceIndexForCharacteristic(_ characteristic: HMCharacteristic) -> Int? {
         guard let service = characteristic.service else { return nil }
+        return serviceLabelIndex(of: service)
+    }
+
+    /// The ServiceLabelIndex value of a service — which physical channel/button it is.
+    static func serviceLabelIndex(of service: HMService) -> Int? {
         guard let indexChar = service.characteristics.first(where: { $0.characteristicType == CharacteristicMapper.serviceLabelIndexType }),
               let value = indexChar.value as? NSNumber
         else { return nil }

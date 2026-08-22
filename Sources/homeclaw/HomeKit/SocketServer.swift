@@ -21,6 +21,31 @@ final class SocketServer: @unchecked Sendable {
     private var intentionallyStopped = false
     private let watchdogInterval: TimeInterval = 30
 
+    /// Reads an integer argument, rejecting values that would otherwise be coerced
+    /// into a plausible-but-wrong selector. Returns nil only when the key is absent;
+    /// a present-but-malformed value throws so it can never be silently dropped
+    /// (dropping a service selector would send the write to a different channel).
+    private func parseInt(_ args: [String: Any], key: String) throws -> Int? {
+        guard let raw = args[key] else { return nil }
+        if let nsNum = raw as? NSNumber {
+            // JSON booleans bridge to NSNumber and `as? Int` turns `true` into 1.
+            guard CFGetTypeID(nsNum) != CFBooleanGetTypeID() else {
+                throw HomeKitManager.ControlError.invalidArgument("\(key) must be an integer, got a boolean")
+            }
+            guard let int = nsNum as? Int else {
+                throw HomeKitManager.ControlError.invalidArgument("\(key) must be a whole number, got \(nsNum)")
+            }
+            return int
+        }
+        if let string = raw as? String {
+            guard let int = Int(string) else {
+                throw HomeKitManager.ControlError.invalidArgument("\(key) must be a whole number, got '\(string)'")
+            }
+            return int
+        }
+        throw HomeKitManager.ControlError.invalidArgument("\(key) must be a whole number")
+    }
+
     /// Parse a boolean wire arg, distinguishing absent from present-but-unparseable.
     ///
     /// Accepts:
@@ -519,7 +544,11 @@ final class SocketServer: @unchecked Sendable {
                     id: id, characteristic: characteristic, value: value,
                     homeID: args["home_id"] as? String,
                     serviceType: args["service_type"] as? String,
-                    dryRun: parseBool(args, key: "dry_run")
+                    serviceName: args["service_name"] as? String,
+                    serviceID: args["service_id"] as? String,
+                    serviceIndex: try parseInt(args, key: "service_index"),
+                    dryRun: parseBool(args, key: "dry_run"),
+                    verify: parseBool(args, key: "verify", default: true)
                 )
 
             case "list_rooms":

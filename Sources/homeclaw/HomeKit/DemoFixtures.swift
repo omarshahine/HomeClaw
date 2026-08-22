@@ -170,7 +170,15 @@ enum DemoFixtures {
         var current = state(for: id)
         current[characteristic] = value
         accessoryState[id] = current
-        return acc.summaryDict(roomName: roomName(for: acc.roomID), state: current)
+        var result = acc.summaryDict(roomName: roomName(for: acc.roomID), state: current)
+        // Match the real control response shape. Demo accessories are single-service,
+        // so there is nothing to disambiguate and the write always "lands" — but the
+        // fields have to be present or demo output would look like an older build.
+        result["characteristic"] = characteristic
+        result["value"] = value
+        result["verified"] = true
+        result["service"] = ["id": acc.id, "name": acc.name, "type": acc.category]
+        return result
     }
 
     // MARK: - Search / device map (read derivations)

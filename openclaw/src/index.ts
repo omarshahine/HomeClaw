@@ -144,7 +144,31 @@ const TOOLS: ToolDef[] = [
 			service_type: Type.Optional(
 				Type.String({
 					description:
-						'Target a specific service by UUID when the characteristic exists on multiple services',
+						'Narrow to services of this TYPE UUID when the characteristic exists on multiple services. Every channel of a multi-gang switch shares one service type, so use service_name or service_index to pick a channel.',
+				})
+			),
+			service_name: Type.Optional(
+				Type.String({
+					description:
+						'Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch; both values appear in the ambiguity error and in homekit_get output.',
+				})
+			),
+			service_id: Type.Optional(
+				Type.String({
+					description:
+						'Unique UUID of the specific service to write to. Use when two services share a name; listed as service_id in the ambiguity error and as `id` per service in homekit_get output.',
+				})
+			),
+			service_index: Type.Optional(
+				Type.Number({
+					description:
+						'Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang.',
+				})
+			),
+			verify: Type.Optional(
+				Type.Boolean({
+					description:
+						'Default true. After writing, the value is read back and a write the device did not apply comes back as an error rather than a success. Set false only for accessories whose readback is unreliable.',
 				})
 			),
 			dry_run: Type.Optional(
@@ -159,6 +183,10 @@ const TOOLS: ToolDef[] = [
 				String(params.value),
 			];
 			optionalFlag(args, '--service-type', params.service_type);
+			optionalFlag(args, '--service-name', params.service_name);
+			optionalFlag(args, '--service-id', params.service_id);
+			optionalFlag(args, '--service-index', params.service_index);
+			if (params.verify === false) args.push('--no-verify');
 			optionalFlag(args, '--dry-run', params.dry_run);
 			args.push('--json');
 			return args;
@@ -349,6 +377,7 @@ const TOOLS: ToolDef[] = [
 				String(params.press ?? 'single'),
 			];
 			optionalFlag(args, '--service-index', params.service_index);
+			if (params.verify === false) args.push('--no-verify');
 			optionalFlag(args, '--dry-run', params.dry_run);
 			args.push('--json');
 			return args;

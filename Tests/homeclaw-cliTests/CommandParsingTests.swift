@@ -114,6 +114,48 @@ struct SetCommandParsingTests {
     func missingValue() {
         #expect(throws: (any Error).self) { _ = try Set.parse(["Lamp", "power"]) }
     }
+
+    // Regression for issue #85: every channel of a multi-gang switch shares one
+    // service type, so --service-type alone can't pick a channel. --service-name
+    // and --service-index are the selectors that can.
+    @Test("--service-name and --service-index are parsed")
+    func perServiceSelectors() throws {
+        let cmd = try Set.parse(["Wall Switch", "power", "true", "--service-name", "Pendentes", "--service-index", "3"])
+        #expect(cmd.serviceName == "Pendentes")
+        #expect(cmd.serviceIndex == 3)
+        #expect(cmd.serviceType == nil)
+    }
+
+    @Test("service selectors default to nil")
+    func selectorsDefaultNil() throws {
+        let cmd = try Set.parse(["Lamp", "power", "on"])
+        #expect(cmd.serviceName == nil)
+        #expect(cmd.serviceIndex == nil)
+    }
+
+    // The ambiguity error tells users to retry with service_id, so the flag it names
+    // has to exist and resolve to exactly that spelling.
+    @Test("--service-id is parsed")
+    func serviceIDSelector() throws {
+        let cmd = try Set.parse(["Wall Switch", "power", "true", "--service-id", "B3E0-UUID"])
+        #expect(cmd.serviceID == "B3E0-UUID")
+        #expect(cmd.serviceName == nil)
+    }
+
+    @Test("--service-index rejects non-numeric input")
+    func serviceIndexMustBeNumeric() {
+        #expect(throws: (any Error).self) {
+            _ = try Set.parse(["Lamp", "power", "on", "--service-index", "first"])
+        }
+    }
+
+    // Verification is on by default; --no-verify is the opt-out for accessories whose
+    // readback is unreliable.
+    @Test("--no-verify defaults off and parses")
+    func noVerifyFlag() throws {
+        #expect(try Set.parse(["Lamp", "power", "on"]).noVerify == false)
+        #expect(try Set.parse(["Lamp", "power", "on", "--no-verify"]).noVerify == true)
+    }
 }
 
 // MARK: - scenes

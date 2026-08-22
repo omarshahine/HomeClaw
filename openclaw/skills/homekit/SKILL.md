@@ -68,6 +68,11 @@ homeclaw-cli set "<uuid>" target_heating_cooling auto  # HVAC: off/heat/cool/aut
 homeclaw-cli set "<uuid>" lock_target_state locked     # Locks: locked/unlocked
 homeclaw-cli set "<uuid>" target_position 100          # Blinds (0=closed, 100=open)
 
+# Multi-gang switches — one accessory, several channels sharing a service type
+homeclaw-cli set "<uuid>" power true --service-name "Pendentes"  # By service name
+homeclaw-cli set "<uuid>" power true --service-id "<service-uuid>"  # By service UUID (names can repeat)
+homeclaw-cli set "<uuid>" power true --service-index 2           # By channel number (ServiceLabelIndex)
+
 # Scenes
 homeclaw-cli scenes --json              # List all scenes
 homeclaw-cli get-scene "<name>" --json  # Full detail: all actions (accessory, room, characteristic, value)
@@ -145,6 +150,43 @@ The `type` field in the compact map tells you what a device IS. The `controls` a
 | `security` | Cameras, water shutoff | Varies: `active`, `power` |
 
 **Critical**: A device named "Closet Light" or "Under Cabinet" with `type: power` is a relay switch. Sending `brightness 50` will fail. Always check `controls` first.
+
+### Multi-Gang Switches and Multi-Button Remotes
+
+Some accessories expose the same characteristic on several services: a 3-gang wall switch has three `power` characteristics, one per channel. Every channel reports the **same** `service_type`, so `--service-type` cannot pick one.
+
+`set` refuses to guess. When a characteristic exists on more than one service it fails with an ambiguity error listing every candidate:
+
+```
+Ambiguous: 'power' exists on multiple services. Pass service_name, service_index, or service_id to pick one
+(service_type is identical across channels on multi-gang accessories):
+  - service_name: "Switch 1", service_index: 1, service_id: 5F2A..., service_type: 00000049-...
+  - service_name: "Switch 2", service_index: 2, service_id: 91C7..., service_type: 00000049-...
+  - service_name: "Pendentes", service_index: 3, service_id: B3E0..., service_type: 00000049-...
+```
+
+Passing selectors that match no service is a different error ("No service on '<name>' matches the given selectors") which lists the same candidates, so an over-constrained retry says so instead of claiming the characteristic doesn't exist.
+
+Copy one of those selectors into the retry. `homeclaw-cli get "<uuid>" --json` lists the same `id`, `name`, and `index` per service if you want them before writing.
+
+### Confirming a Write Landed
+
+`set` reads the characteristic back after writing and reports which service it hit:
+
+```json
+{ "characteristic": "power", "value": "true", "verified": true,
+  "service": { "id": "B3E0...", "name": "Pendentes", "type": "00000049-...", "index": 3 } }
+```
+
+If the device still reports the old value after a few re-reads, `set` **fails** rather than returning success. That is the point of the check: a write HomeKit accepted but the device ignored used to come back as `success: true`.
+
+```
+Write not applied: Wall Switch.Pendentes.power still reads false after writing true. Pass verify=false to accept unconfirmed writes.
+```
+
+When no verdict is possible the response carries `verification_skipped` instead: `not_readable` (a write-only characteristic), `read_failed` (the readback errored or timed out), or `disabled` (you passed `--no-verify` / `verify: false`). None of these mean the write failed, only that it could not be confirmed.
+
+Use `--no-verify` for accessories whose readback is unreliable. Verification already retries a few times, so a device that acknowledges a write and publishes the new value a moment later is not flagged.
 
 ## Event Log
 
