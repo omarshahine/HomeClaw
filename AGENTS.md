@@ -201,9 +201,15 @@ If status shows `ready: false` with 0 homes:
 ## CI
 
 GitHub Actions (`.github/workflows/tests.yml`) runs on `macos-26`:
-- Builds `homeclaw-cli` via SPM
-- Builds `mcp-server` (Node.js)
-- HomeClaw Catalyst app is NOT built in CI (requires signing identity + provisioning)
+- **Build** — builds `homeclaw-cli` via SPM, runs `swift test`, builds `mcp-server` (Node.js)
+- **Catalyst App** — runs `xcodegen` and builds the HomeClaw Catalyst target with
+  `CODE_SIGNING_ALLOWED=NO`, asserting `** BUILD SUCCEEDED **`
+- **Version Consistency** — checks the plugin manifest versions agree
+
+CI builds the Catalyst app **unsigned only**. The HomeKit entitlement is App
+Store-only and cannot be provisioned on a runner, so CI proves the app target
+compiles and links, not that it is signable or distributable. A signed build
+still has to happen locally (`scripts/build.sh`) or via `fastlane`.
 
 ## Clawpatch Code Review
 

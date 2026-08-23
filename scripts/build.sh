@@ -32,11 +32,14 @@ if [[ -n "${DEVELOPER_DIR:-}" ]]; then
     fi
     export DEVELOPER_DIR
 fi
-# Capture without a `||` fallback inside the substitution: `head -1` closes the
-# pipe early, xcodebuild takes SIGPIPE, and the non-zero pipeline status would
-# fire the fallback too, concatenating both strings. Default afterwards instead.
-XCODE_VERSION="$(xcodebuild -version 2>/dev/null | head -1)"
-XCODE_PATH="$(xcode-select -p 2>/dev/null)"
+# Take the first line with parameter expansion rather than `| head -1`: head
+# exits after one line, xcodebuild takes SIGPIPE, and under `set -o pipefail`
+# the resulting 141 makes the assignment fail — which `set -e` turns into a
+# silent abort of the whole script before it builds anything.
+# `|| true` keeps a missing or broken xcode-select from aborting it the same way.
+XCODE_VERSION="$(xcodebuild -version 2>/dev/null || true)"
+XCODE_VERSION="${XCODE_VERSION%%$'\n'*}"
+XCODE_PATH="$(xcode-select -p 2>/dev/null || true)"
 XCODE_VERSION="${XCODE_VERSION:-unknown}"
 XCODE_PATH="${XCODE_PATH:-unknown}"
 
