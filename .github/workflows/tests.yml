@@ -61,8 +61,32 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Report toolchain
-        run: xcodebuild -version
+      # Honor .xcode-version when the runner image has that Xcode, so CI compiles
+      # with the same toolchain as local and release builds. Runner images lag
+      # behind newly seeded betas, so a miss warns and continues rather than
+      # failing — CI's job here is to prove the target compiles, and doing that
+      # on a slightly older Xcode is far better than not doing it at all.
+      - name: Select pinned Xcode
+        run: |
+          PIN="$(tr -d '[:space:]' < .xcode-version 2>/dev/null || true)"
+          if [[ -z "$PIN" ]]; then
+            echo "No .xcode-version pin; using runner default."
+          else
+            MATCH=""
+            for app in /Applications/Xcode*.app; do
+              [[ -d "$app" ]] || continue
+              V="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true)"
+              echo "found $app ($V)"
+              [[ "$V" == "$PIN" ]] && MATCH="$app"
+            done
+            if [[ -n "$MATCH" ]]; then
+              echo "Selecting pinned Xcode $PIN at $MATCH"
+              sudo xcode-select -s "$MATCH/Contents/Developer"
+            else
+              echo "::warning::.xcode-version pins Xcode $PIN, not present on this runner. Building with the default instead."
+            fi
+          fi
+          xcodebuild -version
 
       # The app target is never compiled by the Build job — only the SPM CLI is —
       # so a break in Sources/homeclaw (the HomeKit manager, socket server, and

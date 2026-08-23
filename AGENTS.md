@@ -78,6 +78,28 @@ npm run build:mcp                      # Build Node.js MCP server only
 
 **npm workspaces**: Root `package.json` defines workspaces for `openclaw` and `mcp-server`. Run `npm install` from the project root.
 
+### Xcode version
+
+The Xcode this project builds with is pinned in `.xcode-version` (currently
+**27.0**, i.e. Xcode beta). `scripts/build.sh` and `fastlane` resolve that pin to
+an installed `Xcode.app` by its `CFBundleShortVersionString`, so a beta and a
+release build can sit side by side in `/Applications` under any name.
+
+Both print the toolchain in use on every run. If the pinned version is not
+installed they fail with the list of what is, rather than silently building on a
+different Xcode.
+
+Override for a one-off build:
+
+```bash
+XCODE_APP=/Applications/Xcode.app scripts/build.sh --debug
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer fastlane archive
+```
+
+Either variable may also live in `.env.local`. When bumping the pin, edit
+`.xcode-version`; CI picks it up automatically when the runner image has that
+Xcode, and warns instead of failing when it does not.
+
 ### XcodeGen
 
 The root `project.yml` defines all three targets (HomeClaw, macOSBridge, homeclaw-cli). The generated `.xcodeproj` is gitignored — regenerate after cloning:
@@ -202,7 +224,8 @@ If status shows `ready: false` with 0 homes:
 
 GitHub Actions (`.github/workflows/tests.yml`) runs on `macos-26`:
 - **Build** — builds `homeclaw-cli` via SPM, runs `swift test`, builds `mcp-server` (Node.js)
-- **Catalyst App** — runs `xcodegen` and builds the HomeClaw Catalyst target with
+- **Catalyst App** — runs `xcodegen`, selects the `.xcode-version` Xcode when the
+  runner has it, and builds the HomeClaw Catalyst target with
   `CODE_SIGNING_ALLOWED=NO`, asserting `** BUILD SUCCEEDED **`
 - **Version Consistency** — checks the plugin manifest versions agree
 

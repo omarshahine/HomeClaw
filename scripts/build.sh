@@ -18,13 +18,51 @@ TEAM_ID="${HOMEKIT_TEAM_ID:-}"
 
 # ─── Toolchain ──────────────────────────────────────────────────────
 #
-# Machines with several Xcodes installed otherwise build against whatever
-# `xcode-select` happens to point at, which is invisible in the output. Honor an
-# explicit override (env or .env.local) and always report what we used.
-# XCODE_APP is a convenience spelling of DEVELOPER_DIR.
+# The project pins its Xcode in .xcode-version. Machines with several Xcodes
+# installed otherwise build against whatever `xcode-select` happens to point at,
+# which is invisible in the output and can differ from what releases are built
+# with. Resolution order: DEVELOPER_DIR, XCODE_APP, .xcode-version, xcode-select.
+#
+# Find the Xcode.app whose CFBundleShortVersionString matches $1. Betas and
+# release builds live side by side, so match on the version, not the app name.
+find_xcode_by_version() {
+    local want="$1" app version
+    for app in /Applications/Xcode*.app; do
+        [[ -d "$app" ]] || continue
+        version="$(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || true)"
+        if [[ "$version" == "$want" ]]; then
+            printf '%s' "$app"
+            return 0
+        fi
+    done
+    return 1
+}
+
 if [[ -n "${XCODE_APP:-}" && -z "${DEVELOPER_DIR:-}" ]]; then
     DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
 fi
+
+XCODE_PIN_FILE="$PROJECT_ROOT/.xcode-version"
+XCODE_PIN=""
+if [[ -f "$XCODE_PIN_FILE" ]]; then
+    XCODE_PIN="$(tr -d '[:space:]' < "$XCODE_PIN_FILE")"
+fi
+
+if [[ -z "${DEVELOPER_DIR:-}" && -n "$XCODE_PIN" ]]; then
+    if PINNED_APP="$(find_xcode_by_version "$XCODE_PIN")"; then
+        DEVELOPER_DIR="$PINNED_APP/Contents/Developer"
+    else
+        echo "Error: .xcode-version pins Xcode $XCODE_PIN, but no /Applications/Xcode*.app reports that version." >&2
+        echo "  Installed:" >&2
+        for app in /Applications/Xcode*.app; do
+            [[ -d "$app" ]] || continue
+            echo "    $app ($(defaults read "$app/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "?"))" >&2
+        done
+        echo "  Install it, or override for this build: XCODE_APP=/Applications/Xcode.app scripts/build.sh ..." >&2
+        exit 1
+    fi
+fi
+
 if [[ -n "${DEVELOPER_DIR:-}" ]]; then
     if [[ ! -d "$DEVELOPER_DIR" ]]; then
         echo "Error: DEVELOPER_DIR does not exist: $DEVELOPER_DIR" >&2
@@ -83,11 +121,12 @@ Options:
 
 Environment:
   HOMEKIT_TEAM_ID   Same as --team-id (flag takes precedence)
-  DEVELOPER_DIR     Xcode toolchain to build with (defaults to xcode-select)
+  DEVELOPER_DIR     Xcode toolchain to build with (overrides .xcode-version)
   XCODE_APP         Path to an Xcode.app; shorthand for DEVELOPER_DIR
 
-Both toolchain variables may also be set in .env.local. The Xcode in use is
-printed on every build.
+The project pins its Xcode in .xcode-version; the build resolves that to an
+installed Xcode.app by version. DEVELOPER_DIR / XCODE_APP override the pin and
+may also be set in .env.local. The Xcode in use is printed on every build.
 EOF
     exit 0
 }

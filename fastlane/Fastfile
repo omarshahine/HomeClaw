@@ -33,22 +33,59 @@ end
 load_env_file(File.join(PROJECT_ROOT, ".env.local"))
 load_env_file(File.expand_path("~/.secrets.env"))
 
-# Resolve the Xcode to build with, and say which one it was.
+# The Xcode version this project builds with, from .xcode-version.
+def pinned_xcode_version
+  pin_file = File.join(PROJECT_ROOT, ".xcode-version")
+  return nil unless File.exist?(pin_file)
+
+  pin = File.read(pin_file).strip
+  pin.empty? ? nil : pin
+end
+
+# Locate the installed Xcode.app reporting `version`. Betas and release builds
+# live side by side, so match on CFBundleShortVersionString, not the app name.
+def xcode_app_for_version(version)
+  Dir["/Applications/Xcode*.app"].find do |app|
+    installed = `defaults read #{Shellwords.escape(File.join(app, "Contents/Info.plist"))} CFBundleShortVersionString 2>/dev/null`.strip
+    installed == version
+  end
+end
+
+# Resolve the Xcode to archive with, and say which one it was.
 #
 # A machine with several Xcodes installed otherwise archives against whatever
 # `xcode-select` points at, invisibly — a release built on the wrong toolchain
-# is not something to discover from App Store Connect. Honors DEVELOPER_DIR or
-# XCODE_APP from the environment or .env.local; falls back to xcode-select.
+# is not something to discover from App Store Connect. Resolution order:
+# DEVELOPER_DIR, XCODE_APP, .xcode-version, xcode-select.
 def resolve_toolchain!
   if ENV["DEVELOPER_DIR"].to_s.empty? && !ENV["XCODE_APP"].to_s.empty?
     ENV["DEVELOPER_DIR"] = File.join(ENV["XCODE_APP"], "Contents/Developer")
   end
+
+  pin = pinned_xcode_version
+  if ENV["DEVELOPER_DIR"].to_s.empty? && pin
+    app = xcode_app_for_version(pin)
+    if app.nil?
+      installed = Dir["/Applications/Xcode*.app"].map do |a|
+        v = `defaults read #{Shellwords.escape(File.join(a, "Contents/Info.plist"))} CFBundleShortVersionString 2>/dev/null`.strip
+        "#{a} (#{v.empty? ? '?' : v})"
+      end
+      UI.user_error!(
+        "\.xcode-version pins Xcode #{pin}, but no installed Xcode reports that version.\n" \
+        "Installed: #{installed.join(', ')}\n" \
+        "Install it, or override for this run: XCODE_APP=/Applications/Xcode.app fastlane <lane>"
+      )
+    end
+    ENV["DEVELOPER_DIR"] = File.join(app, "Contents/Developer")
+  end
+
   dir = ENV["DEVELOPER_DIR"]
   UI.user_error!("DEVELOPER_DIR does not exist: #{dir}") if !dir.to_s.empty? && !Dir.exist?(dir)
 
   version = `xcodebuild -version 2>/dev/null`.lines.first.to_s.strip
   path = `xcode-select -p 2>/dev/null`.strip
   UI.message("Toolchain: #{version.empty? ? 'unknown' : version} (#{path})")
+  UI.important("Toolchain #{version} does not match .xcode-version pin #{pin}") if pin && !version.include?(pin)
   version
 end
 
