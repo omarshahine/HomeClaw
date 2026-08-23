@@ -33,6 +33,39 @@ end
 load_env_file(File.join(PROJECT_ROOT, ".env.local"))
 load_env_file(File.expand_path("~/.secrets.env"))
 
+# Resolve the Xcode to build with, and say which one it was.
+#
+# A machine with several Xcodes installed otherwise archives against whatever
+# `xcode-select` points at, invisibly — a release built on the wrong toolchain
+# is not something to discover from App Store Connect. Honors DEVELOPER_DIR or
+# XCODE_APP from the environment or .env.local; falls back to xcode-select.
+def resolve_toolchain!
+  if ENV["DEVELOPER_DIR"].to_s.empty? && !ENV["XCODE_APP"].to_s.empty?
+    ENV["DEVELOPER_DIR"] = File.join(ENV["XCODE_APP"], "Contents/Developer")
+  end
+  dir = ENV["DEVELOPER_DIR"]
+  UI.user_error!("DEVELOPER_DIR does not exist: #{dir}") if !dir.to_s.empty? && !Dir.exist?(dir)
+
+  version = `xcodebuild -version 2>/dev/null`.lines.first.to_s.strip
+  path = `xcode-select -p 2>/dev/null`.strip
+  UI.message("Toolchain: #{version.empty? ? 'unknown' : version} (#{path})")
+  version
+end
+
+# Concurrent xcodebuild runs against the same project can wedge the build
+# service: a run sits at the toolchain probe producing nothing, which reads as a
+# broken toolchain rather than contention. Fail fast instead of hanging a
+# release. Scoped to this project; unrelated builds on the machine are allowed.
+def ensure_no_concurrent_build!
+  pids = `pgrep -f "xcodebuild.*#{APP_NAME}.xcodeproj" 2>/dev/null`.split.reject { |p| p == Process.pid.to_s }
+  return if pids.empty?
+
+  UI.user_error!(
+    "Another xcodebuild is already running against #{APP_NAME}.xcodeproj (pid #{pids.first}). " \
+    "Concurrent builds wedge the build service. Wait for it to finish, or kill #{pids.first}."
+  )
+end
+
 def asc_api_key
   # Accept the ASC_* names or the canonical App Store Connect API names used
   # machine-wide (so a shell with ~/.secrets.env sourced works without remapping).
@@ -194,6 +227,9 @@ platform :ios do
   # Pre-archive prep: regenerate Xcode project + build the Node.js MCP server.
   private_lane :prepare do
     UI.user_error!("xcodegen not installed. brew install xcodegen") unless system("command -v xcodegen >/dev/null 2>&1")
+
+    resolve_toolchain!
+    ensure_no_concurrent_build!
 
     UI.message("Generating Xcode project...")
     sh("cd #{Shellwords.escape(PROJECT_ROOT)} && xcodegen generate --use-cache", log: false)

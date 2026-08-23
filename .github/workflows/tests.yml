@@ -38,6 +38,52 @@ jobs:
       - name: Build MCP server
         run: npm run build:mcp
 
+  catalyst:
+    name: Catalyst App
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The Xcode build phase compiles openclaw/dist via tsc, resolved from
+      # node_modules before falling back to npx.
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Report toolchain
+        run: xcodebuild -version
+
+      # The app target is never compiled by the Build job — only the SPM CLI is —
+      # so a break in Sources/homeclaw (the HomeKit manager, socket server, and
+      # views) could reach main with CI green. Signing is disabled because the
+      # HomeKit entitlement is App Store-only and cannot be provisioned here;
+      # this checks that the Catalyst target compiles and links, not that it
+      # is distributable.
+      - name: Build Catalyst app (no signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project HomeClaw.xcodeproj \
+            -scheme HomeClaw \
+            -configuration Debug \
+            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+            build \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee /tmp/catalyst-build.log \
+            | grep -E "error:|warning:|^\*\* BUILD" || true
+          grep -q "^\*\* BUILD SUCCEEDED \*\*" /tmp/catalyst-build.log
+
   version-check:
     name: Version Consistency
     runs-on: ubuntu-latest
