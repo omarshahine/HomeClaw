@@ -6,6 +6,7 @@ struct IntegrationsSettingsView: View {
     @State private var claudeCodeStatus: ClaudeCodeStatus = .checking
     @State private var openClawStatus: OpenClawStatus = .checking
     @State private var cliStatus: CLIStatus = .checking
+    @State private var hermesStatus: HermesStatus = .checking
     @State private var statusMessage: StatusMessage?
 
     // MARK: - Status Enums
@@ -42,6 +43,13 @@ struct IntegrationsSettingsView: View {
         case notInstalled
         /// Plugin found in extensions directory or OpenClaw config.
         case installed
+    }
+
+    private enum HermesStatus {
+        case checking
+        case detected
+        case notDetected
+        case serverUnavailable
     }
 
     // MARK: - Constants & Paths
@@ -111,6 +119,7 @@ struct IntegrationsSettingsView: View {
             claudeDesktopSection
             claudeCodeSection
             openClawSection
+            hermesSection
 
             if let message = statusMessage {
                 Section {
@@ -356,6 +365,37 @@ struct IntegrationsSettingsView: View {
         }
     }
 
+    // MARK: - Hermes Section
+
+    @ViewBuilder
+    private var hermesSection: some View {
+        Section {
+            LabeledContent("Status") {
+                hermesStatusLabel
+            }
+
+            if let nodePath = nodeJSPath(), let serverPath = Self.bundledServerJSPath {
+                Button("Copy Hermes MCP Configuration") {
+                    UIPasteboard.general.string = HermesIntegrationSupport.setupInstructions(
+                        nodePath: nodePath, serverPath: serverPath)
+                    statusMessage = StatusMessage(
+                        text: "Hermes configuration copied to the clipboard.", isError: false)
+                }
+
+                Text("Start HomeClaw before using the homekit_status MCP tool. The generated configuration uses the bundled server and does not modify Hermes automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            } else {
+                Text("Build the app with the bundled MCP server, then copy the Hermes configuration here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Hermes").font(.headline).foregroundStyle(.primary)
+        }
+    }
+
     @ViewBuilder
     private var openClawRemoteInstructionsView: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -428,6 +468,24 @@ struct IntegrationsSettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var hermesStatusLabel: some View {
+        switch hermesStatus {
+        case .checking:
+            Label("Checking\u{2026}", systemImage: "circle.dotted")
+                .foregroundStyle(.secondary)
+        case .detected:
+            Label("Detected", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .notDetected:
+            Label("Not Detected", systemImage: "circle")
+                .foregroundStyle(.secondary)
+        case .serverUnavailable:
+            Label("MCP Server Not Bundled", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+        }
+    }
+
     // MARK: - Status Checking
 
     private func refreshStatuses() {
@@ -435,6 +493,13 @@ struct IntegrationsSettingsView: View {
         claudeDesktopStatus = checkClaudeDesktopStatus()
         claudeCodeStatus = checkClaudeCodeStatus()
         openClawStatus = checkOpenClawStatus()
+        hermesStatus = checkHermesStatus()
+    }
+
+    private func checkHermesStatus() -> HermesStatus {
+        guard HermesIntegrationSupport.findHermesExecutable() != nil else { return .notDetected }
+        guard Self.bundledServerJSPath != nil else { return .serverUnavailable }
+        return .detected
     }
 
     private func checkClaudeDesktopStatus() -> DesktopStatus {

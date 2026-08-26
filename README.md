@@ -369,6 +369,22 @@ After installing, verify Claude can reach HomeKit:
 
 HomeClaw includes an [OpenClaw](https://openclaw.ai) plugin that registers a HomeKit skill on the gateway. The skill calls `homeclaw-cli` by name, so it must be in your PATH.
 
+## Using with Hermes
+
+HomeClaw also ships a portable [Agent Plugin](https://agent-plugins.org/) package for [Hermes Agent](https://hermes-agent.nousresearch.com/). It connects Hermes to the existing HomeClaw stdio MCP server; it does not duplicate HomeKit access or install the app.
+
+### Prerequisites
+
+1. Install HomeClaw from the Mac App Store.
+2. Launch HomeClaw and grant HomeKit access when macOS asks.
+3. Keep HomeClaw running while Hermes uses the MCP tools.
+
+Install the plugin from a checkout of this repository using Hermes' portable-plugin installer, or copy the root `mcp.json` into Hermes' MCP configuration. The Settings > Integrations > Hermes section can copy a configuration for the installed app and Node.js path without modifying Hermes automatically.
+
+The first verification should be the read-only `homekit_status` tool. If it reports that the backend is unavailable, confirm that HomeClaw is running; no `sudo`, symlink, credentials, or HomeKit write is required.
+
+For a nonstandard app location, use the generated configuration from Settings and keep the absolute server path inside the installed HomeClaw bundle.
+
 ### Same-Mac Install (Recommended)
 
 If HomeClaw and OpenClaw run on the same Mac, use the one-click installer:

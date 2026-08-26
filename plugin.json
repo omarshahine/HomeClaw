@@ -1,0 +1,11 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "homeclaw",
+  "version": "1.0.5",
+  "description": "HomeKit smart home control and monitoring through the HomeClaw MCP server.",
+  "homepage": "https://github.com/omarshahine/HomeClaw",
+  "repository": "https://github.com/omarshahine/HomeClaw",
+  "license": "MIT",
+  "keywords": ["homekit", "smart-home", "mcp"],
+  "mcp": true
+}
