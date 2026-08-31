@@ -1,0 +1,16 @@
+version: 2
+# Grouped and monthly on purpose: ungrouped weekly updates across this
+# fleet would be dozens of PRs a week. One PR per ecosystem per month
+# is something a person can actually read.
+updates:
+  # The real supply-chain surface: these workflows carry signing certs,
+  # notarization credentials and publish tokens.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
