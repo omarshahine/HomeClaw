@@ -19,7 +19,7 @@ OpenClaw → Plugin (openclaw/) → homeclaw-cli ──────────�
 
 **Single-process design.** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement. By making the entire app Catalyst, HomeKit access is direct (no IPC), signing is unified (single archive), and App Store submission is clean. The macOSBridge plugin bundle provides the native macOS menu bar via `NSStatusItem`.
 
-**Note:** The HTTP MCP server (port 9090, bearer token auth) has been disabled. The implementation is preserved in `Sources/homeclaw/MCP/_disabled/` and `Sources/homeclaw/Shared/_disabled/` for reference but is not compiled. All MCP clients now use the stdio server or CLI.
+**Note:** The native Streamable HTTP MCP server binds only to loopback at the fixed endpoint `http://127.0.0.1:9090/mcp`, is owned by the Catalyst app lifecycle, and exposes `/healthz` for readiness. It has no shell-launch, install, or token controls. The Node stdio server remains available for Claude Desktop, Claude Code, and OpenClaw compatibility.
 
 ## Project Structure
 

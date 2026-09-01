@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppConfig {
-    static let bundleID = "com.shahine.homeclaw"
+    static let bundleID = "com.hadm.homeclaw"
     static let appName = "HomeClaw"
 
     /// Returns the real user home directory, bypassing the sandbox container.
@@ -36,6 +36,19 @@ enum AppConfig {
             return container.appendingPathComponent("homeclaw.sock").path
         }
         return "/tmp/homeclaw.sock"
+    }()
+
+    // Native MCP HTTP listener configuration. Only the port is overrideable for tests/development.
+    static let mcpBindHost = HTTPMCPConfiguration.defaultBindHost
+    static let mcpEndpoint: String = {
+        "http://\(mcpBindHost):\(mcpPort)/mcp"
+    }()
+    static let mcpPort: Int = {
+        guard let value = ProcessInfo.processInfo.environment["HOMECLAW_MCP_PORT"],
+              let port = Int(value), (1...65535).contains(port) else {
+            return HTTPMCPConfiguration.defaultPort
+        }
+        return port
     }()
 
     // UserDefaults keys

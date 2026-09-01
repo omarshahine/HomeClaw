@@ -22,6 +22,12 @@ packages:
   SwiftTUI:
     url: https://github.com/rensbreur/SwiftTUI.git
     branch: main
+  mcp-swift-sdk:
+    url: https://github.com/modelcontextprotocol/swift-sdk.git
+    exactVersion: "0.8.2"
+  swift-nio:
+    url: https://github.com/apple/swift-nio.git
+    exactVersion: "2.99.0"
 
 targets:
   # ─── Unified Catalyst App ─────────────────────────────────
@@ -42,7 +48,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
+        PRODUCT_BUNDLE_IDENTIFIER: com.hadm.homeclaw
         PRODUCT_NAME: HomeClaw
         TARGETED_DEVICE_FAMILY: "6"
         SUPPORTS_MACCATALYST: YES
@@ -73,6 +79,14 @@ targets:
       - target: homeclaw-cli
         embed: false
       - sdk: HomeKit.framework
+      - package: mcp-swift-sdk
+        product: MCP
+      - package: swift-nio
+        product: NIOCore
+      - package: swift-nio
+        product: NIOHTTP1
+      - package: swift-nio
+        product: NIOPosix
     preBuildScripts:
       - name: "Increment Build Number (Archive Only)"
         script: |
@@ -212,6 +226,27 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw.uitests
         PRODUCT_NAME: HomeClawUITests
+        TEST_TARGET_NAME: HomeClaw
+        TARGETED_DEVICE_FAMILY: "6"
+        SUPPORTS_MACCATALYST: YES
+        DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER: NO
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+  # ─── Unit Tests ────────────────────────────────────────────
+  HomeClawTests:
+    type: bundle.unit-test
+    platform: iOS
+    attributes:
+      UIKitCatalyst: optimized
+    sources:
+      - path: Tests/HomeClawTests
+    dependencies:
+      - target: HomeClaw
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw.tests
+        PRODUCT_NAME: HomeClawTests
         TEST_TARGET_NAME: HomeClaw
         TARGETED_DEVICE_FAMILY: "6"
         SUPPORTS_MACCATALYST: YES

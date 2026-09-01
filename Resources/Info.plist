@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>HomeClaw</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.shahine.homeclaw</string>
+	<string>com.hadm.homeclaw</string>
 	<key>CFBundleName</key>
 	<string>HomeClaw</string>
 	<key>CFBundlePackageType</key>

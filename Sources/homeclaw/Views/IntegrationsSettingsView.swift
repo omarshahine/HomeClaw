@@ -111,7 +111,7 @@ struct IntegrationsSettingsView: View {
             claudeDesktopSection
             claudeCodeSection
             openClawSection
-
+            HermesIntegrationView()
             if let message = statusMessage {
                 Section {
                     Label(
