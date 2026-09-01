@@ -55,4 +55,12 @@ jobs:
           # --branch is explicit because this Pages project has no Git
           # integration: wrangler would otherwise infer a branch, and only
           # "main" maps to this project's production deployment.
-          command: pages deploy site/dist --project-name=homeclaw --branch=main
+          # ⚠️ workingDirectory MUST be `site`, and not for tidiness.
+          # wrangler-action runs `npm i wrangler@4` in this directory. The repo
+          # ROOT declares `workspaces: ["openclaw", "mcp-server"]`, and
+          # openclaw/package.json is `os: ["darwin"]` because it wraps a macOS
+          # binary — so any npm install at the root fails on a Linux runner with
+          # EBADPLATFORM before wrangler is even fetched, let alone authenticated.
+          # `site` is not a workspace member, so installing there is isolated.
+          workingDirectory: site
+          command: pages deploy dist --project-name=homeclaw --branch=main
