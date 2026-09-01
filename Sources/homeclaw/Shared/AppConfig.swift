@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppConfig {
-    static let bundleID = "com.hadm.homeclaw"
+    static let bundleID = "com.shahine.homeclaw"
     static let appName = "HomeClaw"
 
     /// Returns the real user home directory, bypassing the sandbox container.

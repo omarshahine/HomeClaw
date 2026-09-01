@@ -3,8 +3,12 @@ import XCTest
 
 final class StreamableHTTPTransportTests: XCTestCase {
     private let json = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
-    private let headers = ["Content-Type": "application/json", "Accept": "application/json"]
+    private let protocolVersion = MCPServer.supportedProtocolVersion
+    private var headers: [String: String] { ["Content-Type": "application/json", "Accept": "application/json"] }
     private func send(_ server: MCPServer, _ request: HTTPRequest) async -> HTTPResponse { await server.handleHTTPRequest(request) }
+    private func sessionHeaders(for id: String, accept: String = "application/json") -> [String: String] {
+        ["Content-Type": "application/json", "Accept": accept, "Mcp-Session-Id": id, "MCP-Protocol-Version": protocolVersion]
+    }
 
     func testInitializeCreatesSessionAndReturnsSessionHeader() async {
         let response = await send(MCPServer(homeKitReady: false), HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
@@ -12,26 +16,26 @@ final class StreamableHTTPTransportTests: XCTestCase {
     }
 
     func testRequestsRequireTheirOwnValidSession() async {
-        let server = MCPServer(); let initialize = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
-        let id = initialize.header("Mcp-Session-Id")!
-        let list = Data("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}".utf8)
-        let missing = await send(server, HTTPRequest(method: "POST", headers: headers, body: list)); XCTAssertEqual(missing.statusCode, 400)
-        let validHeaders = headers.merging(["Mcp-Session-Id": id]) { _, new in new }
-        let valid = await send(server, HTTPRequest(method: "POST", headers: validHeaders, body: list)); XCTAssertEqual(valid.statusCode, 200)
-        let unknownHeaders = headers.merging(["Mcp-Session-Id": "unknown"]) { _, new in new }
-        let unknown = await send(server, HTTPRequest(method: "POST", headers: unknownHeaders, body: list)); XCTAssertEqual(unknown.statusCode, 404)
-    }
+            let server = MCPServer(); let initialize = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
+            let id = initialize.header("Mcp-Session-Id")!
+            let list = Data("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}".utf8)
+            let missing = await send(server, HTTPRequest(method: "POST", headers: headers, body: list)); XCTAssertEqual(missing.statusCode, 400)
+            let validHeaders = sessionHeaders(for: id)
+            let valid = await send(server, HTTPRequest(method: "POST", headers: validHeaders, body: list)); XCTAssertEqual(valid.statusCode, 200)
+            let unknownHeaders = sessionHeaders(for: "unknown")
+            let unknown = await send(server, HTTPRequest(method: "POST", headers: unknownHeaders, body: list)); XCTAssertEqual(unknown.statusCode, 404)
+        }
 
     func testNotificationIsAcceptedAndGetAndDeleteAreSessionScoped() async throws {
-        let server = MCPServer(); let initialize = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
-        let id = try XCTUnwrap(initialize.header("Mcp-Session-Id"))
-        let sessionHeaders = headers.merging(["Mcp-Session-Id": id, "Accept": "text/event-stream"]) { _, new in new }
-        let notification = Data("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}".utf8)
-        let accepted = await send(server, HTTPRequest(method: "POST", headers: sessionHeaders, body: notification)); XCTAssertEqual(accepted.statusCode, 202); XCTAssertNil(accepted.bodyData)
-        let sse = await send(server, HTTPRequest(method: "GET", headers: sessionHeaders)); XCTAssertEqual(sse.statusCode, 200); XCTAssertEqual(sse.header("Content-Type"), "text/event-stream"); XCTAssertTrue(sse.bodyString?.hasSuffix("\n\n") == true)
-        let deleted = await send(server, HTTPRequest(method: "DELETE", headers: sessionHeaders)); XCTAssertEqual(deleted.statusCode, 200)
-        let gone = await send(server, HTTPRequest(method: "GET", headers: sessionHeaders)); XCTAssertEqual(gone.statusCode, 404)
-    }
+            let server = MCPServer(); let initialize = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
+            let id = try XCTUnwrap(initialize.header("Mcp-Session-Id"))
+            let sessionHeaders = self.sessionHeaders(for: id, accept: "text/event-stream")
+            let notification = Data("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}".utf8)
+            let accepted = await send(server, HTTPRequest(method: "POST", headers: sessionHeaders, body: notification)); XCTAssertEqual(accepted.statusCode, 202); XCTAssertNil(accepted.bodyData)
+            let sse = await send(server, HTTPRequest(method: "GET", headers: sessionHeaders)); XCTAssertEqual(sse.statusCode, 200); XCTAssertEqual(sse.header("Content-Type"), "text/event-stream"); XCTAssertTrue(sse.bodyString?.hasSuffix("\n\n") == true)
+            let deleted = await send(server, HTTPRequest(method: "DELETE", headers: sessionHeaders)); XCTAssertEqual(deleted.statusCode, 200)
+            let gone = await send(server, HTTPRequest(method: "GET", headers: sessionHeaders)); XCTAssertEqual(gone.statusCode, 404)
+        }
 
     func testMixedCaseAcceptMediaTypeIsAccepted() async {
         let response = await send(MCPServer(homeKitReady: false), HTTPRequest(method: "POST", headers: ["Content-Type": "application/json", "Accept": "Application/JSON"], body: Data(json.utf8)))

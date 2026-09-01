@@ -49,7 +49,7 @@ actor MCPServer {
     let sessionStore: StreamableHTTPSessionStore
     private static let readOnlyTools: Set<String> = ["homekit_status", "homekit_accessories", "homekit_rooms", "homekit_device_map", "homekit_events"]
 
-    init(configuration: HTTPMCPConfiguration = .init(port: AppConfig.mcpPort, bindHost: AppConfig.mcpBindHost), homeKitReady: Bool = false, sessionStore: StreamableHTTPSessionStore? = nil, toolRegistry: MCPToolRegistry = HomeClawMCPToolRegistry.shared, dispatchTimeout: Duration = .seconds(30)) {
+    init(configuration: HTTPMCPConfiguration = .init(port: AppConfig.mcpPort, bindHost: AppConfig.mcpBindHost), homeKitReady: Bool = false, sessionStore: StreamableHTTPSessionStore? = nil, toolRegistry: MCPToolRegistry = HomeClawMCPToolRegistry.shared, dispatchTimeout: Duration = .seconds(120)) {
         self.configuration = configuration; self.homeKitReady = homeKitReady; self.toolRegistry = toolRegistry; self.dispatchTimeout = dispatchTimeout
         self.sessionStore = sessionStore ?? .init(ttl: configuration.sessionTTL)
     }

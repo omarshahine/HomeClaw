@@ -48,7 +48,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.hadm.homeclaw
+        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
         PRODUCT_NAME: HomeClaw
         TARGETED_DEVICE_FAMILY: "6"
         SUPPORTS_MACCATALYST: YES
