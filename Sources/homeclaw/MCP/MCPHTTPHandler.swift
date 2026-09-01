@@ -115,7 +115,12 @@ final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         channel.eventLoop.execute { guard channel.isActive else { return }; channel.writeAndFlush(Self.wrapOutbound(.end(nil)), promise: nil) }
     }
     private static func writeParts(_ response: HTTPResponse, version: HTTPVersion, channel: Channel) {
-        var head = HTTPResponseHead(version: version, status: HTTPResponseStatus(statusCode: response.statusCode)); for (name, value) in response.headers { head.headers.add(name: name, value: value) }
+        var head = HTTPResponseHead(version: version, status: HTTPResponseStatus(statusCode: response.statusCode))
+        // Add Content-Length for fixed-size non-stream responses (HTTP/1.1 framing)
+        if let body = response.bodyData, response.stream == nil {
+            head.headers.add(name: "Content-Length", value: "\(body.count)")
+        }
+        for (name, value) in response.headers { head.headers.add(name: name, value: value) }
         channel.write(wrapOutbound(.head(head)), promise: nil)
         if response.stream == nil, let body = response.bodyData { var buffer = channel.allocator.buffer(capacity: body.count); buffer.writeBytes(body); channel.write(wrapOutbound(.body(.byteBuffer(buffer))), promise: nil) }
         if response.stream != nil { channel.flush() }
