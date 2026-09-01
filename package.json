@@ -14,6 +14,6 @@
     "build": "npm run build:swift && npm run build:mcp"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0"
+    "esbuild": "^0.28.1"
   }
 }
