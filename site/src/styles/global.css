@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Tailwind 4 is CSS-first: what used to live in tailwind.config.mjs under
+   theme.extend is expressed here as @theme custom properties. The token names
+   map 1:1 to the old config, so `bg-background`, `text-muted`, `font-mono`,
+   `animate-fade-in-up` and friends keep working unchanged in the markup. */
+@theme {
+  --color-background: #0a0a0a;
+  --color-card: #171717;
+  --color-border: #262626;
+  --color-foreground: #fafafa;
+  --color-muted: #a3a3a3;
+  --color-accent: #22c55e;
+  --color-accent-2: #4ade80;
+
+  --font-sans: Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+  --animate-fade-in-up: fade-in-up 0.6s ease-out forwards;
+  --animate-gradient-shift: gradient-shift 6s ease infinite;
+  --animate-glow: glow 3s ease-in-out infinite;
+}
+
+@keyframes fade-in-up {
+  0%   { opacity: 0; transform: translateY(20px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+@keyframes glow {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.8; }
+}
+
+/* darkMode: 'class' in Tailwind 3 became an explicit variant in 4. */
+@custom-variant dark (&:where(.dark, .dark *));

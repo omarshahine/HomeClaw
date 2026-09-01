@@ -22,8 +22,13 @@ const { title, description } = Astro.props;
 </Layout>
 
 <style is:global>
+  /* Tailwind 4 resolves @apply against the theme only when the stylesheet that
+     defines it is referenced. @reference loads it for this block without
+     duplicating any CSS into the output. */
+  @reference "../styles/global.css";
+
   .prose-invert {
-    color: theme('colors.foreground');
+    color: var(--color-foreground);
   }
   .prose-invert h1 {
     @apply text-4xl sm:text-5xl font-bold tracking-tight mb-6;

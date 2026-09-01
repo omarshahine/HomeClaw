@@ -13,6 +13,10 @@ const {
 
 const canonicalURL = new URL(Astro.url.pathname, Astro.site);
 const imageURL = new URL(image, Astro.site).toString();
+
+// Tailwind 4 has no Astro integration to inject its base styles, so the
+// stylesheet is imported explicitly. @astrojs/tailwind used to do this.
+import '../styles/global.css';
 ---
 
 <!doctype html>
