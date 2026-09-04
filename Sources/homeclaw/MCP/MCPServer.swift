@@ -47,6 +47,7 @@ actor MCPServer {
     private var expiryTask: Task<Void, Never>?
     private let dispatchTimeout: Duration
     let sessionStore: StreamableHTTPSessionStore
+    private var lifecycleGeneration: UInt64 = 0
     private static let readOnlyTools: Set<String> = ["homekit_status", "homekit_accessories", "homekit_rooms", "homekit_device_map", "homekit_events"]
 
     init(configuration: HTTPMCPConfiguration = .init(port: AppConfig.mcpPort, bindHost: AppConfig.mcpBindHost), homeKitReady: Bool = false, sessionStore: StreamableHTTPSessionStore? = nil, toolRegistry: MCPToolRegistry = HomeClawMCPToolRegistry.shared, dispatchTimeout: Duration = .seconds(120)) {
@@ -58,14 +59,21 @@ actor MCPServer {
 
     func start() async throws {
         guard channel == nil else { return }; try configuration.validateLoopbackBind()
+        let generation = lifecycleGeneration
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         do {
             let channel = try await ServerBootstrap(group: group).serverChannelOption(.backlog, value: 256).serverChannelOption(.socketOption(.so_reuseaddr), value: 1).childChannelInitializer { channel in channel.pipeline.configureHTTPServerPipeline().flatMap { channel.pipeline.addHandler(MCPHTTPHandler(server: self)) } }.bind(host: configuration.bindHost, port: configuration.port).get()
+            guard generation == lifecycleGeneration else {
+                try? await channel.close()
+                try? await group.shutdownGracefully()
+                return
+            }
             self.group = group; self.channel = channel; listenerReady = true; startExpiryCleanup()
             NotificationCenter.default.post(name: .mcpListenerStatusDidChange, object: nil, userInfo: ["listenerReady": true, "homeKitReady": homeKitReady])
         } catch { try? await group.shutdownGracefully(); throw error }
     }
     func stop() async {
+        lifecycleGeneration &+= 1
         let channel = self.channel; let group = self.group; self.channel = nil; self.group = nil; listenerReady = false
         expiryTask?.cancel(); expiryTask = nil; cleanupSSE(for: Array(sseContinuations.keys)); _ = await sessionStore.removeAll()
         NotificationCenter.default.post(name: .mcpListenerStatusDidChange, object: nil, userInfo: ["listenerReady": false, "homeKitReady": homeKitReady])
