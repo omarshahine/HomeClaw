@@ -8,6 +8,7 @@ final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
     private struct RequestState: Sendable { var head: HTTPRequestHead; var bodyBuffer: ByteBuffer; let responseTicket: Int }
     private var requestState: RequestState?; private var rejectedBody = false
     private var activeTasks: [UUID: Task<Void, Never>] = [:]
+    private let maxInflight = HTTPMCPConfiguration.defaultMaxInflightPerChannel
     private let lifecycle = MCPHTTPHandlerLifecycle()
     private let responseOrder = MCPHTTPResponseOrder()
     init(server: MCPServer) { self.server = server }
@@ -34,6 +35,12 @@ final class MCPHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             state.bodyBuffer.writeBuffer(&buffer); requestState = state
         case .end:
             guard !rejectedBody, let state = requestState else { requestState = nil; rejectedBody = false; return }
+            // Bound pipelined work per channel — 1 MiB per request does not bound aggregate
+            if activeTasks.count >= maxInflight {
+                let ticket = state.responseTicket; requestState = nil
+                Self.schedule(.error(statusCode: 429, "Too many concurrent requests"), version: state.head.version, on: context.channel, order: responseOrder, ticket: ticket)
+                return
+            }
             requestState = nil; let taskID = UUID(); let sessionID = state.head.headers.first(name: "Mcp-Session-Id"); lifecycle.begin(taskID: taskID, sessionID: sessionID)
             let channel = context.channel
             let responseOrder = self.responseOrder

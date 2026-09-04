@@ -11,10 +11,12 @@ struct StreamableHTTPSession: Sendable, Equatable {
 actor StreamableHTTPSessionStore {
     private var sessions: [String: StreamableHTTPSession] = [:]
     private let ttl: TimeInterval
+    private let maxSessions: Int
 
-    init(ttl: TimeInterval = 3600) { self.ttl = ttl }
+    init(ttl: TimeInterval = 3600, maxSessions: Int = 128) { self.ttl = ttl; self.maxSessions = maxSessions }
 
-    func create(now: Date = Date()) -> String {
+    func create(now: Date = Date()) -> String? {
+        guard sessions.count < maxSessions else { return nil }
         let id = UUID().uuidString
         sessions[id] = StreamableHTTPSession(createdAt: now, lastAccessedAt: now)
         return id

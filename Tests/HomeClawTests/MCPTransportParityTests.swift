@@ -18,7 +18,7 @@ final class MCPTransportParityTests: XCTestCase {
         XCTAssertTrue((canonicalAction["enum"] as? [Any])?.contains { $0 as? String == "control" } == true)
 
         let server = MCPServer()
-        let initResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: ["Content-Type": "application/json", "Accept": "application/json"], body: Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}".utf8)))
+        let initResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: ["Content-Type": "application/json", "Accept": "application/json"], body: Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}".utf8)))
         let session = try XCTUnwrap(initResponse.header("Mcp-Session-Id"))
         let headers = ["Content-Type": "application/json", "Accept": "application/json", "Mcp-Session-Id": session, "MCP-Protocol-Version": MCPServer.supportedProtocolVersion]
         let list = Data("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}".utf8)
@@ -58,7 +58,7 @@ final class MCPTransportParityTests: XCTestCase {
         let registry = HomeClawMCPToolRegistry.test(status: "ok")
         let server = MCPServer(toolRegistry: registry)
         let headers = ["Content-Type": "application/json", "Accept": "application/json"]
-        let initData = Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}".utf8)
+        let initData = Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}".utf8)
         let initResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: headers, body: initData))
         let session = try XCTUnwrap(initResponse.header("Mcp-Session-Id"))
         let callData = Data("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"homekit_status\",\"arguments\":{}}}".utf8)

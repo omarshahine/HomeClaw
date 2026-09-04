@@ -2,7 +2,7 @@ import XCTest
 @testable import HomeClaw
 
 final class StreamableHTTPTransportTests: XCTestCase {
-    private let json = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+    private let json = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}"
     private let protocolVersion = MCPServer.supportedProtocolVersion
     private var headers: [String: String] { ["Content-Type": "application/json", "Accept": "application/json"] }
     private func send(_ server: MCPServer, _ request: HTTPRequest) async -> HTTPResponse { await server.handleHTTPRequest(request) }
@@ -13,6 +13,28 @@ final class StreamableHTTPTransportTests: XCTestCase {
     func testInitializeCreatesSessionAndReturnsSessionHeader() async {
         let response = await send(MCPServer(homeKitReady: false), HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
         XCTAssertEqual(response.statusCode, 200); XCTAssertNotNil(response.header("Mcp-Session-Id")); XCTAssertTrue(response.bodyString?.contains("protocolVersion") == true)
+    }
+
+    func testInvalidInitializeDoesNotAllocateSession() async throws {
+        let server = MCPServer()
+        let badJSON = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"
+        let bad = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(badJSON.utf8)))
+        XCTAssertEqual(bad.statusCode, 400); XCTAssertNil(bad.header("Mcp-Session-Id"))
+        let c0 = await server.sessionStore.count; XCTAssertEqual(c0, 0)
+        let notifBad = "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{}}"
+        let notif = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(notifBad.utf8)))
+        XCTAssertEqual(notif.statusCode, 202)
+        let c1 = await server.sessionStore.count; XCTAssertEqual(c1, 0)
+    }
+
+    func testSessionCapReturns429() async throws {
+        let store = StreamableHTTPSessionStore(ttl: 3600, maxSessions: 1)
+        let server = MCPServer(sessionStore: store)
+        let first = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
+        XCTAssertEqual(first.statusCode, 200)
+        let second = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
+        XCTAssertEqual(second.statusCode, 429)
+        let cnt = await store.count; XCTAssertEqual(cnt, 1)
     }
 
     func testRequestsRequireTheirOwnValidSession() async {

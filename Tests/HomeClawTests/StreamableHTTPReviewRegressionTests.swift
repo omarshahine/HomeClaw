@@ -44,7 +44,7 @@ private actor CallCounter {
 
 final class StreamableHTTPReviewRegressionTests: XCTestCase {
     private let jsonHeaders = ["Content-Type": "application/json", "Accept": "application/json"]
-    private let initialize = Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}".utf8)
+    private let initialize = Data("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0\"}}}".utf8)
 
     func testResponseOrderGateReleasesConcurrentRequestsInReservationOrder() async {
         let gate = MCPHTTPResponseOrder()

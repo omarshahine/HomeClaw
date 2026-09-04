@@ -48,17 +48,19 @@ actor MCPServer {
     private let dispatchTimeout: Duration
     let sessionStore: StreamableHTTPSessionStore
     private var lifecycleGeneration: UInt64 = 0
+    private var isStarting = false
     private static let readOnlyTools: Set<String> = ["homekit_status", "homekit_accessories", "homekit_rooms", "homekit_device_map", "homekit_events"]
 
     init(configuration: HTTPMCPConfiguration = .init(port: AppConfig.mcpPort, bindHost: AppConfig.mcpBindHost), homeKitReady: Bool = false, sessionStore: StreamableHTTPSessionStore? = nil, toolRegistry: MCPToolRegistry = HomeClawMCPToolRegistry.shared, dispatchTimeout: Duration = .seconds(120)) {
         self.configuration = configuration; self.homeKitReady = homeKitReady; self.toolRegistry = toolRegistry; self.dispatchTimeout = dispatchTimeout
-        self.sessionStore = sessionStore ?? .init(ttl: configuration.sessionTTL)
+        self.sessionStore = sessionStore ?? .init(ttl: configuration.sessionTTL, maxSessions: configuration.maxSessions)
     }
     var endpoint: String { AppConfig.mcpEndpoint }; var bindHost: String { configuration.bindHost }
     func updateHomeKitReady(_ ready: Bool) { homeKitReady = ready; NotificationCenter.default.post(name: .mcpListenerStatusDidChange, object: nil, userInfo: ["listenerReady": listenerReady, "homeKitReady": ready]) }
 
     func start() async throws {
-        guard channel == nil else { return }; try configuration.validateLoopbackBind()
+        guard channel == nil, !isStarting else { return }; try configuration.validateLoopbackBind()
+        isStarting = true; defer { isStarting = false }
         let generation = lifecycleGeneration
         let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
         do {
@@ -111,6 +113,8 @@ actor MCPServer {
         guard let body = request.body, let object = try? JSONSerialization.jsonObject(with: body), let json = object as? [String: Any], isJSONRPC(json) else { return protocolError(status: 400, code: -32600, message: "Invalid JSON-RPC request") }
         let method = json["method"] as? String; let initialize = method == "initialize"; let supplied = request.header("Mcp-Session-Id")
         if initialize && supplied != nil { return protocolError(status: 400, code: -32600, message: "Initialize must not include Mcp-Session-Id") }
+        // Validate initialize params before allocating any session state
+        if initialize, let paramsError = validateInitializeParams(json) { return paramsError }
         // Notifications (no "id") never create sessions; they are not addressable
         let isNotification = !json.keys.contains("id")
         if initialize {
@@ -125,11 +129,30 @@ actor MCPServer {
         if let supplied {
             id = supplied
         } else {
-            id = await sessionStore.create()
+            guard let created = await sessionStore.create() else {
+                return protocolError(status: 429, code: -32600, message: "Too many sessions")
+            }
+            id = created
         }
         guard !isNotification else { return HTTPResponse(statusCode: 202) }
         var headers = ["Content-Type": "application/json; charset=utf-8"]; if supplied == nil { headers["Mcp-Session-Id"] = id }
         return HTTPResponse(statusCode: 200, headers: headers, bodyData: await rpcResponse(for: json))
+    }
+
+    private func validateInitializeParams(_ json: [String: Any]) -> HTTPResponse? {
+        guard let params = json["params"] as? [String: Any] else {
+            return protocolError(status: 400, code: -32602, message: "Missing initialize params")
+        }
+        guard let pv = params["protocolVersion"] as? String, pv == Self.supportedProtocolVersion else {
+            return protocolError(status: 400, code: -32602, message: "Invalid or missing protocolVersion")
+        }
+        guard params["capabilities"] is [String: Any] else {
+            return protocolError(status: 400, code: -32602, message: "Missing capabilities")
+        }
+        guard let ci = params["clientInfo"] as? [String: Any], ci["name"] is String, ci["version"] is String else {
+            return protocolError(status: 400, code: -32602, message: "Missing clientInfo")
+        }
+        return nil
     }
 
     private func rpcResponse(for json: [String: Any]) async -> Data {
