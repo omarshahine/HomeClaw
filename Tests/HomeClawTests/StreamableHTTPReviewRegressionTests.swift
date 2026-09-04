@@ -372,8 +372,8 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
     }
 
     func testPeriodicExpiryCleanupFinishesIdleSSEStream() async throws {
-        let store = StreamableHTTPSessionStore(ttl: 0)
-        let server = MCPServer(sessionStore: store)
+        let store = StreamableHTTPSessionStore(ttl: 1)
+        let server = MCPServer(configuration: HTTPMCPConfiguration(sessionTTL: 1), sessionStore: store)
         await server.startExpiryCleanup()
         let initResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: jsonHeaders, body: initialize))
         let session = try XCTUnwrap(initResponse.header("Mcp-Session-Id"))
