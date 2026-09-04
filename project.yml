@@ -295,6 +295,10 @@ schemes:
         HomeClaw: all
         macOSBridge: all
         homeclaw-cli: all
+    test:
+      config: Debug
+      targets:
+        - HomeClawTests
     run:
       config: Debug
       executable: HomeClaw
@@ -302,6 +306,16 @@ schemes:
       config: Release
     profile:
       config: Release
+
+  HomeClawTests:
+    build:
+      targets:
+        HomeClaw: all
+        HomeClawTests: [test]
+    test:
+      config: Debug
+      targets:
+        - HomeClawTests
 
   HomeClawUITests:
     build:

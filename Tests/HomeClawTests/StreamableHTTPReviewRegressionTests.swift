@@ -58,7 +58,8 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
             gate.finish(second)
         }
         try? await Task.sleep(for: .milliseconds(10))
-        XCTAssertEqual(await events.events, [])
+        let eventsBeforeFirst = await events.events
+        XCTAssertEqual(eventsBeforeFirst, [])
 
         let firstTask = Task {
             await gate.waitTurn(first)
@@ -67,7 +68,8 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
         }
         _ = await firstTask.value
         _ = await secondTask.value
-        XCTAssertEqual(await events.events, ["first", "second"])
+        let finalEvents = await events.events
+        XCTAssertEqual(finalEvents, ["first", "second"])
     }
 
     func testHandlerLifecycleRetiresCompletedTaskAndSession() {
@@ -131,7 +133,8 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
             await counter.increment()
         }
 
-        XCTAssertEqual(await counter.count, 0)
+        let finalCount = await counter.count
+        XCTAssertEqual(finalCount, 0)
     }
 
     func testMCPPathUsesRequestPathNotAbsoluteEndpointURL() async {
@@ -169,9 +172,11 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
         let session = try XCTUnwrap(initResponse.header("Mcp-Session-Id"))
         let body = Data("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}".utf8)
         let base = jsonHeaders.merging(["Mcp-Session-Id": session]) { _, new in new }
-        XCTAssertEqual((await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: base, body: body))).statusCode, 400)
+        let baseResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: base, body: body))
+        XCTAssertEqual(baseResponse.statusCode, 400)
         let supported = base.merging(["MCP-Protocol-Version": "2025-06-18"]) { _, new in new }
-        XCTAssertEqual((await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: supported, body: body))).statusCode, 200)
+        let supportedResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: supported, body: body))
+        XCTAssertEqual(supportedResponse.statusCode, 200)
     }
 
     func testWildcardAcceptIsAccepted() async {
@@ -234,8 +239,10 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
     func testNativeToolRejectsFractionalAndOutOfRangeIntegers() async throws {
         let fractional = try JSONSerialization.data(withJSONObject: ["limit": 1.5])
         let outOfRange = try JSONSerialization.data(withJSONObject: ["duration_seconds": 86401])
-        XCTAssertTrue(String(decoding: await ToolHandlers.call(name: "homekit_events", arguments: fractional), as: UTF8.self).contains("Invalid arguments"))
-        XCTAssertTrue(String(decoding: await ToolHandlers.call(name: "homekit_events", arguments: outOfRange), as: UTF8.self).contains("Invalid arguments"))
+        let fractionalResult = String(decoding: await ToolHandlers.call(name: "homekit_events", arguments: fractional), as: UTF8.self)
+        XCTAssertTrue(fractionalResult.contains("Invalid arguments"))
+        let outOfRangeResult = String(decoding: await ToolHandlers.call(name: "homekit_events", arguments: outOfRange), as: UTF8.self)
+        XCTAssertTrue(outOfRangeResult.contains("Invalid arguments"))
     }
     func testToolsListUsesRegisteredHomeClawTools() async throws {
         let server = MCPServer()
