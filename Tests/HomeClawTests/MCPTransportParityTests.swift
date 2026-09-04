@@ -62,7 +62,7 @@ final class MCPTransportParityTests: XCTestCase {
         let initResponse = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: headers, body: initData))
         let session = try XCTUnwrap(initResponse.header("Mcp-Session-Id"))
         let callData = Data("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"homekit_status\",\"arguments\":{}}}".utf8)
-        let callHeaders = headers.merging(["Mcp-Session-Id": session]) { _, value in value }
+        let callHeaders = headers.merging(["Mcp-Session-Id": session, "MCP-Protocol-Version": MCPServer.supportedProtocolVersion]) { _, value in value }
         let response = await server.handleHTTPRequest(HTTPRequest(method: "POST", headers: callHeaders, body: callData))
         XCTAssertEqual(response.statusCode, 200)
         XCTAssertTrue(response.bodyString?.contains("ok") == true)

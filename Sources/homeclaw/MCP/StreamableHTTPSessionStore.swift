@@ -30,6 +30,20 @@ actor StreamableHTTPSessionStore {
         return true
     }
 
+    /// Atomically validates that the session exists and has not expired, and refreshes its TTL.
+    /// Returns false if missing or expired (expired entries are removed).
+    @discardableResult
+    func validateAndTouch(_ id: String, now: Date = Date()) -> Bool {
+        guard var session = sessions[id] else { return false }
+        if now.timeIntervalSince(session.lastAccessedAt) >= ttl {
+            sessions.removeValue(forKey: id)
+            return false
+        }
+        session.lastAccessedAt = now
+        sessions[id] = session
+        return true
+    }
+
     @discardableResult
     func remove(_ id: String) -> Bool { sessions.removeValue(forKey: id) != nil }
 

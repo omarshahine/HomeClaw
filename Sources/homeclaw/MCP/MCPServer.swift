@@ -90,7 +90,7 @@ actor MCPServer {
         guard acceptableResponse else { return protocolError(status: 406, code: -32600, message: "Accept must include application/json for POST or text/event-stream for GET") }
         if method == "POST" { return await handlePOST(request) }
         guard let id = request.header("Mcp-Session-Id") else { return protocolError(status: 400, code: -32600, message: "Missing Mcp-Session-Id header") }
-        guard await sessionStore.get(id) != nil else { return protocolError(status: 404, code: -32600, message: "Session not found or expired") }; _ = await sessionStore.touch(id)
+        guard await sessionStore.validateAndTouch(id) else { return protocolError(status: 404, code: -32600, message: "Session not found or expired") }
         guard request.header("MCP-Protocol-Version") == Self.supportedProtocolVersion else { return protocolError(status: 400, code: -32600, message: "Unsupported or missing MCP-Protocol-Version") }
         if method == "DELETE" { cleanupSSE(for: id); _ = await sessionStore.remove(id); return HTTPResponse(statusCode: 200) }
         var continuation: AsyncStream<Data>.Continuation!; let stream = AsyncStream<Data> { continuation = $0 }; continuation.yield(Data(": connected\n\n".utf8)); let ownership = SSEStreamOwnership(sessionID: id, token: UUID())
@@ -103,10 +103,15 @@ actor MCPServer {
         guard let body = request.body, let object = try? JSONSerialization.jsonObject(with: body), let json = object as? [String: Any], isJSONRPC(json) else { return protocolError(status: 400, code: -32600, message: "Invalid JSON-RPC request") }
         let method = json["method"] as? String; let initialize = method == "initialize"; let supplied = request.header("Mcp-Session-Id")
         if initialize && supplied != nil { return protocolError(status: 400, code: -32600, message: "Initialize must not include Mcp-Session-Id") }
-        if !initialize {
+        // Notifications (no "id") never create sessions; they are not addressable
+        let isNotification = !json.keys.contains("id")
+        if initialize {
+            if isNotification { return HTTPResponse(statusCode: 202) }
+        } else {
             guard request.header("MCP-Protocol-Version") == Self.supportedProtocolVersion else { return protocolError(status: 400, code: -32600, message: "Unsupported or missing MCP-Protocol-Version") }
             guard let supplied else { return protocolError(status: 400, code: -32600, message: "Missing Mcp-Session-Id header") }
-            guard await sessionStore.get(supplied) != nil else { return protocolError(status: 404, code: -32600, message: "Session not found or expired") }
+            guard await sessionStore.validateAndTouch(supplied) else { return protocolError(status: 404, code: -32600, message: "Session not found or expired") }
+            if isNotification { return HTTPResponse(statusCode: 202) }
         }
         let id: String
         if let supplied {
@@ -114,8 +119,7 @@ actor MCPServer {
         } else {
             id = await sessionStore.create()
         }
-        _ = await sessionStore.touch(id)
-        guard json.keys.contains("id") else { return HTTPResponse(statusCode: 202) }
+        guard !isNotification else { return HTTPResponse(statusCode: 202) }
         var headers = ["Content-Type": "application/json; charset=utf-8"]; if supplied == nil { headers["Mcp-Session-Id"] = id }
         return HTTPResponse(statusCode: 200, headers: headers, bodyData: await rpcResponse(for: json))
     }
