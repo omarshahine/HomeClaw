@@ -113,12 +113,12 @@ actor MCPServer {
         guard let body = request.body, let object = try? JSONSerialization.jsonObject(with: body), let json = object as? [String: Any], isJSONRPC(json) else { return protocolError(status: 400, code: -32600, message: "Invalid JSON-RPC request") }
         let method = json["method"] as? String; let initialize = method == "initialize"; let supplied = request.header("Mcp-Session-Id")
         if initialize && supplied != nil { return protocolError(status: 400, code: -32600, message: "Initialize must not include Mcp-Session-Id") }
-        // Validate initialize params before allocating any session state
-        if initialize, let paramsError = validateInitializeParams(json) { return paramsError }
-        // Notifications (no "id") never create sessions; they are not addressable
+        // Notifications (no "id") never create sessions; they are not addressable — check before validation
         let isNotification = !json.keys.contains("id")
+        if isNotification, initialize { return HTTPResponse(statusCode: 202) }
+        // Validate initialize params before allocating any session state (only for non-notification initialize)
+        if initialize, let paramsError = validateInitializeParams(json) { return paramsError }
         if initialize {
-            if isNotification { return HTTPResponse(statusCode: 202) }
         } else {
             guard request.header("MCP-Protocol-Version") == Self.supportedProtocolVersion else { return protocolError(status: 400, code: -32600, message: "Unsupported or missing MCP-Protocol-Version") }
             guard let supplied else { return protocolError(status: 400, code: -32600, message: "Missing Mcp-Session-Id header") }

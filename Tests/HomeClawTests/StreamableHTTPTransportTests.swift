@@ -21,6 +21,7 @@ final class StreamableHTTPTransportTests: XCTestCase {
         let bad = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(badJSON.utf8)))
         XCTAssertEqual(bad.statusCode, 400); XCTAssertNil(bad.header("Mcp-Session-Id"))
         let c0 = await server.sessionStore.count; XCTAssertEqual(c0, 0)
+        // initialize notification with invalid params: still 202, no allocation (notifications never create)
         let notifBad = "{\"jsonrpc\":\"2.0\",\"method\":\"initialize\",\"params\":{}}"
         let notif = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(notifBad.utf8)))
         XCTAssertEqual(notif.statusCode, 202)
@@ -51,12 +52,18 @@ final class StreamableHTTPTransportTests: XCTestCase {
     func testNotificationIsAcceptedAndGetAndDeleteAreSessionScoped() async throws {
             let server = MCPServer(); let initialize = await send(server, HTTPRequest(method: "POST", headers: headers, body: Data(json.utf8)))
             let id = try XCTUnwrap(initialize.header("Mcp-Session-Id"))
-            let sessionHeaders = self.sessionHeaders(for: id, accept: "text/event-stream")
+            let sessionHeadersJSON = self.sessionHeaders(for: id, accept: "application/json")
+            let sessionHeadersSSE = self.sessionHeaders(for: id, accept: "text/event-stream")
             let notification = Data("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}".utf8)
-            let accepted = await send(server, HTTPRequest(method: "POST", headers: sessionHeaders, body: notification)); XCTAssertEqual(accepted.statusCode, 202); XCTAssertNil(accepted.bodyData)
-            let sse = await send(server, HTTPRequest(method: "GET", headers: sessionHeaders)); XCTAssertEqual(sse.statusCode, 200); XCTAssertEqual(sse.header("Content-Type"), "text/event-stream"); XCTAssertTrue(sse.bodyString?.hasSuffix("\n\n") == true)
-            let deleted = await send(server, HTTPRequest(method: "DELETE", headers: sessionHeaders)); XCTAssertEqual(deleted.statusCode, 200)
-            let gone = await send(server, HTTPRequest(method: "GET", headers: sessionHeaders)); XCTAssertEqual(gone.statusCode, 404)
+            let accepted = await send(server, HTTPRequest(method: "POST", headers: sessionHeadersJSON, body: notification)); XCTAssertEqual(accepted.statusCode, 202); XCTAssertNil(accepted.bodyData)
+            let sse = await send(server, HTTPRequest(method: "GET", headers: sessionHeadersSSE)); XCTAssertEqual(sse.statusCode, 200); XCTAssertEqual(sse.header("Content-Type"), "text/event-stream"); XCTAssertNotNil(sse.stream)
+            // initial SSE chunk is delivered via stream, not bodyData
+            if let stream = sse.stream {
+                var it = stream.makeAsyncIterator(); let first = await it.next()
+                XCTAssertEqual(first, Data(": connected\n\n".utf8))
+            }
+            let deleted = await send(server, HTTPRequest(method: "DELETE", headers: sessionHeadersSSE)); XCTAssertEqual(deleted.statusCode, 200)
+            let gone = await send(server, HTTPRequest(method: "GET", headers: sessionHeadersSSE)); XCTAssertEqual(gone.statusCode, 404)
         }
 
     func testMixedCaseAcceptMediaTypeIsAccepted() async {
