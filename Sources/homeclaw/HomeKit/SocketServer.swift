@@ -294,8 +294,10 @@ final class SocketServer: @unchecked Sendable {
             return
         }
 
-        // Make socket world-accessible so the CLI and MCP server can connect
-        chmod(path, 0o666)
+        // Owner-only. The CLI and MCP server run as the same user, so 0600 is
+        // sufficient for them and keeps other local accounts off the socket.
+        // Peer identity is additionally verified on accept(); see acceptConnection().
+        chmod(path, 0o600)
 
         // Increase socket buffers for large responses (192 accessories = ~300KB JSON)
         var bufSize: Int32 = 1_048_576 // 1 MB
@@ -387,6 +389,18 @@ final class SocketServer: @unchecked Sendable {
     private func acceptConnection() {
         let clientFD = accept(serverFD, nil, nil)
         guard clientFD >= 0 else { return }
+
+        // Defence in depth: file permissions alone don't establish who is on the
+        // other end (the path can be reachable via a permissive parent directory,
+        // and the /tmp fallback is world-traversable). Verify the peer's effective
+        // uid matches ours before handing it the command surface.
+        var peerUID: uid_t = 0
+        var peerGID: gid_t = 0
+        guard getpeereid(clientFD, &peerUID, &peerGID) == 0, peerUID == getuid() else {
+            AppLogger.socket.error("Rejected socket connection from uid \(Int(peerUID))")
+            close(clientFD)
+            return
+        }
 
         // On macOS, accept() inherits the non-blocking flag from the listening socket.
         // Reset the client FD to blocking so recv() waits for data instead of returning EAGAIN.
