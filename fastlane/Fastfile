@@ -3,6 +3,8 @@ require "shellwords"
 require "fileutils"
 require "tmpdir"
 require "time"
+require "digest"
+require "base64"
 
 default_platform(:ios)
 
@@ -242,6 +244,28 @@ end
 # the canonical prefix and that hasn't expired. Purely local -- no network.
 APPSTORE_PROFILE_PREFIX = "com.shahine.homeclaw AppStore"
 
+# SHA-1 fingerprints of every code-signing identity in the local keychain.
+def local_certificate_fingerprints
+  @local_certificate_fingerprints ||= begin
+    out, _, _ = Open3.capture3("security", "find-identity", "-v", "-p", "codesigning")
+    out.scan(/\b([0-9A-F]{40})\b/).flatten.uniq
+  end
+end
+
+# True when at least one certificate embedded in the profile is installed
+# locally. DeveloperCertificates holds base64 DER blobs; their SHA-1 is the
+# same fingerprint `security find-identity` prints.
+def profile_certs_available?(plist)
+  section = plist[%r{<key>DeveloperCertificates</key>\s*<array>(.*?)</array>}m, 1]
+  return false if section.nil?
+
+  section.scan(%r{<data>(.*?)</data>}m).flatten.any? do |b64|
+    der = Base64.decode64(b64)
+    fingerprint = Digest::SHA1.hexdigest(der).upcase
+    local_certificate_fingerprints.include?(fingerprint)
+  end
+end
+
 def appstore_profile_name
   return ENV["HOMECLAW_APPSTORE_PROFILE"] unless ENV["HOMECLAW_APPSTORE_PROFILE"].to_s.empty?
 
@@ -260,11 +284,19 @@ def appstore_profile_name
     exp = Time.parse(expiry) rescue nil
     next if exp.nil? || exp < Time.now
 
+    # Expiry alone isn't enough. A profile minted on another Mac embeds that
+    # machine's distribution certificate; picking it because it happens to
+    # expire later reproduces the exact certificate mismatch this resolver
+    # exists to avoid. Require that one of the profile's embedded certs is
+    # actually installed here.
+    next unless profile_certs_available?(plist)
+
     best = [name, exp] if best.nil? || exp > best[1]
   end
 
   UI.user_error!(
     "No unexpired provisioning profile starting with #{APPSTORE_PROFILE_PREFIX.inspect} is installed.\n" \
+    "(A profile whose signing certificate isn't in this keychain is skipped.)\n" \
     "Create one: fastlane run sigh app_identifier:com.shahine.homeclaw platform:catalyst force:true\n" \
     "Or point at one explicitly: HOMECLAW_APPSTORE_PROFILE='<name>' fastlane <lane>"
   ) if best.nil?
