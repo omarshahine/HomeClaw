@@ -912,6 +912,18 @@ Development-signed builds are tied to registered devices. To run HomeClaw on ano
 
 Apple restricts the `com.apple.developer.homekit` entitlement to **development signing** and **Mac App Store** distribution. It cannot be included in Developer ID provisioning profiles. A Developer ID build would pass Gatekeeper but have no HomeKit access (`HMHomeManager` returns zero homes). This is an [Apple platform restriction](https://developer.apple.com/forums/thread/699085), not a bug.
 
+### Not Exposed by HomeKit
+
+Some devices that appear in the Home app never reach the public HomeKit API, so HomeClaw cannot see them regardless of configuration:
+
+- **HomePod and HomePod mini** — including the mini's built-in temperature and humidity sensors
+- **Apple TV**
+- The speaker component of accessories that embed one (an Ecobee's smart speaker, for example)
+
+These are absent from `HMHome.accessories` entirely. The Home app reaches them over a private media path that `HMHomeManager` does not expose. If you have HomePods assigned to a room and they don't show up in `homeclaw-cli list`, this is why — it isn't an accessory filter and it isn't a mapping gap.
+
+HomeClaw already maps speaker, television and microphone services, so if Apple ever surfaces these through the public API they will appear with no code change.
+
 ## Project Structure
 
 ```
