@@ -57,6 +57,26 @@ OpenClaw --> Plugin (openclaw/) --> homeclaw-cli --------------------------+
 
 **Single-process design.** Apple's `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement. By making the entire app Catalyst, HomeKit access is direct (no IPC), signing is unified (single archive), and App Store submission is clean. The `macOSBridge` plugin bundle provides the native macOS menu bar via `NSStatusItem`.
 
+## Native MCP for Hermes
+
+HomeClaw must be running before connecting. The Catalyst app owns a fixed, loopback-only Streamable HTTP endpoint:
+
+```text
+http://127.0.0.1:9090/mcp
+```
+
+Loopback binding prevents remote network access; no bearer token or shell launch is required. Readiness is available at `http://127.0.0.1:9090/healthz`. In Hermes, add:
+
+```yaml
+mcp_servers:
+  homeclaw:
+    url: http://127.0.0.1:9090/mcp
+    timeout: 120
+    connect_timeout: 30
+```
+
+The stdio MCP server remains supported for Claude Desktop, Claude Code, and OpenClaw. Use the existing `npm run build:mcp` and stdio setup when a client cannot use native HTTP.
+
 ## Install
 
 Marketing site with screenshots and full pitch: **[homeclaw.omarknows.app](https://homeclaw.omarknows.app/)**.

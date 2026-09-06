@@ -3913,6 +3913,7 @@ extension Notification.Name {
     static let homeKitStatusDidChange = Notification.Name("HomeKitStatusDidChange")
     static let homeKitMenuDataDidChange = Notification.Name("HomeKitMenuDataDidChange")
     static let webhookCircuitStateDidChange = Notification.Name("WebhookCircuitStateDidChange")
+    static let mcpListenerStatusDidChange = Notification.Name("MCPListenerStatusDidChange")
 }
 
 // MARK: - HMAccessoryDelegate

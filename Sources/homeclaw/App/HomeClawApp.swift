@@ -17,6 +17,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     private var homeKitObserver: NSObjectProtocol?
     private var menuDataObserver: NSObjectProtocol?
     private var webhookCircuitObserver: NSObjectProtocol?
+    private let mcpServer = MCPServer()
 
     /// Held for the app's lifetime to opt out of App Nap. HomeClaw is an
     /// `LSUIElement` background agent: on a headless Mac (no display/UI activity)
@@ -119,8 +120,11 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func quitApp() {
-        // Clean up socket before exit
-        SocketServer.shared.stop()
+        // Clean up native HTTP listener before the Unix socket and app exit.
+        Task { [mcpServer] in
+            await mcpServer.stop()
+            SocketServer.shared.stop()
+        }
 
         #if targetEnvironment(macCatalyst)
         // Use NSApplication to terminate cleanly
@@ -171,8 +175,22 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         // after the first scene connects. Creating HMHomeManager before a
         // window exists causes a TCC privacy violation crash on macOS 26.4+.
 
-        // Start socket server for CLI and MCP clients
-        SocketServer.shared.start()
+        // Start native MCP HTTP server without blocking application launch.
+        Task { [mcpServer] in
+            do {
+                try await mcpServer.start()
+                AppLogger.app.info("Native MCP HTTP server started")
+            } catch {
+                AppLogger.app.error("Native MCP HTTP server failed to start: \(error.localizedDescription)")
+            }
+        }
+
+        // Start the legacy socket listener off the application launch path. Its
+        // filesystem bind must not prevent the native MCP HTTP listener from
+        // starting if an old app-group socket is stale or unavailable.
+        DispatchQueue.global(qos: .userInitiated).async {
+            SocketServer.shared.start()
+        }
 
         // Load macOSBridge bundle for the menu bar
         #if targetEnvironment(macCatalyst)
@@ -187,8 +205,12 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         ) { [weak self] notification in
             let ready = notification.userInfo?["ready"] as? Bool ?? false
             let names = notification.userInfo?["homeNames"] as? [String] ?? []
-            MainActor.assumeIsolated {
-                self?.macOSController?.updateStatus(ready: ready, homeNames: names)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.mcpServer.updateHomeKitReady(ready)
+                await MainActor.run {
+                    self.macOSController?.updateStatus(ready: ready, homeNames: names)
+                }
             }
         }
 
@@ -259,7 +281,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
 
     func applicationWillTerminate(_ application: UIApplication) {
         AppLogger.app.info("HomeClaw shutting down...")
-        SocketServer.shared.stop()
+        Task { [mcpServer] in
+            await mcpServer.stop()
+            SocketServer.shared.stop()
+        }
         if let observer = homeKitObserver {
             NotificationCenter.default.removeObserver(observer)
         }

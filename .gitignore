@@ -87,3 +87,6 @@ fastlane/README.md.bak
 
 # Clawpatch local review state
 .clawpatch/
+
+.worktrees/
+.superpowers
