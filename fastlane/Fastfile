@@ -2,6 +2,7 @@ require "open3"
 require "shellwords"
 require "fileutils"
 require "tmpdir"
+require "time"
 
 default_platform(:ios)
 
@@ -229,6 +230,49 @@ def xcodebuild_auth_args
     " -authenticationKeyIssuerID #{Shellwords.escape(issuer_id)}"
 end
 
+# Resolve the App Store provisioning profile to export with.
+#
+# The name can't be hardcoded. `sigh` refuses to reuse a profile whose signing
+# certificate isn't installed locally, and when the canonical name is already
+# taken it creates a timestamped one ("<name> 1788724911") instead of replacing
+# it. A machine that didn't mint the original profile therefore ends up with a
+# working profile under a name the Fastfile doesn't know.
+#
+# Pick the newest installed profile for this bundle id whose name starts with
+# the canonical prefix and that hasn't expired. Purely local -- no network.
+APPSTORE_PROFILE_PREFIX = "com.shahine.homeclaw AppStore"
+
+def appstore_profile_name
+  return ENV["HOMECLAW_APPSTORE_PROFILE"] unless ENV["HOMECLAW_APPSTORE_PROFILE"].to_s.empty?
+
+  dir = File.expand_path("~/Library/Developer/Xcode/UserData/Provisioning Profiles")
+  best = nil
+
+  Dir[File.join(dir, "*.provisionprofile")].each do |path|
+    plist, _, status = Open3.capture3("security", "cms", "-D", "-i", path)
+    next unless status.success?
+
+    name = plist[%r{<key>Name</key>\s*<string>([^<]*)</string>}, 1]
+    next unless name&.start_with?(APPSTORE_PROFILE_PREFIX)
+
+    expiry = plist[%r{<key>ExpirationDate</key>\s*<date>([^<]*)</date>}, 1]
+    next if expiry.nil?
+    exp = Time.parse(expiry) rescue nil
+    next if exp.nil? || exp < Time.now
+
+    best = [name, exp] if best.nil? || exp > best[1]
+  end
+
+  UI.user_error!(
+    "No unexpired provisioning profile starting with #{APPSTORE_PROFILE_PREFIX.inspect} is installed.\n" \
+    "Create one: fastlane run sigh app_identifier:com.shahine.homeclaw platform:catalyst force:true\n" \
+    "Or point at one explicitly: HOMECLAW_APPSTORE_PROFILE='<name>' fastlane <lane>"
+  ) if best.nil?
+
+  UI.message("Provisioning profile: #{best[0]}")
+  best[0]
+end
+
 def archive_and_export(team:, version:, build_number:, export: false)
   rm_rf = ->(p) { FileUtils.rm_rf(p) }
   rm_rf.call(ARCHIVE_PATH)
@@ -253,7 +297,7 @@ def archive_and_export(team:, version:, build_number:, export: false)
       signingStyle: "manual",
       signingCertificate: "Apple Distribution",
       installerSigningCertificate: "3rd Party Mac Developer Installer",
-      provisioningProfiles: { "com.shahine.homeclaw" => "com.shahine.homeclaw AppStore" },
+      provisioningProfiles: { BUNDLE_ID => appstore_profile_name },
     }
   )
 
