@@ -12,6 +12,9 @@ struct Search: ParsableCommand {
     @Option(name: .long, help: "Filter by category")
     var category: String?
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
@@ -19,6 +22,7 @@ struct Search: ParsableCommand {
         if let err = validateInput(query, label: "query") { throw ValidationError(err) }
         var args: [String: String] = ["query": query]
         if let category { args["category"] = category }
+        if let home { args["home_id"] = home }
 
         let response = try SocketClient.send(command: "search", args: args)
 

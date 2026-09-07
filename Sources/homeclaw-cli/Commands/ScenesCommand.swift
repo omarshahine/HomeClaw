@@ -6,11 +6,16 @@ struct Scenes: ParsableCommand {
         abstract: "List all HomeKit scenes"
     )
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
     func run() throws {
-        let response = try SocketClient.send(command: "list_scenes")
+        var args: [String: String] = [:]
+        if let home { args["home_id"] = home }
+        let response = try SocketClient.send(command: "list_scenes", args: args.isEmpty ? nil : args)
 
         guard response.success else {
             throw ValidationError(response.error ?? "Unknown error")
@@ -48,13 +53,18 @@ struct Trigger: ParsableCommand {
     @Argument(help: "Scene name or UUID")
     var scene: String
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
     func run() throws {
         if let err = validateInput(scene, label: "scene") { throw ValidationError(err) }
 
-        let response = try SocketClient.send(command: "trigger_scene", args: ["id": scene])
+        var args: [String: String] = ["id": scene]
+        if let home { args["home_id"] = home }
+        let response = try SocketClient.send(command: "trigger_scene", args: args)
 
         guard response.success else {
             throw ValidationError(response.error ?? "Unknown error")

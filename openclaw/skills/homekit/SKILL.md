@@ -56,12 +56,17 @@ homeclaw-cli device-map --format agent -o memory/homekit-device-map.json
 homeclaw-cli device-map --format agent   # LLM-optimized flat list (default cache format)
 homeclaw-cli device-map --format json      # Full detail with aliases, manufacturer
 homeclaw-cli device-map --format md        # Markdown tables by room
+homeclaw-cli device-map --home "<home>" --format agent  # Scope map to one home
 homeclaw-cli search "<query>" --json       # Search by name/room/category
+homeclaw-cli search "<query>" --home "<home>" --json
 homeclaw-cli get "<name-or-uuid>" --json   # Full detail on one device
+homeclaw-cli get "<name-or-uuid>" --home "<home>" --json
 homeclaw-cli list --room "Kitchen" --json  # All devices in a room
+homeclaw-cli list --home "<home>" --room "Kitchen" --json
 
 # Control — always use UUID for reliability
 homeclaw-cli set "<uuid>" power true                   # On/off
+homeclaw-cli set "<uuid>" power true --home "<home>"   # Multi-home: pin the home
 homeclaw-cli set "<uuid>" brightness 50                # Lights (0-100)
 homeclaw-cli set "<uuid>" target_temperature 72        # Thermostat
 homeclaw-cli set "<uuid>" target_heating_cooling auto  # HVAC: off/heat/cool/auto
@@ -75,8 +80,10 @@ homeclaw-cli set "<uuid>" power true --service-index 2           # By channel nu
 
 # Scenes
 homeclaw-cli scenes --json              # List all scenes
+homeclaw-cli scenes --home "<home>" --json
 homeclaw-cli get-scene "<name>" --json  # Full detail: all actions (accessory, room, characteristic, value)
 homeclaw-cli trigger "<scene-name>"     # Run a scene
+homeclaw-cli trigger "<scene-name>" --home "<home>"
 homeclaw-cli import-scene scene.json --dry-run   # Preview scene import
 homeclaw-cli import-scene scene.json              # Create scene from JSON
 echo '{"name": "...", "actions": [...]}' | homeclaw-cli import-scene -   # Read JSON from stdin (works from any directory, sandbox-safe)
