@@ -21265,6 +21265,42 @@ function sendCommand(command, args = {}) {
   });
 }
 
+// lib/freshness.js
+function freshnessFailure(message) {
+  throw new Error(`HomeClaw freshness contract violation: ${message}`);
+}
+function isFreshnessTimestamp(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(value) && !Number.isNaN(Date.parse(value));
+}
+function validateFreshAccessoryPayload(payload, { allowStale = false } = {}) {
+  if (!payload || typeof payload !== "object") freshnessFailure("response data is missing");
+  const { refreshed, read_attempted: attempted, read_succeeded: succeeded } = payload;
+  if (!Number.isInteger(attempted) || !Number.isInteger(succeeded)) {
+    freshnessFailure("read counts are missing or malformed");
+  }
+  if (allowStale) {
+    if (refreshed !== false || attempted !== 0 || succeeded !== 0) {
+      freshnessFailure("invalid no-refresh response");
+    }
+    return false;
+  }
+  if (refreshed !== true || attempted <= 0 || succeeded !== attempted) {
+    freshnessFailure("live refresh failed; values may be last-known");
+  }
+  if (!Array.isArray(payload.services)) freshnessFailure("services are missing");
+  const reads = payload.services.flatMap((service) => {
+    if (!Array.isArray(service?.characteristics)) return [];
+    return service.characteristics.filter((characteristic) => Object.hasOwn(characteristic, "read")).map((characteristic) => characteristic.read);
+  });
+  if (reads.length !== attempted) freshnessFailure("characteristic read count is inconsistent");
+  for (const read of reads) {
+    if (read?.succeeded !== true || !isFreshnessTimestamp(read.observed_at)) {
+      freshnessFailure("characteristic attestation is invalid");
+    }
+  }
+  return true;
+}
+
 // lib/handlers/homekit.js
 async function handleStatus() {
   return sendCommand("status");
@@ -21283,7 +21319,9 @@ async function handleAccessories(args) {
       const socketArgs = { id: args.accessory_id };
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.no_refresh) socketArgs.refresh = false;
-      return sendCommand("get_accessory", socketArgs);
+      const result = await sendCommand("get_accessory", socketArgs);
+      validateFreshAccessoryPayload(result, { allowStale: args.no_refresh === true });
+      return result;
     }
     case "search": {
       if (!args.query) throw new Error("query is required for search action");

@@ -15,6 +15,51 @@ struct Get: ParsableCommand {
     @Flag(name: .long, help: "Skip live characteristic reads; return last-known + static values only (fast — ideal for serial number / model / firmware sweeps)")
     var noRefresh = false
 
+    static func refreshContractError(
+        noRefresh: Bool,
+        detail: [String: Any]
+    ) -> String? {
+        guard let refreshed = detail["refreshed"] as? Bool,
+              let attempted = detail["read_attempted"] as? Int,
+              let succeeded = detail["read_succeeded"] as? Int
+        else {
+            return "HomeClaw response is missing valid freshness metadata"
+        }
+
+        if noRefresh {
+            return refreshed == false && attempted == 0 && succeeded == 0
+                ? nil
+                : "HomeClaw returned fresh-read metadata for --no-refresh"
+        }
+
+        guard refreshed, attempted > 0, succeeded == attempted else {
+            return "HomeClaw live refresh failed; values may be last-known"
+        }
+        guard let services = detail["services"] as? [[String: Any]] else {
+            return "HomeClaw response is missing characteristic freshness metadata"
+        }
+
+        let reads = services.flatMap { service -> [[String: Any]] in
+            let characteristics = service["characteristics"] as? [[String: Any]] ?? []
+            return characteristics.compactMap { $0["read"] as? [String: Any] }
+        }
+        guard reads.count == attempted else {
+            return "HomeClaw characteristic freshness count is inconsistent"
+        }
+
+        let timestampFormatter = ISO8601DateFormatter()
+        timestampFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        for read in reads {
+            guard read["succeeded"] as? Bool == true,
+                  let observedAt = read["observed_at"] as? String,
+                  timestampFormatter.date(from: observedAt) != nil
+            else {
+                return "HomeClaw characteristic freshness attestation is invalid"
+            }
+        }
+        return nil
+    }
+
     func run() throws {
         if let err = validateInput(accessory, label: "accessory") { throw ValidationError(err) }
         var args: [String: String] = ["id": accessory]
@@ -25,13 +70,18 @@ struct Get: ParsableCommand {
             throw ValidationError(response.error ?? "Unknown error")
         }
 
-        if shouldOutputJSON(json) {
-            printJSON(response.data?.value)
-            return
+        guard let detail = response.data?.value as? [String: Any] else {
+            throw ValidationError("HomeClaw returned an invalid accessory response")
+        }
+        if let contractError = Self.refreshContractError(
+            noRefresh: noRefresh,
+            detail: detail
+        ) {
+            throw ValidationError(contractError)
         }
 
-        guard let detail = response.data?.value as? [String: Any] else {
-            print("Accessory not found.")
+        if shouldOutputJSON(json) {
+            printJSON(detail)
             return
         }
 
@@ -50,7 +100,7 @@ struct Get: ParsableCommand {
         if let bridgedAccessoryCount = detail["bridged_accessory_count"] as? Int {
             print("  Bridged:   \(bridgedAccessoryCount) accessory(ies)")
         }
-        if detail["refreshed"] as? Bool == false {
+        if noRefresh {
             print("  Note:      --no-refresh — static + last-known values only (dynamic state not live-read)")
         }
 

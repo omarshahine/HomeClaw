@@ -46,6 +46,9 @@ jobs:
       - name: Build MCP server
         run: npm run build:mcp
 
+      - name: Test MCP freshness contract
+        run: npm run test:mcp
+
   catalyst:
     name: Catalyst App
     if: github.event_name == 'pull_request'

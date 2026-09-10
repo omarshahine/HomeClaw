@@ -100,9 +100,13 @@ enum DemoFixtures {
     }
 
     @MainActor
-    static func accessoryDetail(id: String) -> [String: Any]? {
+    static func accessoryDetail(id: String, refresh: Bool = true) -> [String: Any]? {
         guard let acc = accessories.first(where: { $0.id == id }) else { return nil }
-        return acc.detailDict(roomName: roomName(for: acc.roomID), state: state(for: acc.id))
+        return acc.detailDict(
+            roomName: roomName(for: acc.roomID),
+            state: state(for: acc.id),
+            refresh: refresh
+        )
     }
 
     // MARK: - Menu data
@@ -663,12 +667,46 @@ enum DemoFixtures {
             return dict
         }
 
-        func detailDict(roomName: String, state: [String: String]) -> [String: Any] {
+        func detailDict(
+            roomName: String,
+            state: [String: String],
+            refresh: Bool
+        ) -> [String: Any] {
             var dict = summaryDict(roomName: roomName, state: state)
             dict["bridged"] = false
             dict["model"] = "Demo \(category.capitalized)"
             dict["firmware"] = "1.0"
-            return dict
+            let observedAt = Date()
+            var readReport = AccessoryReadReport()
+            let characteristics: [[String: Any]] = state.sorted { $0.key < $1.key }.map {
+                name, value in
+                let characteristicID = UUID()
+                let characteristic: [String: Any] = [
+                    "name": name,
+                    "type": "demo.\(name)",
+                    "value": value,
+                    "writable": false,
+                ]
+                if refresh {
+                    readReport.record(
+                        characteristicID: characteristicID,
+                        attestation: .completed(succeeded: true, at: observedAt)
+                    )
+                }
+                return readReport.attesting(
+                    characteristic,
+                    characteristicID: characteristicID
+                )
+            }
+            dict["services"] = [[
+                "id": "\(id).demo-service",
+                "name": "Demo Service",
+                "type": "demo",
+                "characteristics": characteristics,
+            ]]
+            return refresh
+                ? readReport.applyingFreshness(to: dict)
+                : AccessoryReadReport.applyingNoRefresh(to: dict)
         }
     }
 

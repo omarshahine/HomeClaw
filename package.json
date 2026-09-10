@@ -10,6 +10,7 @@
   ],
   "scripts": {
     "build:mcp": "node mcp-server/build.mjs",
+    "test:mcp": "node --test mcp-server/tests/*.test.js",
     "build:swift": "swift build",
     "build": "npm run build:swift && npm run build:mcp"
   },

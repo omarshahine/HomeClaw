@@ -460,12 +460,16 @@ final class HomeKitManager: NSObject, Observable {
     ///   sweeps that otherwise trigger the per-call ballooning in issue #66.
     func getAccessory(id: String, homeID: String? = nil, refresh: Bool = true) async -> [String: Any]? {
         await waitForReady()
-        if Self.isDemoMode { return DemoFixtures.accessoryDetail(id: id) }
+        if Self.isDemoMode { return DemoFixtures.accessoryDetail(id: id, refresh: refresh) }
         guard let accessory = findAccessory(id: id, homeID: homeID) else { return nil }
         guard isAccessoryAllowed(accessory) else { return nil }
+        let readReport: AccessoryReadReport?
         if refresh {
-            await readAllValues(for: accessory)
-            updateCacheFromAccessory(accessory)
+            let report = await readAllValues(for: accessory)
+            readReport = report
+            updateCacheFromAccessory(accessory, readReport: report)
+        } else {
+            readReport = nil
         }
         let bridgeMetadata = BridgeMetadata(
             homes: findHome(for: accessory).map { [$0] } ?? filteredHomes(homeID: homeID),
@@ -474,16 +478,18 @@ final class HomeKitManager: NSObject, Observable {
         var detail = AccessoryModel.accessoryDetail(
             accessory,
             bridge: bridgeMetadata.bridgeSummary(for: accessory),
-            bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory)
+            bridgedAccessoryIDs: bridgeMetadata.bridgedAccessoryIDs(for: accessory),
+            readReport: readReport
         )
-        if !refresh {
+        if let readReport {
+            detail = readReport.applyingFreshness(to: detail)
+        } else {
             // Signal that dynamic characteristic values were NOT live-read this
             // call. Without a refresh, never-read characteristics serialize as
             // null/last-known, so callers must not mistake a stale/unread value
             // for a fresh one. Static metadata (serial/model/firmware) is always
-            // accurate. Only emitted on the opt-in path, so default output is
-            // unchanged.
-            detail["refreshed"] = false
+            // accurate.
+            detail = AccessoryReadReport.applyingNoRefresh(to: detail)
         }
         return detail
     }
@@ -741,11 +747,11 @@ final class HomeKitManager: NSObject, Observable {
                 guard ContinuousClock.now < deadline else { break }
                 try? await Task.sleep(for: Self.verifyRetryDelay)
             }
-            let readSucceeded = await readValueWithTimeout(
+            let read = await readValueWithTimeout(
                 characteristic, timeout: Self.verifyReadTimeout
             )
-            anyReadSucceeded = anyReadSucceeded || readSucceeded
-            if readSucceeded, Self.valuesMatch(characteristic.value, parsedValue, step: step) {
+            anyReadSucceeded = anyReadSucceeded || read.succeeded
+            if read.succeeded, Self.valuesMatch(characteristic.value, parsedValue, step: step) {
                 return .matched
             }
             guard ContinuousClock.now < deadline else { break }
@@ -3493,7 +3499,7 @@ final class HomeKitManager: NSObject, Observable {
                 for characteristic in service.characteristics {
                     let name = CharacteristicMapper.name(for: characteristic.characteristicType)
                     if AccessoryModel.isInterestingState(name) {
-                        await readValueWithTimeout(characteristic)
+                        _ = await readValueWithTimeout(characteristic)
                         state[name] = CharacteristicMapper.formatValue(
                             characteristic.value, for: characteristic.characteristicType
                         )
@@ -3523,12 +3529,21 @@ final class HomeKitManager: NSObject, Observable {
     }
 
     /// Extracts interesting state from an accessory after a live read and updates the cache.
-    private func updateCacheFromAccessory(_ accessory: HMAccessory) {
+    private func updateCacheFromAccessory(
+        _ accessory: HMAccessory,
+        readReport: AccessoryReadReport? = nil
+    ) {
         var state: [String: String] = [:]
         for service in accessory.services {
             for characteristic in service.characteristics {
                 let name = CharacteristicMapper.name(for: characteristic.characteristicType)
                 if AccessoryModel.isInterestingState(name) {
+                    if let readReport,
+                       readReport.attestation(for: characteristic.uniqueIdentifier)?.succeeded
+                           != true
+                    {
+                        continue
+                    }
                     state[name] = CharacteristicMapper.formatValue(
                         characteristic.value, for: characteristic.characteristicType
                     )
@@ -3561,7 +3576,7 @@ final class HomeKitManager: NSObject, Observable {
             for characteristic in service.characteristics {
                 let name = CharacteristicMapper.name(for: characteristic.characteristicType)
                 if AccessoryModel.isInterestingState(name) {
-                    await readValueWithTimeout(characteristic)
+                    _ = await readValueWithTimeout(characteristic)
                 }
             }
         }
@@ -3569,15 +3584,22 @@ final class HomeKitManager: NSObject, Observable {
 
     /// Reads all readable characteristic values for a single accessory.
     /// Call before AccessoryModel.accessoryDetail() so cached values are populated.
-    private func readAllValues(for accessory: HMAccessory) async {
-        guard accessory.isReachable else { return }
+    private func readAllValues(for accessory: HMAccessory) async -> AccessoryReadReport {
+        var report = AccessoryReadReport()
         for service in accessory.services {
             for characteristic in service.characteristics {
                 if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
-                    await readValueWithTimeout(characteristic)
+                    let attestation = accessory.isReachable
+                        ? await readValueWithTimeout(characteristic)
+                        : .completed(succeeded: false)
+                    report.record(
+                        characteristicID: characteristic.uniqueIdentifier,
+                        attestation: attestation
+                    )
                 }
             }
         }
+        return report
     }
 
     /// Hard ceiling for a single HomeKit characteristic read.
@@ -3595,25 +3617,26 @@ final class HomeKitManager: NSObject, Observable {
     /// calls balloon to ~95s / hang" signature in the bug report. A timed-out
     /// read simply leaves the previously cached `characteristic.value` in place.
     ///
-    /// Returns true only when HomeKit answered without an error, i.e. when
-    /// `characteristic.value` now holds a fresh device read. On false the cached
-    /// value is stale and callers must not treat it as evidence of anything.
+    /// The success timestamp is captured inside HomeKit's completion handler.
+    /// Timeout/error results carry no observation time, so callers cannot mistake
+    /// the unchanged `characteristic.value` for a fresh read.
     @discardableResult
     private func readValueWithTimeout(
         _ characteristic: HMCharacteristic, timeout: TimeInterval = HomeKitManager.readTimeout
-    ) async -> Bool {
+    ) async -> CharacteristicReadAttestation {
         let logger = AppLogger.homekit
         // One-shot guard: whichever of the HomeKit completion or the timer fires
         // first resumes the continuation; the loser is a no-op.
         let guardBox = ReadResumeGuard()
-        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+        return await withCheckedContinuation {
+            (continuation: CheckedContinuation<CharacteristicReadAttestation, Never>) in
             // Cancellable timer leg: when HomeKit responds before the deadline we
             // cancel it, so a large readAllValues loop (50–100+ characteristics)
             // doesn't leave a burst of no-op main-thread wakeups draining 6s later.
             let timerWork = DispatchWorkItem {
                 guard guardBox.claim() else { return }
                 logger.warning("readValue timed out after \(timeout, format: .fixed(precision: 0))s; serving last-known value")
-                continuation.resume(returning: false)
+                continuation.resume(returning: .completed(succeeded: false))
             }
             characteristic.readValue { error in
                 timerWork.cancel()
@@ -3621,7 +3644,9 @@ final class HomeKitManager: NSObject, Observable {
                 if let error {
                     logger.debug("readValue failed: \(error.localizedDescription, privacy: .public)")
                 }
-                continuation.resume(returning: error == nil)
+                continuation.resume(
+                    returning: .completed(succeeded: error == nil, at: Date())
+                )
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + timeout, execute: timerWork)
         }

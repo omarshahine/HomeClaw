@@ -101,7 +101,8 @@ enum AccessoryModel {
     static func accessoryDetail(
         _ accessory: HMAccessory,
         bridge: [String: Any]? = nil,
-        bridgedAccessoryIDs: [String] = []
+        bridgedAccessoryIDs: [String] = [],
+        readReport: AccessoryReadReport? = nil
     ) -> [String: Any] {
         var dict: [String: Any] = [
             "id": accessory.uniqueIdentifier.uuidString,
@@ -138,6 +139,12 @@ enum AccessoryModel {
                     ),
                     "writable": CharacteristicMapper.isWritable(characteristic.characteristicType),
                 ]
+                if let readReport {
+                    charDict = readReport.attesting(
+                        charDict,
+                        characteristicID: characteristic.uniqueIdentifier
+                    )
+                }
 
                 if let metadata = characteristic.metadata {
                     var meta: [String: Any] = [:]

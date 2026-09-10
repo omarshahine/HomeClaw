@@ -5,6 +5,7 @@ let package = Package(
     name: "HomeClaw",
     platforms: [.macOS(.v26)],
     products: [
+        .library(name: "HomeClawFreshness", targets: ["HomeClawFreshness"]),
         .executable(name: "homeclaw-cli", targets: ["homeclaw-cli"]),
     ],
     dependencies: [
@@ -12,6 +13,7 @@ let package = Package(
         .package(url: "https://github.com/rensbreur/SwiftTUI.git", branch: "main"),
     ],
     targets: [
+        .target(name: "HomeClawFreshness"),
         .executableTarget(
             name: "homeclaw-cli",
             dependencies: [
@@ -23,6 +25,10 @@ let package = Package(
         .testTarget(
             name: "homeclaw-cliTests",
             dependencies: ["homeclaw-cli"]
+        ),
+        .testTarget(
+            name: "HomeClawFreshnessTests",
+            dependencies: ["HomeClawFreshness"]
         ),
     ]
 )

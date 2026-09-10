@@ -34,6 +34,7 @@ targets:
       - path: Sources/homeclaw
         excludes:
           - "**/_disabled/**"
+      - path: Sources/HomeClawFreshness
       - path: Resources/HomeClaw.icns
         buildPhase: resources
       - path: Resources/HomeClaw.icon
@@ -111,9 +112,7 @@ targets:
         script: |
           if command -v node &>/dev/null && [ -f "${PROJECT_DIR}/mcp-server/build.mjs" ]; then
             cd "${PROJECT_DIR}"
-            if [ ! -f "mcp-server/dist/server.js" ] || [ "mcp-server/server.js" -nt "mcp-server/dist/server.js" ]; then
-              node mcp-server/build.mjs 2>/dev/null || echo "warning: MCP server build skipped"
-            fi
+            node mcp-server/build.mjs 2>/dev/null || echo "warning: MCP server build skipped"
           fi
         basedOnDependencyAnalysis: false
     postBuildScripts:
