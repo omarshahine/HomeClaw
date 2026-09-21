@@ -20,5 +20,131 @@
       "help": "Directory where homeclaw-cli is installed. Defaults to the HomeClaw.app bundle.",
       "placeholder": "/Applications/HomeClaw.app/Contents/MacOS"
     }
+  },
+  "contracts": {
+    "tools": [
+      "homekit_status",
+      "homekit_device_map",
+      "homekit_list",
+      "homekit_get",
+      "homekit_search",
+      "homekit_set",
+      "homekit_scenes",
+      "homekit_get_scene",
+      "homekit_trigger",
+      "homekit_import_scene",
+      "homekit_delete_scene",
+      "homekit_events",
+      "homekit_rename",
+      "homekit_automations_list",
+      "homekit_automations_get",
+      "homekit_automations_create"
+    ]
+  },
+  "toolMetadata": {
+    "homekit_status": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_device_map": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_list": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_get": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_search": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_set": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_scenes": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_get_scene": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_trigger": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_import_scene": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_delete_scene": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_events": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_rename": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_automations_list": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_automations_get": {
+      "profiles": [
+        "coding",
+        "messaging",
+        "full"
+      ],
+      "replaySafe": true
+    },
+    "homekit_automations_create": {
+      "optional": true,
+      "sideEffecting": true
+    }
   }
 }

@@ -23,8 +23,21 @@ interface ToolDef {
 	description: string;
 	parameters: TObject;
 	buildArgs: (params: Record<string, unknown>) => string[];
-	/** When true, tool is registered but disabled by default — users opt in via settings. */
+	/**
+	 * When true, the tool changes HomeKit state and is opt-in: OpenClaw hides it
+	 * until the user allowlists it (e.g. `tools.alsoAllow: ["homeclaw"]`).
+	 * Must match `toolMetadata.<name>.optional` in openclaw.plugin.json
+	 * (enforced by scripts/check-openclaw-contracts.mjs).
+	 */
 	optional?: boolean;
+}
+
+/**
+ * OpenClaw reads `optional` from registerTool's second (options) argument,
+ * not from the tool object itself.
+ */
+function registerOptions(tool: ToolDef): { optional: true } | undefined {
+	return tool.optional ? { optional: true } : undefined;
 }
 
 /** Helper to build a tool result with the required content + details shape. */
@@ -426,7 +439,6 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
 					label: tool.name,
 					description: tool.description,
 					parameters: tool.parameters,
-					...(tool.optional && { optional: true }),
 					async execute() {
 						return toolResult(
 							JSON.stringify(
@@ -436,7 +448,7 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
 							)
 						);
 					},
-				});
+				}, registerOptions(tool));
 			}
 			return;
 		}
@@ -447,7 +459,6 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
 				label: tool.name,
 				description: tool.description,
 				parameters: tool.parameters,
-				...(tool.optional && { optional: true }),
 
 				async execute(_id: string, params: Record<string, unknown>) {
 					try {
@@ -488,7 +499,7 @@ const pluginEntry: OpenClawPluginDefinition = definePluginEntry({
 						);
 					}
 				},
-			});
+			}, registerOptions(tool));
 		}
 	},
 });

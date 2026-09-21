@@ -133,3 +133,8 @@ jobs:
                 - mcp-server/package.json:.version
                 - .claude-plugin/plugin.json:.version
                 - .claude-plugin/marketplace.json:.plugins[0].version
+
+      # OpenClaw drops any agent tool missing from the manifest's
+      # contracts.tools, so keep it in lockstep with the TOOLS array.
+      - name: Check OpenClaw tool contracts
+        run: node scripts/check-openclaw-contracts.mjs
