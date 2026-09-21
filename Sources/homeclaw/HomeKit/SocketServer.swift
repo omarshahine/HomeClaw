@@ -488,7 +488,7 @@ final class SocketServer: @unchecked Sendable {
         // dispatch. `filteredHomes` falls back to the primary home, which would
         // otherwise turn `set … --home <typo>` into a write against the wrong home.
         for key in ["home_id", "home"] {
-            if let homeID = args[key] as? String, !homeID.isEmpty, !hk.knowsHome(homeID) {
+            if let homeID = args[key] as? String, !homeID.isEmpty, !(await hk.knowsHome(homeID)) {
                 return encodeResponse(success: false, error: "Home not found: \(homeID)")
             }
         }

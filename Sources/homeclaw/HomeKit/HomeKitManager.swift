@@ -3747,14 +3747,15 @@ final class HomeKitManager: NSObject, Observable {
     /// `filteredHomes` uses. An explicit home that matches nothing must be
     /// rejected rather than silently falling back to the primary home, or a
     /// typo in `--home` would act on a same-named accessory in another home.
-    /// Before HomeKit has loaded any homes there is nothing to check against,
-    /// so the request is let through to fail or wait as it does today.
-    func knowsHome(_ id: String) -> Bool {
+    /// Waits for HomeKit first: validating against a not-yet-loaded home list
+    /// would let an early `set --home <typo>` through to the primary-home fallback.
+    /// Every command that takes a home waits for readiness anyway.
+    func knowsHome(_ id: String) async -> Bool {
         if Self.isDemoMode {
             return id == DemoFixtures.homeID
                 || id.localizedCaseInsensitiveCompare(DemoFixtures.homeName) == .orderedSame
         }
-        if homes.isEmpty { return true }
+        await waitForReady()
         return homes.contains {
             $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(id) == .orderedSame
                 || $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
