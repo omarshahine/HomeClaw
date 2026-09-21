@@ -502,6 +502,12 @@ final class HomeKitManager: NSObject, Observable {
         case roomNotFound(String)
         case zoneNotFound(String)
         case triggerNotFound(String)
+        /// Name matched more than one automation. Payload: the query and a
+        /// pre-rendered candidate list (one "name (UUID)" per line).
+        case ambiguousTrigger(String, String)
+        /// Operation needs an HMEventTrigger but the resolved automation is some
+        /// other HMTrigger subclass (e.g. a timer automation from the Home app).
+        case unsupportedTriggerType(String)
         case sceneNotFound(String)
         case serviceNotFound(String)
         case invalidArgument(String)
@@ -526,6 +532,13 @@ final class HomeKitManager: NSObject, Observable {
             case .roomNotFound(let id): "Room not found: \(id)"
             case .zoneNotFound(let id): "Zone not found: \(id)"
             case .triggerNotFound(let id): "Automation not found: \(id)"
+            case .ambiguousTrigger(let name, let options):
+                """
+                Ambiguous: '\(name)' matches multiple automations. \
+                Pass the automation UUID instead:
+                \(options)
+                """
+            case .unsupportedTriggerType(let detail): detail
             case .sceneNotFound(let id): "Scene not found: \(id)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
             case .invalidArgument(let detail): "Invalid argument: \(detail)"
@@ -1374,19 +1387,20 @@ final class HomeKitManager: NSObject, Observable {
     func getAutomation(id: String, homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
-            guard let detail = DemoFixtures.getAutomation(id: id) else {
+            guard let detail = try DemoFixtures.getAutomation(id: id) else {
                 throw ControlError.triggerNotFound(id)
             }
             return detail
         }
         let home = try resolveHome(homeID: homeID)
-        if let trigger = findEventTrigger(id: id, in: home) {
-            return AccessoryModel.automationDetail(trigger, homeName: home.name, home: home)
+        let trigger = try resolveTrigger(id: id, in: home)
+        if let event = trigger as? HMEventTrigger {
+            return AccessoryModel.automationDetail(event, homeName: home.name, home: home)
         }
-        if let timer = findTimerTrigger(id: id, in: home) {
+        if let timer = trigger as? HMTimerTrigger {
             return AccessoryModel.timerTriggerDetail(timer, homeName: home.name, home: home)
         }
-        throw ControlError.triggerNotFound(id)
+        return AccessoryModel.triggerSummary(trigger, homeName: home.name, home: home)
     }
 
     func createAutomation(
@@ -2222,17 +2236,15 @@ final class HomeKitManager: NSObject, Observable {
     ) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
-            guard let result = DemoFixtures.deleteAutomation(id: id, dryRun: dryRun) else {
+            guard let result = try DemoFixtures.deleteAutomation(id: id, dryRun: dryRun) else {
                 throw ControlError.triggerNotFound(id)
             }
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        // Use findAnyTrigger so HMTimerTrigger (Apple Home native time automations)
-        // can also be deleted, not just HMEventTrigger.
-        guard let trigger = findAnyTrigger(id: id, in: home) else {
-            throw ControlError.triggerNotFound(id)
-        }
+        // Resolve over every HMTrigger subclass so HMTimerTrigger (Apple Home native
+        // time automations) can also be deleted, not just HMEventTrigger.
+        let trigger = try resolveTrigger(id: id, in: home)
 
         let triggerName = trigger.name
         let sceneCount = trigger.actionSets.count
@@ -2269,15 +2281,16 @@ final class HomeKitManager: NSObject, Observable {
     ) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
-            guard let result = DemoFixtures.updateAutomation(id: id, addScenes: addSceneIDs, removeScenes: removeSceneIDs, dryRun: dryRun) else {
+            guard let result = try DemoFixtures.updateAutomation(id: id, addScenes: addSceneIDs, removeScenes: removeSceneIDs, dryRun: dryRun) else {
                 throw ControlError.triggerNotFound(id)
             }
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        guard let trigger = findTrigger(id: id, in: home) else {
-            throw ControlError.triggerNotFound(id)
-        }
+        // addActionSet/removeActionSet live on the HMTrigger base class, so rewire
+        // works on every trigger `automations list` emits, event and timer alike
+        // (issue #119: this used to resolve HMEventTrigger only).
+        let trigger = try resolveTrigger(id: id, in: home)
 
         var resolvedAdd: [HMActionSet] = []
         var resolvedRemove: [HMActionSet] = []
@@ -2314,8 +2327,11 @@ final class HomeKitManager: NSObject, Observable {
             "name": trigger.name,
             "home": home.name,
             "before": trigger.actionSets.map { $0.name },
+            "before_ids": trigger.actionSets.map { $0.uniqueIdentifier.uuidString },
             "to_add": resolvedAdd.map { $0.name },
+            "to_add_ids": resolvedAdd.map { $0.uniqueIdentifier.uuidString },
             "to_remove": resolvedRemove.map { $0.name },
+            "to_remove_ids": resolvedRemove.map { $0.uniqueIdentifier.uuidString },
             "warnings": warnings,
         ]
 
@@ -2359,6 +2375,7 @@ final class HomeKitManager: NSObject, Observable {
         var result = summary
         result["dry_run"] = false
         result["after"] = trigger.actionSets.map { $0.name }
+        result["after_ids"] = trigger.actionSets.map { $0.uniqueIdentifier.uuidString }
         return result
     }
 
@@ -2416,7 +2433,7 @@ final class HomeKitManager: NSObject, Observable {
     ) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
-            switch DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: value, dryRun: dryRun) {
+            switch try DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: value, dryRun: dryRun) {
             case .ok(let result): return result
             case .automationNotFound: throw ControlError.triggerNotFound(id)
             case .accessoryNotFound: throw ControlError.accessoryNotFound(accessoryID)
@@ -2424,21 +2441,15 @@ final class HomeKitManager: NSObject, Observable {
         }
         let home = try resolveHome(homeID: homeID)
 
-        // Only HMEventTrigger supports updatePredicate. Reject other trigger subclasses
-        // explicitly so callers get a clear message instead of a no-op.
-        if findEventTrigger(id: id, in: home) == nil, findAnyTrigger(id: id, in: home) != nil {
-            throw ControlError.invalidArgument(
-                "Automation '\(id)' is an HMTimerTrigger (Apple Home native time automation), " +
-                "not an HMEventTrigger. add-condition only works on HMEventTrigger automations " +
-                "because HMTimerTrigger doesn't expose the predicate API needed to append a condition. " +
+        // Only HMEventTrigger supports updatePredicate. Resolve over every trigger
+        // subclass first so a timer automation gets a clear type error instead of
+        // "not found".
+        let trigger = try resolveEventTrigger(
+            id: id, in: home, operation: "add-condition",
+            detail: "HMTimerTrigger doesn't expose the predicate API needed to append a condition. " +
                 "There's no in-place workaround that preserves the trigger UUID — recreating via " +
                 "`automations create-time` would produce a new UUID, breaking any references " +
-                "(button bindings, Siri shortcuts, integrations) to the original."
-            )
-        }
-        guard let trigger = findEventTrigger(id: id, in: home) else {
-            throw ControlError.triggerNotFound(id)
-        }
+                "(button bindings, Siri shortcuts, integrations) to the original.")
 
         // Resolve the new condition's accessory + characteristic + value before mutating.
         // Mirrors `createAutomation`'s `--condition` resolution path so the same inputs
@@ -2565,16 +2576,15 @@ final class HomeKitManager: NSObject, Observable {
     ) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
-            guard let result = DemoFixtures.enableAutomation(id: id, enabled: enabled) else {
+            guard let result = try DemoFixtures.enableAutomation(id: id, enabled: enabled) else {
                 throw ControlError.triggerNotFound(id)
             }
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        // Use findAnyTrigger so HMTimerTrigger automations can also be enabled/disabled.
-        guard let trigger = findAnyTrigger(id: id, in: home) else {
-            throw ControlError.triggerNotFound(id)
-        }
+        // Resolve over every HMTrigger subclass so timer automations can also be
+        // enabled/disabled.
+        let trigger = try resolveTrigger(id: id, in: home)
 
         try await homeKitAsync { trigger.enable(enabled, completionHandler: $0) }
 
@@ -2589,35 +2599,78 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Private Helpers
 
-    private func findTrigger(id: String, in home: HMHome) -> HMEventTrigger? {
-        findEventTrigger(id: id, in: home)
+    /// Outcome of matching a user-supplied automation identifier against a
+    /// list of candidates. Generic so the demo fixtures and the HomeKit path
+    /// share one matching contract.
+    enum IdentifierMatch<T> {
+        case found(T)
+        case ambiguous([T])
+        case notFound
     }
 
-    /// Lookup an HMEventTrigger by UUID or name (case-insensitive).
-    private func findEventTrigger(id: String, in home: HMHome) -> HMEventTrigger? {
-        let eventTriggers = home.triggers.compactMap { $0 as? HMEventTrigger }
-        if let trigger = eventTriggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
-            return trigger
+    /// Match `query` against candidates by UUID first (case-insensitive: UUIDs
+    /// emitted by `automations list` are uppercase, but callers may lowercase
+    /// them), then by exact name (case-insensitive). A UUID hit always wins over
+    /// a name hit. More than one name hit is `.ambiguous` rather than silently
+    /// taking whichever trigger HomeKit happens to enumerate first.
+    nonisolated static func matchIdentifier<T>(
+        _ query: String,
+        in candidates: [T],
+        id: (T) -> String,
+        name: (T) -> String
+    ) -> IdentifierMatch<T> {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return .notFound }
+        if let byID = candidates.first(where: { id($0).caseInsensitiveCompare(needle) == .orderedSame }) {
+            return .found(byID)
         }
-        return eventTriggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+        let byName = candidates.filter { name($0).localizedCaseInsensitiveCompare(needle) == .orderedSame }
+        switch byName.count {
+        case 0: return .notFound
+        case 1: return .found(byName[0])
+        default: return .ambiguous(byName)
+        }
     }
 
-    /// Lookup an HMTimerTrigger (Apple Home native time automation) by UUID or name.
-    private func findTimerTrigger(id: String, in home: HMHome) -> HMTimerTrigger? {
-        let timerTriggers = home.triggers.compactMap { $0 as? HMTimerTrigger }
-        if let trigger = timerTriggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
-            return trigger
-        }
-        return timerTriggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    /// Render ambiguity candidates as "name (UUID)" lines for error messages.
+    nonisolated static func formatCandidates(_ pairs: [(name: String, id: String)]) -> String {
+        pairs.map { "  - \($0.name) (\($0.id))" }.joined(separator: "\n")
     }
 
-    /// Lookup any HMTrigger subclass by UUID or name. Used for delete/enable/disable
-    /// where the operation works on the abstract HMTrigger API regardless of subtype.
-    private func findAnyTrigger(id: String, in home: HMHome) -> HMTrigger? {
-        if let trigger = home.triggers.first(where: { $0.uniqueIdentifier.uuidString == id }) {
+    /// Resolve any HMTrigger subclass (event, timer, ...) by UUID or unique name.
+    /// This is the single resolver for every automation command, so anything
+    /// `automations list` emits (it iterates all of `home.triggers`) resolves here.
+    /// Throws `.triggerNotFound` or `.ambiguousTrigger`.
+    private func resolveTrigger(id: String, in home: HMHome) throws -> HMTrigger {
+        switch Self.matchIdentifier(
+            id, in: home.triggers, id: { $0.uniqueIdentifier.uuidString }, name: { $0.name })
+        {
+        case .found(let trigger):
             return trigger
+        case .ambiguous(let matches):
+            throw ControlError.ambiguousTrigger(
+                id, Self.formatCandidates(matches.map { ($0.name, $0.uniqueIdentifier.uuidString) }))
+        case .notFound:
+            throw ControlError.triggerNotFound(id)
         }
-        return home.triggers.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
+
+    /// Resolve a trigger that must be an HMEventTrigger (predicate / event
+    /// characteristic operations). Uses the same resolver as every other
+    /// automation command, so a timer automation gets a clear "wrong trigger
+    /// type" error instead of "not found".
+    private func resolveEventTrigger(
+        id: String, in home: HMHome, operation: String, detail: String? = nil
+    ) throws -> HMEventTrigger {
+        let trigger = try resolveTrigger(id: id, in: home)
+        if let event = trigger as? HMEventTrigger { return event }
+        let kind = trigger is HMTimerTrigger
+            ? "a timer automation (HMTimerTrigger)"
+            : "a \(String(describing: type(of: trigger))) automation"
+        var message = "Automation '\(trigger.name)' (\(trigger.uniqueIdentifier.uuidString)) is \(kind); " +
+            "\(operation) only applies to event automations (HMEventTrigger)."
+        if let detail { message += " " + detail }
+        throw ControlError.unsupportedTriggerType(message)
     }
 
     private func findInputEventCharacteristic(

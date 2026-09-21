@@ -910,29 +910,48 @@ struct RewireAutomation: ParsableCommand {
             return
         }
 
+        for line in Self.formatResult(result, fallbackName: id) { print(line) }
+    }
+
+    /// Render a rewire result as text lines. Echoes the resolved automation UUID
+    /// and the resolved scene UUIDs (issue #119) so a dry run proves exactly which
+    /// trigger and scenes a real run would touch.
+    static func formatResult(_ result: [String: Any], fallbackName: String) -> [String] {
         let isDryRun = result["dry_run"] as? Bool ?? false
-        let autoName = result["name"] as? String ?? id
+        let autoName = result["name"] as? String ?? fallbackName
+        let autoID = result["id"] as? String
         let before = (result["before"] as? [String]) ?? []
-        let toAdd = (result["to_add"] as? [String]) ?? []
-        let toRemove = (result["to_remove"] as? [String]) ?? []
         let warnings = (result["warnings"] as? [String]) ?? []
 
+        var lines: [String] = []
+        let header = autoID.map { "\(autoName) (\($0))" } ?? autoName
         if isDryRun {
-            print("DRY RUN — \(autoName)")
-            print("  Currently attached: \(before.joined(separator: ", "))")
-            print("  Would add:    \(toAdd.joined(separator: ", "))")
-            print("  Would remove: \(toRemove.joined(separator: ", "))")
+            lines.append("DRY RUN — \(header)")
+            lines.append("  Currently attached: \(before.joined(separator: ", "))")
+            lines.append("  Would add:    \(scenesWithIDs(result, names: "to_add", ids: "to_add_ids"))")
+            lines.append("  Would remove: \(scenesWithIDs(result, names: "to_remove", ids: "to_remove_ids"))")
         } else {
             let after = (result["after"] as? [String]) ?? []
-            print("Rewired '\(autoName)'")
-            print("  Before: \(before.joined(separator: ", "))")
-            print("  After:  \(after.joined(separator: ", "))")
+            lines.append("Rewired '\(autoName)'" + (autoID.map { " (\($0))" } ?? ""))
+            lines.append("  Before: \(before.joined(separator: ", "))")
+            lines.append("  After:  \(after.joined(separator: ", "))")
         }
 
         if !warnings.isEmpty {
-            print("\nWarnings:")
-            for w in warnings { print("  ⚠ \(w)") }
+            lines.append("")
+            lines.append("Warnings:")
+            for w in warnings { lines.append("  ⚠ \(w)") }
         }
+        return lines
+    }
+
+    /// "Name (UUID), Name (UUID)" when the parallel `*_ids` array lines up with the
+    /// names; plain names otherwise (older app builds don't send ids).
+    static func scenesWithIDs(_ result: [String: Any], names namesKey: String, ids idsKey: String) -> String {
+        let names = (result[namesKey] as? [String]) ?? []
+        let ids = (result[idsKey] as? [String]) ?? []
+        guard ids.count == names.count else { return names.joined(separator: ", ") }
+        return zip(names, ids).map { "\($0) (\($1))" }.joined(separator: ", ")
     }
 }
 

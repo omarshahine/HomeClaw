@@ -429,9 +429,29 @@ enum DemoFixtures {
         automations.map { $0.summaryDict() }
     }
 
+    /// Resolve an automation index with the same contract as the HomeKit path
+    /// (`HomeKitManager.matchIdentifier`): case-insensitive UUID first, then a
+    /// unique case-insensitive name. Returns nil when nothing matches and throws
+    /// `.ambiguousTrigger` when the name matches more than one automation.
     @MainActor
-    static func getAutomation(id: String) -> [String: Any]? {
-        automations.first(where: { $0.matches(id) })?.detailDict()
+    static func automationIndex(for id: String) throws -> Int? {
+        switch HomeKitManager.matchIdentifier(
+            id, in: Array(automations.indices), id: { automations[$0].id }, name: { automations[$0].name })
+        {
+        case .found(let idx):
+            return idx
+        case .ambiguous(let matches):
+            throw HomeKitManager.ControlError.ambiguousTrigger(
+                id, HomeKitManager.formatCandidates(matches.map { (automations[$0].name, automations[$0].id) }))
+        case .notFound:
+            return nil
+        }
+    }
+
+    @MainActor
+    static func getAutomation(id: String) throws -> [String: Any]? {
+        guard let idx = try automationIndex(for: id) else { return nil }
+        return automations[idx].detailDict()
     }
 
     /// Create a button- or characteristic-triggered automation. Resolves the
@@ -528,8 +548,8 @@ enum DemoFixtures {
     }
 
     @MainActor
-    static func deleteAutomation(id: String, dryRun: Bool) -> [String: Any]? {
-        guard let idx = automations.firstIndex(where: { $0.matches(id) }) else { return nil }
+    static func deleteAutomation(id: String, dryRun: Bool) throws -> [String: Any]? {
+        guard let idx = try automationIndex(for: id) else { return nil }
         let auto = automations[idx]
         let sceneCount = auto.attachedSceneNames.count
         if dryRun { return ["dry_run": true, "name": auto.name, "scene_count": sceneCount] }
@@ -538,36 +558,69 @@ enum DemoFixtures {
     }
 
     @MainActor
-    static func enableAutomation(id: String, enabled: Bool) -> [String: Any]? {
-        guard let idx = automations.firstIndex(where: { $0.matches(id) }) else { return nil }
+    static func enableAutomation(id: String, enabled: Bool) throws -> [String: Any]? {
+        guard let idx = try automationIndex(for: id) else { return nil }
         automations[idx].enabled = enabled
         return ["name": automations[idx].name, "enabled": enabled]
     }
 
     /// Add/remove attached scenes in place (rewire). Mirrors `updateAutomationActionSets`.
+    /// Resolves the automation and every scene to (name, UUID) so the result carries
+    /// the same `id` / `*_ids` keys as the real method.
     @MainActor
-    static func updateAutomation(id: String, addScenes: [String], removeScenes: [String], dryRun: Bool) -> [String: Any]? {
-        guard let idx = automations.firstIndex(where: { $0.matches(id) }) else { return nil }
+    static func updateAutomation(id: String, addScenes: [String], removeScenes: [String], dryRun: Bool) throws -> [String: Any]? {
+        guard let idx = try automationIndex(for: id) else { return nil }
         let before = automations[idx].attachedSceneNames
         var warnings: [String] = []
-        let toAdd = addScenes.filter { name in
-            if scenes.contains(where: { $0.matches(name) }) { return true }
-            warnings.append("Scene not found: \(name)")
-            return false
+        var toAdd: [DemoScene] = []
+        for query in addScenes {
+            if let scene = scenes.first(where: { $0.matches(query) }) {
+                if before.contains(scene.name) {
+                    warnings.append("Already attached, skipping add: \(scene.name)")
+                } else {
+                    toAdd.append(scene)
+                }
+            } else {
+                warnings.append("Scene not found (add): \(query)")
+            }
         }
-        let toRemove = removeScenes
+        var toRemove: [String] = []
+        for query in removeScenes {
+            let resolvedName = scenes.first(where: { $0.matches(query) })?.name ?? query
+            if let attachedName = before.first(where: { $0.localizedCaseInsensitiveCompare(resolvedName) == .orderedSame }) {
+                toRemove.append(attachedName)
+            } else {
+                warnings.append("Scene not attached to this automation (remove): \(query)")
+            }
+        }
+        func sceneIDs(_ names: [String]) -> [String] {
+            names.compactMap { name in scenes.first(where: { $0.name == name })?.id }
+        }
+        var result: [String: Any] = [
+            "id": automations[idx].id,
+            "name": automations[idx].name,
+            "home": homeName,
+            "before": before,
+            "before_ids": sceneIDs(before),
+            "to_add": toAdd.map(\.name),
+            "to_add_ids": toAdd.map(\.id),
+            "to_remove": toRemove,
+            "to_remove_ids": sceneIDs(toRemove),
+            "warnings": warnings,
+        ]
         if dryRun {
-            return [
-                "dry_run": true, "name": automations[idx].name,
-                "before": before, "to_add": toAdd, "to_remove": toRemove, "warnings": warnings,
-            ]
+            result["dry_run"] = true
+            return result
         }
         var attached = Set(before)
         toRemove.forEach { attached.remove($0) }
-        toAdd.forEach { attached.insert($0) }
+        toAdd.forEach { attached.insert($0.name) }
         let after = Array(attached).sorted()
         automations[idx].extraSceneNames = after
-        return ["name": automations[idx].name, "before": before, "after": after, "warnings": warnings]
+        result["dry_run"] = false
+        result["after"] = after
+        result["after_ids"] = sceneIDs(after)
+        return result
     }
 
     /// Append a characteristic condition to an automation's predicate. Mirrors
@@ -580,8 +633,14 @@ enum DemoFixtures {
         property: String,
         value: String,
         dryRun: Bool
-    ) -> AutomationConditionResult {
-        guard let aIdx = automations.firstIndex(where: { $0.matches(id) }) else { return .automationNotFound }
+    ) throws -> AutomationConditionResult {
+        guard let aIdx = try automationIndex(for: id) else { return .automationNotFound }
+        // Mirror the real method: only event automations carry a predicate.
+        if automations[aIdx].triggerType == "time" {
+            throw HomeKitManager.ControlError.unsupportedTriggerType(
+                "Automation '\(automations[aIdx].name)' (\(automations[aIdx].id)) is a timer automation; "
+                    + "add-condition only applies to event automations.")
+        }
         guard let acc = accessories.first(where: { $0.id == accessoryID || $0.name.lowercased() == accessoryID.lowercased() }) else {
             return .accessoryNotFound
         }
@@ -722,7 +781,8 @@ enum DemoFixtures {
         var extraSceneNames: [String] = []
 
         func matches(_ idOrName: String) -> Bool {
-            id == idOrName || name.localizedCaseInsensitiveCompare(idOrName) == .orderedSame
+            id.caseInsensitiveCompare(idOrName) == .orderedSame
+                || name.localizedCaseInsensitiveCompare(idOrName) == .orderedSame
         }
 
         var attachedSceneNames: [String] {
