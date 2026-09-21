@@ -1,52 +1,36 @@
-# Disabled: HTTP MCP Server
+# Archived HTTP MCP prototype — not compiled
 
-This directory contains the HTTP MCP server implementation that has been disabled.
-These files are preserved for reference but are **not compiled** into the app.
+This directory preserves the superseded MCP SDK-based prototype for historical
+reference. XcodeGen excludes `**/_disabled/**` from the app target. These files
+are **not** the active HTTP server; do not move them into the parent directory or
+restore their SDK/token dependencies.
 
-## What was here
+## Active implementation
 
-The app previously ran an HTTP MCP server (NIO-based, port 9090) with bearer token
-authentication. All MCP clients now use either:
+The compiled implementation is in `Sources/homeclaw/MCP/` (the parent directory).
+It uses SwiftNIO directly, not `mcp-swift-sdk`. Enable **Streamable HTTP MCP** in
+**Settings → Integrations**; the setting is persistent and **off by default**.
+When enabled, the Catalyst app serves `http://127.0.0.1:9090/mcp` and `/healthz`.
+Turning it off stops the listener. Existing Node stdio and Unix-socket clients
+remain supported independently of this setting.
 
-- **stdio MCP server** (Node.js, `mcp-server/`) — used by Claude Code and Claude Desktop
-- **homekit-cli** (SPM binary) — used by OpenClaw
+The active security model is loopback-only binding, fail-closed Host/Origin
+validation, and a deny-by-default read-only HTTP tool allowlist. It intentionally
+has **no bearer token**. The prototype's bearer-token/Keychain design is
+superseded, not a missing feature to restore. HomeKit access remains subject to
+the app's entitlement and system permission.
 
-The HTTP server, bearer token auth, and Keychain token management added complexity
-without being in the active path for any current client.
+## Historical files
 
-## Files
+| File | Historical purpose |
+|------|--------------------|
+| `MCPServer.swift` | SDK-based HTTP server actor |
+| `MCPHTTPHandler.swift` | HTTP-to-MCP SDK bridge |
+| `BearerTokenValidator.swift` | Superseded bearer-token validation |
+| `ToolHandlers.swift` | Prototype tool definitions and dispatch |
 
-| File | Purpose |
-|------|---------|
-| `MCPServer.swift` | NIO-based HTTP server actor with session management |
-| `MCPHTTPHandler.swift` | NIO ChannelHandler bridging HTTP to MCP SDK |
-| `BearerTokenValidator.swift` | Bearer token extraction and validation |
-| `ToolHandlers.swift` | MCP tool definitions and dispatch to HomeKitClient |
+Related archived code lives in `Sources/homeclaw/Shared/_disabled/`
+(`KeychainManager.swift`) and `Sources/homeclaw-cli/Commands/_disabled/`
+(`TokenCommand.swift`). Those files also remain excluded from compilation.
 
-Related files in `Shared/_disabled/`:
-
-| File | Purpose |
-|------|---------|
-| `KeychainManager.swift` | macOS Keychain CRUD for bearer tokens |
-
-Related files in `homekit-cli/Commands/_disabled/`:
-
-| File | Purpose |
-|------|---------|
-| `TokenCommand.swift` | CLI command for viewing/rotating bearer tokens |
-
-## Re-enabling
-
-To re-enable the HTTP server:
-
-1. Move files back from `_disabled/` to their parent directories
-2. Restore the MCP SDK dependency in `Package.swift`:
-   ```swift
-   .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.11.0")
-   ```
-3. Add the MCP product dependency to the `homekit-mcp` target
-4. Restore `MCPServer` startup in `AppDelegate.swift`
-5. Restore `KeychainManager` and token initialization
-6. Restore `AppConfig` HTTP constants (port, endpoint, keychain keys)
-7. Restore the Server settings tab and menu bar token/port display
-8. Add `Token.self` back to `HomeKitCLI` subcommands
+For current client setup, see the root README's **Native MCP for Hermes** section.

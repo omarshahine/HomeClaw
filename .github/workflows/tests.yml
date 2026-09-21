@@ -32,7 +32,7 @@ jobs:
       - name: Build homeclaw-cli
         run: swift build --product homeclaw-cli
 
-      - name: Run Swift tests
+      - name: Run Swift CLI tests (not Catalyst coverage)
         run: swift test
 
       - name: Setup Node
@@ -42,6 +42,11 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Verify native MCP schema parity
+        run: |
+          node --test scripts/check-mcp-schema-parity.test.mjs
+          node scripts/check-mcp-schema-parity.mjs
 
       - name: Build MCP server
         run: npm run build:mcp
@@ -100,25 +105,43 @@ jobs:
           fi
           xcodebuild -version
 
-      # The app target is never compiled by the Build job — only the SPM CLI is —
-      # so a break in Sources/homeclaw (the HomeKit manager, socket server, and
-      # views) could reach main with CI green. Signing is disabled because the
-      # HomeKit entitlement is App Store-only and cannot be provisioned here;
-      # this checks that the Catalyst target compiles and links, not that it
-      # is distributable.
-      - name: Build Catalyst app (no signing)
+      - name: Verify CI evidence harness and settings wiring
         run: |
-          set -o pipefail
-          xcodebuild \
-            -project HomeClaw.xcodeproj \
-            -scheme HomeClaw \
-            -configuration Debug \
-            -destination 'generic/platform=macOS,variant=Mac Catalyst' \
-            build \
-            CODE_SIGNING_ALLOWED=NO \
-            | tee /tmp/catalyst-build.log \
-            | grep -E "error:|warning:|^\*\* BUILD" || true
-          grep -q "^\*\* BUILD SUCCEEDED \*\*" /tmp/catalyst-build.log
+          python3 scripts/test-ci-evidence.py -v
+          python3 scripts/test-integration-settings.py -v
+
+      - name: Verify generated HomeKit entitlement
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          with open('Resources/HomeClaw.entitlements', 'rb') as handle:
+              entitlements = plistlib.load(handle)
+          assert entitlements.get('com.apple.developer.homekit') is True
+          assert 'group.com.shahine.homeclaw' in entitlements.get('com.apple.security.application-groups', [])
+          PY
+
+      # SPM runs CLI tests only. This builds and executes every app-hosted
+      # HomeClawTests case, without filters/skips. Unsigned execution is not
+      # evidence of HomeKit provisioning or distribution signing.
+      - name: Run full Catalyst HomeClawTests (no signing)
+        timeout-minutes: 25
+        env:
+          CATALYST_EVIDENCE_DIR: ${{ runner.temp }}/catalyst-test-evidence
+        run: bash scripts/test-catalyst.sh
+
+      - name: Upload Catalyst test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: catalyst-homeclawtests-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/catalyst-test-evidence/xcodebuild.log
+            ${{ runner.temp }}/catalyst-test-evidence/xcodebuild-exit-status.txt
+            ${{ runner.temp }}/catalyst-test-evidence/summary.json
+            ${{ runner.temp }}/catalyst-test-evidence/tests.json
+            ${{ runner.temp }}/catalyst-test-evidence/HomeClawTests.xcresult
 
   version-check:
     name: Version Consistency

@@ -57,6 +57,51 @@ OpenClaw --> Plugin (openclaw/) --> homeclaw-cli --------------------------+
 
 **Single-process design.** Apple's `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement. By making the entire app Catalyst, HomeKit access is direct (no IPC), signing is unified (single archive), and App Store submission is clean. The `macOSBridge` plugin bundle provides the native macOS menu bar via `NSStatusItem`.
 
+## Native MCP for Hermes
+
+HomeClaw must be running before connecting. In **Settings → Integrations**, enable **Streamable HTTP MCP**. This persistent setting is **off by default**; turning it off stops the HTTP listener without disabling existing stdio or Unix-socket clients. When enabled, the Catalyst app owns a loopback-only Streamable HTTP endpoint:
+
+```text
+http://127.0.0.1:9090/mcp
+```
+
+Loopback binding prevents remote network access; no bearer token or shell launch is required. Readiness is available at `http://127.0.0.1:9090/healthz`. In Hermes, add:
+
+```yaml
+mcp_servers:
+  homeclaw:
+    url: http://127.0.0.1:9090/mcp
+    timeout: 120
+    connect_timeout: 30
+```
+
+The stdio MCP server remains supported for Claude Desktop, Claude Code, and OpenClaw. Use the existing `npm run build:mcp` and stdio setup when a client cannot use native HTTP.
+
+### Native transport development checks
+
+`swift test` covers the CLI package only. To build and execute the full native
+Catalyst `HomeClawTests` suite on macOS 26 or later:
+
+```bash
+npm install
+node scripts/check-mcp-schema-parity.mjs
+xcodegen generate
+bash scripts/test-catalyst.sh
+```
+
+The test script saves the xcodebuild log and `.xcresult` under
+`.build/catalyst-test-evidence/` and fails on empty or skipped test results. For a
+repeat run, set `CATALYST_EVIDENCE_DIR` to a fresh directory. Unit-test hosting
+suppresses live HomeKit, socket, and menu-bar startup; these tests are not proof
+of HomeKit provisioning or real accessory access.
+
+`lib/schemas.js` is the canonical tool schema. The Swift descriptors are readable
+JSON and CI compares every descriptor against the Node export and the XCTest
+fixture. After an intentional schema edit, regenerate both reviewed copies with
+`node scripts/check-mcp-schema-parity.mjs --write`, then inspect their diff. The
+HTTP read-only allowlist remains separate and deny-by-default; adding a tool to
+the canonical schema does not expose it over HTTP.
+
 ## Install
 
 Marketing site with screenshots and full pitch: **[homeclaw.omarknows.app](https://homeclaw.omarknows.app/)**.

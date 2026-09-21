@@ -291,7 +291,7 @@ final class HomeKitManager: NSObject, Observable {
 
     private var homeManager: HMHomeManager?
     private var homesReady = false
-    private var pendingContinuations: [CheckedContinuation<Void, Never>] = []
+    private var pendingContinuations: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     private let cache = CharacteristicCache.shared
     private var isWarmingCache = false
@@ -314,7 +314,7 @@ final class HomeKitManager: NSObject, Observable {
         if Self.isDemoMode {
             AppLogger.homekit.info("Demo mode enabled — serving DemoFixtures, skipping HMHomeManager")
             homesReady = true
-            for continuation in pendingContinuations { continuation.resume() }
+            for continuation in pendingContinuations.values { continuation.resume() }
             pendingContinuations.removeAll()
             NotificationCenter.default.post(
                 name: .homeKitStatusDidChange,
@@ -333,15 +333,27 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Readiness
 
-    /// Waits until HomeKit has delivered the initial set of homes.
+    /// Waits until HomeKit has delivered the initial set of homes, or until the
+    /// calling task is cancelled (so an abandoned caller does not stay parked
+    /// here forever). Callers that care must check `isReady` afterwards.
     func waitForReady() async {
         if homesReady { return }
         if homeManager == nil {
             AppLogger.homekit.warning("waitForReady() called before start() — HomeKit not yet initialised")
         }
-        await withCheckedContinuation { continuation in
-            pendingContinuations.append(continuation)
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if homesReady || Task.isCancelled { continuation.resume(); return }
+                pendingContinuations[id] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancelReadinessWait(id) }
         }
+    }
+
+    private func cancelReadinessWait(_ id: UUID) {
+        pendingContinuations.removeValue(forKey: id)?.resume()
     }
 
     var isReady: Bool { homesReady }
@@ -3645,8 +3657,11 @@ final class HomeKitManager: NSObject, Observable {
     /// Call before AccessoryModel.accessoryDetail() so cached values are populated.
     private func readAllValues(for accessory: HMAccessory) async -> AccessoryReadReport {
         var report = AccessoryReadReport()
-        for service in accessory.services {
+        services: for service in accessory.services {
             for characteristic in service.characteristics {
+                // A cancelled caller (e.g. an HTTP client that disconnected)
+                // gets no benefit from the rest of the sweep.
+                if Task.isCancelled { break services }
                 if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
                     let attestation = accessory.isReachable
                         ? await readValueWithTimeout(characteristic)
@@ -3979,7 +3994,7 @@ extension HomeKitManager: HMHomeManagerDelegate {
 
             if !homesReady {
                 homesReady = true
-                for continuation in pendingContinuations {
+                for continuation in pendingContinuations.values {
                     continuation.resume()
                 }
                 pendingContinuations.removeAll()
@@ -4018,6 +4033,7 @@ extension Notification.Name {
     static let homeKitStatusDidChange = Notification.Name("HomeKitStatusDidChange")
     static let homeKitMenuDataDidChange = Notification.Name("HomeKitMenuDataDidChange")
     static let webhookCircuitStateDidChange = Notification.Name("WebhookCircuitStateDidChange")
+    static let mcpListenerStatusDidChange = Notification.Name("MCPListenerStatusDidChange")
 }
 
 // MARK: - HMAccessoryDelegate

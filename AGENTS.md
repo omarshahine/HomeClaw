@@ -19,7 +19,7 @@ OpenClaw → Plugin (openclaw/) → homeclaw-cli ──────────�
 
 **Single-process design.** `HMHomeManager` requires a UIKit/Catalyst app with the HomeKit entitlement. By making the entire app Catalyst, HomeKit access is direct (no IPC), signing is unified (single archive), and App Store submission is clean. The macOSBridge plugin bundle provides the native macOS menu bar via `NSStatusItem`.
 
-**Note:** The HTTP MCP server (port 9090, bearer token auth) has been disabled. The implementation is preserved in `Sources/homeclaw/MCP/_disabled/` and `Sources/homeclaw/Shared/_disabled/` for reference but is not compiled. All MCP clients now use the stdio server or CLI.
+**Note:** The native Streamable HTTP MCP server is **off by default** and can be enabled in Settings → Integrations. When enabled it binds only to loopback at `http://127.0.0.1:9090/mcp`, is owned by the Catalyst app lifecycle, and exposes `/healthz` for readiness. It uses SwiftNIO directly, with Host/Origin validation and a deny-by-default read-only tool allowlist; no bearer token or shell launch is required. The Node stdio server remains available independently. `MCP/_disabled/` contains an excluded, superseded SDK/token prototype, not the active implementation.
 
 ## Project Structure
 
@@ -224,9 +224,12 @@ If status shows `ready: false` with 0 homes:
 
 GitHub Actions (`.github/workflows/tests.yml`) runs on `macos-26`:
 - **Build** — builds `homeclaw-cli` via SPM, runs `swift test`, builds `mcp-server` (Node.js)
-- **Catalyst App** — runs `xcodegen`, selects the `.xcode-version` Xcode when the
-  runner has it, and builds the HomeClaw Catalyst target with
-  `CODE_SIGNING_ALLOWED=NO`, asserting `** BUILD SUCCEEDED **`
+- **Catalyst App** — runs XcodeGen, selects the `.xcode-version` Xcode when the
+  runner has it, checks complete Node/native schema parity, and executes the full
+  `HomeClawTests` suite via `scripts/test-catalyst.sh` with
+  `CODE_SIGNING_ALLOWED=NO`. The script preserves xcodebuild's exit status and
+  requires passing, nonempty xcresult evidence with no skipped tests. CI uploads
+  the log and result bundle. Catalyst deployment targets support the macOS 26 runner.
 - **Version Consistency** — checks the plugin manifest versions agree
 
 The two macOS jobs (**Build**, **Catalyst App**) run only on pull requests —
@@ -234,10 +237,11 @@ macOS minutes bill at 10x Linux, and re-running them on the merge commit's push
 to main duplicated what the PR already proved. Pushes to main run only the
 Linux **Version Consistency** job.
 
-CI builds the Catalyst app **unsigned only**. The HomeKit entitlement is App
-Store-only and cannot be provisioned on a runner, so CI proves the app target
-compiles and links, not that it is signable or distributable. A signed build
-still has to happen locally (`scripts/build.sh`) or via `fastlane`.
+CI builds and tests the Catalyst app **unsigned only**. The HomeKit entitlement
+cannot be provisioned on a runner. Unit tests avoid live HomeKit operations;
+passing them proves native code execution, not real accessory access, signing,
+or distributability. A signed build still has to happen locally
+(`scripts/build.sh`) or via `fastlane`.
 
 ## Clawpatch Code Review
 

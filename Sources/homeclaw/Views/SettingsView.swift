@@ -1445,6 +1445,7 @@ private struct AppStoreIntegrationsView: View {
 
     var body: some View {
         Form {
+            NativeHTTPSettingsSection()
             // CLI
             Section("Command Line") {
                 LabeledContent("Binary") {

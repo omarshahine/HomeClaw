@@ -1,6 +1,32 @@
 import SwiftUI
 import UIKit
 
+/// Available in both development and App Store integration settings.
+struct NativeHTTPSettingsSection: View {
+    @EnvironmentObject private var httpIntegration: HTTPIntegrationLifecycle
+
+    var body: some View {
+        Section {
+            Toggle("Enable Streamable HTTP MCP", isOn: Binding(
+                get: { httpIntegration.isEnabled },
+                set: { httpIntegration.setEnabled($0) }))
+            Text(AppConfig.mcpEndpoint)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+            Text("Off by default. When enabled, local clients can read HomeKit data over loopback without a token. CLI and stdio integrations are unaffected.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let error = httpIntegration.errorMessage {
+                Text("HTTP server failed to start: \(error)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Streamable HTTP MCP").font(.headline).foregroundStyle(.primary)
+        }
+    }
+}
+
 struct IntegrationsSettingsView: View {
     @State private var claudeDesktopStatus: DesktopStatus = .checking
     @State private var claudeCodeStatus: ClaudeCodeStatus = .checking
@@ -107,11 +133,11 @@ struct IntegrationsSettingsView: View {
 
     var body: some View {
         Form {
+            NativeHTTPSettingsSection()
             cliSection
             claudeDesktopSection
             claudeCodeSection
             openClawSection
-
             if let message = statusMessage {
                 Section {
                     Label(

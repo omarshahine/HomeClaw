@@ -17,6 +17,23 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     private var homeKitObserver: NSObjectProtocol?
     private var menuDataObserver: NSObjectProtocol?
     private var webhookCircuitObserver: NSObjectProtocol?
+    private lazy var mcpServer = MCPServer()
+    private var homeKitStatusSequence: UInt64 = 0
+    private(set) lazy var httpIntegration = makeHTTPIntegration()
+
+    private func makeHTTPIntegration() -> HTTPIntegrationLifecycle {
+        // Build closures outside the lazy initializer's isolation context.
+        let server = mcpServer
+        return HTTPIntegrationLifecycle(
+            start: {
+                try await server.start()
+                AppLogger.app.info("Native MCP HTTP server started")
+            },
+            stop: { await server.stop() })
+    }
+    private var terminationTask: Task<Void, Never>?
+    private var macTerminationObserver: NSObjectProtocol?
+    private let socketLifecycleQueue = DispatchQueue(label: "com.shahine.homeclaw.socket-lifecycle")
 
     /// Held for the app's lifetime to opt out of App Nap. HomeClaw is an
     /// `LSUIElement` background agent: on a headless Mac (no display/UI activity)
@@ -119,9 +136,25 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func quitApp() {
-        // Clean up socket before exit
-        SocketServer.shared.stop()
+        guard !AppLaunchPolicy.suppressLiveServices else { return }
+        guard terminationTask == nil else { return }
+        let shutdown = beginServerShutdown()
+        terminationTask = Task { @MainActor in
+            await shutdown.value
+            terminateApplication()
+        }
+    }
 
+    @discardableResult
+    private func beginServerShutdown() -> Task<Void, Never> {
+        httpIntegration.beginShutdown {
+            // Serialize with the off-main startup so it cannot bind after stop.
+            // This only joins synchronous socket setup, never HTTP/MainActor work.
+            socketLifecycleQueue.sync { SocketServer.shared.stop() }
+        }
+    }
+
+    private func terminateApplication() {
         #if targetEnvironment(macCatalyst)
         // Use NSApplication to terminate cleanly
         if let nsAppClass: AnyClass = NSClassFromString("NSApplication"),
@@ -146,7 +179,18 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
+        guard !AppLaunchPolicy.suppressLiveServices else { return true }
         AppLogger.app.info("HomeClaw starting (unified Catalyst)...")
+        #if targetEnvironment(macCatalyst)
+        // AppKit system/Apple-event quit need not call UIKit's termination hook.
+        // Observe the synchronous final notification without replacing its delegate.
+        macTerminationObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("NSApplicationWillTerminateNotification"),
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { _ = self?.beginServerShutdown() }
+        }
+        #endif
 
         // Opt out of App Nap for the lifetime of the process so the control socket
         // and menu-data pipeline keep running on headless/idle Macs. `.allowing`
@@ -171,8 +215,16 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         // after the first scene connects. Creating HMHomeManager before a
         // window exists causes a TCC privacy violation crash on macOS 26.4+.
 
-        // Start socket server for CLI and MCP clients
-        SocketServer.shared.start()
+        // Opt-in only: an absent preference is false. The controller serializes
+        // runtime toggles with startup and shutdown without blocking launch.
+        httpIntegration.startIfEnabled()
+
+        // Start the legacy socket listener off the application launch path. Its
+        // filesystem bind must not prevent the native MCP HTTP listener from
+        // starting if an old app-group socket is stale or unavailable.
+        socketLifecycleQueue.async {
+            SocketServer.shared.start()
+        }
 
         // Load macOSBridge bundle for the menu bar
         #if targetEnvironment(macCatalyst)
@@ -188,7 +240,15 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
             let ready = notification.userInfo?["ready"] as? Bool ?? false
             let names = notification.userInfo?["homeNames"] as? [String] ?? []
             MainActor.assumeIsolated {
+                // The menu bar updates synchronously, in notification order.
                 self?.macOSController?.updateStatus(ready: ready, homeNames: names)
+                // The HTTP listener's readiness hop is fire-and-forget: it must
+                // never delay or reorder the menu bar update above.
+                // A sequence number keeps racing Tasks from applying a stale state.
+                guard let self else { return }
+                self.homeKitStatusSequence &+= 1
+                let server = self.mcpServer, sequence = self.homeKitStatusSequence
+                Task { await server.updateHomeKitReady(ready, sequence: sequence) }
             }
         }
 
@@ -258,8 +318,11 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
+        guard !AppLaunchPolicy.suppressLiveServices else { return }
         AppLogger.app.info("HomeClaw shutting down...")
-        SocketServer.shared.stop()
+        // UIKit cannot defer this callback. Stop the legacy socket synchronously;
+        // HTTP is best-effort here, but explicit Quit awaits it before terminate.
+        beginServerShutdown()
         if let observer = homeKitObserver {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -278,6 +341,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {
+        if AppLaunchPolicy.suppressLiveServices {
+            // No scene delegate means no restored settings/onboarding or HomeKit.
+            return UISceneConfiguration(name: "Unit Tests", sessionRole: connectingSceneSession.role)
+        }
         // Settings window — triggered by openSettings() via macOSBridge menu
         if options.userActivities.first?.activityType == "com.shahine.homeclaw.settings" {
             let config = UISceneConfiguration(
@@ -420,7 +487,9 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     private func createAndShowWindow(in windowScene: UIWindowScene) {
         let w = UIWindow(windowScene: windowScene)
-        w.rootViewController = UIHostingController(rootView: SettingsView())
+        guard let app = UIApplication.shared.delegate as? HomeClawApp else { return }
+        w.rootViewController = UIHostingController(
+            rootView: SettingsView().environmentObject(app.httpIntegration))
         w.makeKeyAndVisible()
         self.window = w
 
@@ -668,6 +737,7 @@ class HeadlessSceneDelegate: UIResponder, UIWindowSceneDelegate {
         options connectionOptions: UIScene.ConnectionOptions
     ) {
         window = nil
+        guard !AppLaunchPolicy.suppressLiveServices else { return }
 
         #if targetEnvironment(macCatalyst)
         if let windowScene = scene as? UIWindowScene {

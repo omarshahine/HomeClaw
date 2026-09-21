@@ -446,6 +446,18 @@ final class HomeEventLogger {
 
     // MARK: - Webhook
 
+    /// Sends a synthetic event through the same webhook delivery path used by HomeKit events.
+    @discardableResult
+    func testWebhook() -> [String: Any] {
+        guard let config = HomeClawConfig.shared.webhookConfig,
+              config.enabled,
+              !config.url.isEmpty,
+              let url = URL(string: config.url + HomeClawConfig.shared.effectiveEndpoint)
+        else { return ["sent": false, "error": "Webhook is not configured"] }
+        sendWebhookPayload(["type": "test", "source": "homeclaw"], to: url, token: config.token)
+        return ["sent": true, "endpoint": url.path]
+    }
+
     private func sendWebhookPayload(
         _ payload: [String: Any], to url: URL, token: String,
         timeout: TimeInterval = 10, isCritical: Bool = false,
