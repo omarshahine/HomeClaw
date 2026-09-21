@@ -16619,7 +16619,7 @@ async function handleConfig(args) {
 
 // mcp-server/server.js
 var server = new Server(
-  { name: "homeclaw", version: "1.0.11" },
+  { name: "homeclaw", version: "1.0.12" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

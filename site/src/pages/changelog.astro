@@ -10,6 +10,36 @@ import MarkdownPage from '../layouts/MarkdownPage.astro';
 
   <hr />
 
+  <h3>Version 1.0.12</h3>
+  <p class="timestamp">September 2026</p>
+  <h4>New</h4>
+  <ul>
+    <li>
+      <strong>MCP over HTTP</strong>: HomeClaw can serve MCP directly from the app at
+      <code>http://127.0.0.1:9090/mcp</code>, for assistants that can't launch a local command. It's off by default
+      (turn it on in Settings &rarr; Integrations), only answers on this Mac, and only offers read-only tools. Thanks
+      to Keith Herrington.
+    </li>
+    <li>
+      Everyday CLI commands take <code>--home</code>, so you can work with a second home without changing your
+      default. A mistyped home name is now an error instead of quietly using your primary home. Thanks to Viz.
+    </li>
+  </ul>
+  <h4>Fixes</h4>
+  <ul>
+    <li>
+      Reading an accessory no longer passes off old values as fresh ones. If a live read fails, HomeClaw says so and
+      why, such as the accessory being unreachable. Thanks to ankjaers.
+    </li>
+    <li>Automation rewiring now finds every automation the list shows, including time-based ones.</li>
+    <li>
+      The OpenClaw plugin loads its tools again on current OpenClaw releases. Tools that change your home now need
+      to be allowed in your OpenClaw config.
+    </li>
+  </ul>
+
+  <hr />
+
   <h3>Version 1.0.11</h3>
   <p class="timestamp">September 2026</p>
   <h4>Security &amp; reliability</h4>
