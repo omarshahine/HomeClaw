@@ -19,6 +19,19 @@ description: >
 > the project; those are its outputs, not missing references.
 <!-- /local -->
 
+<!-- local: apple-xcode-skills -->
+> **Known issues in Apple's Xcode 27.1 text (added by apple-xcode-skills, verified; Apple's text below is unchanged).**
+> - `scripts/filter_build_settings.py` treats only `YES`, `YES_AGGRESSIVE` and `YES_ERROR` as hardened, but
+>   `CLANG_CXX_STANDARD_LIBRARY_HARDENING` is hardened at `fast` or `debug`. A correctly hardened C++ target reads as
+>   unhardened or deliberately disabled. Judge that setting by value, not by the script.
+> - Its default regex is built from *every* backticked uppercase token in the reference, so it tracks values
+>   (`YES`, `YES_ERROR`) and prose tokens (`ARCHS_STANDARD`) as if they were settings, and matches them unanchored:
+>   an unrelated `MY_YES_FLAG` is reported. Treat only the Build Setting column as the tracked set.
+> - `references/settings-and-entitlements-catalog.md` is cited nowhere and contradicts the canonical
+>   `references/security-settings-reference.md` (it says to set `ARCHS = arm64 arm64e` explicitly and that apps stay
+>   arm64e-only). Follow `security-settings-reference.md`; the catalog is kept only because Apple ships it.
+<!-- /local -->
+
 
 # Audit Xcode Security Settings
 

@@ -17,6 +17,15 @@ when_to_use: >
 effort: high
 ---
 
+<!-- local: apple-xcode-skills -->
+> **Known issues in Apple's Xcode 27.1 text (added by apple-xcode-skills, verified; Apple's text below is unchanged).**
+> - `references/adoption-strategies.md` compares `int idx = -1` against a `size_t` count. The `-1` converts to
+>   `SIZE_MAX`, so `idx < original_count` is false and the loop never runs. Use a signed type or restructure.
+> - Its line "If you are doing header-only adoption, stop here" means *do not continue into full adoption's §3*.
+>   Header-only adoption still has its own step 3, the opt-in Safe Wrapper batch, and the completion milestone.
+<!-- /local -->
+
+
 ## How to Use This Skill
 
 When helping with `-fbounds-safety` adoption or code changes, ask clarifying questions about the user's codebase and goals before suggesting changes. For complex tasks involving multiple files or non-trivial annotation decisions, use plan mode to propose an approach before implementing.
