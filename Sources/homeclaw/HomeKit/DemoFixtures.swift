@@ -635,12 +635,9 @@ enum DemoFixtures {
         dryRun: Bool
     ) throws -> AutomationConditionResult {
         guard let aIdx = try automationIndex(for: id) else { return .automationNotFound }
-        // Mirror the real method: only event automations carry a predicate.
-        if automations[aIdx].triggerType == "time" {
-            throw HomeKitManager.ControlError.unsupportedTriggerType(
-                "Automation '\(automations[aIdx].name)' (\(automations[aIdx].id)) is a timer automation; "
-                    + "add-condition only applies to event automations.")
-        }
+        // Demo "time" automations model the time-based HMEventTrigger that
+        // `createTimeAutomation` builds, which does carry a predicate, so they
+        // accept conditions like any other event automation.
         guard let acc = accessories.first(where: { $0.id == accessoryID || $0.name.lowercased() == accessoryID.lowercased() }) else {
             return .accessoryNotFound
         }
