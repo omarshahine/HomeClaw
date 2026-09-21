@@ -50,4 +50,18 @@ struct GetFreshnessContractTests {
         #expect(Get.refreshContractError(noRefresh: true, detail: stale) == nil)
         #expect(Get.refreshContractError(noRefresh: false, detail: stale) != nil)
     }
+
+    @Test("A failed refresh names the cause and the --no-refresh escape hatch")
+    func failureExplainsCause() throws {
+        var offline = payload(refreshed: false, succeeded: 0)
+        offline["reachable"] = false
+        let offlineError = try #require(Get.refreshContractError(noRefresh: false, detail: offline))
+        #expect(offlineError.contains("not reachable"))
+        #expect(offlineError.contains("--no-refresh"))
+
+        var partial = payload(refreshed: false, attempted: 2, succeeded: 1)
+        partial["reachable"] = true
+        let partialError = try #require(Get.refreshContractError(noRefresh: false, detail: partial))
+        #expect(partialError.contains("1 of 2"))
+    }
 }

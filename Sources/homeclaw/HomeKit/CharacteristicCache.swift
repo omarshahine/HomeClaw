@@ -81,6 +81,12 @@ final class CharacteristicCache: @unchecked Sendable {
         data.values[accessoryID] = state
     }
 
+    /// Merge freshly read values into an accessory's cached state, keeping
+    /// last-known entries for characteristics that were not read this time.
+    func mergeValues(for accessoryID: String, state: [String: String]) {
+        data.values[accessoryID, default: [:]].merge(state) { _, fresh in fresh }
+    }
+
     /// Mark the cache as freshly warmed with the given device hash.
     func markWarmed(deviceHash: String) {
         data.deviceHash = deviceHash

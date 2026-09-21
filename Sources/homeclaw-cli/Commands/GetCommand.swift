@@ -36,7 +36,11 @@ struct Get: ParsableCommand {
         }
 
         guard refreshed, attempted > 0, succeeded == attempted else {
-            return "HomeClaw live refresh failed; values may be last-known"
+            let reason = detail["reachable"] as? Bool == false
+                ? "accessory is not reachable"
+                : "\(succeeded) of \(attempted) characteristic reads succeeded"
+            return "HomeClaw live refresh failed (\(reason)); values may be last-known. "
+                + "Use --no-refresh to read last-known values."
         }
         guard let services = detail["services"] as? [[String: Any]] else {
             return "HomeClaw response is missing characteristic freshness metadata"

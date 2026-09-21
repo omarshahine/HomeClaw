@@ -3551,7 +3551,13 @@ final class HomeKitManager: NSObject, Observable {
             }
         }
         if !state.isEmpty {
-            cache.setValues(for: accessory.uniqueIdentifier.uuidString, state: state)
+            // A partial refresh must not erase last-known values for the
+            // characteristics whose reads failed, so merge rather than replace.
+            if readReport != nil {
+                cache.mergeValues(for: accessory.uniqueIdentifier.uuidString, state: state)
+            } else {
+                cache.setValues(for: accessory.uniqueIdentifier.uuidString, state: state)
+            }
             cache.save()
         }
     }

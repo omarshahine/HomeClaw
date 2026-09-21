@@ -36,6 +36,13 @@ test('default MCP get rejects a failed live refresh', async () => {
     /live refresh failed/i,
   );
 });
+test('a failed refresh names the cause', async () => {
+  const send = async () => freshPayload({ refreshed: false, read_succeeded: 0, reachable: false });
+  await assert.rejects(
+    handleAccessories({ action: 'get', accessory_id: 'sensor' }, send),
+    /not reachable.*no_refresh/i,
+  );
+});
 test('explicit no_refresh forwards refresh=false and accepts stale data', async () => {
   let observed;
   const stale = {
