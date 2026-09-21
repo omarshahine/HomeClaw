@@ -616,6 +616,16 @@ enum DemoFixtures {
         toRemove.forEach { attached.remove($0) }
         toAdd.forEach { attached.insert($0.name) }
         let after = Array(attached).sorted()
+        // `after` is the full attached set. `attachedSceneNames` always re-adds
+        // the primary (inline or named) scene, so drop it when it was removed;
+        // otherwise a removed scene would reappear on the next read.
+        if automations[idx].inlineActions, !after.contains(automations[idx].name) {
+            automations[idx].inlineActions = false
+            automations[idx].actions = []
+        }
+        if let primary = automations[idx].sceneName, !after.contains(primary) {
+            automations[idx].sceneName = nil
+        }
         automations[idx].extraSceneNames = after
         result["dry_run"] = false
         result["after"] = after
