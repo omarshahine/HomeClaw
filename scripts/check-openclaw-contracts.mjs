@@ -66,6 +66,16 @@ for (const tool of tools) {
 	if (tool.optional && meta.sideEffecting !== true) {
 		errors.push(`${tool.name}: optional (state-changing) tool must set sideEffecting: true`);
 	}
+	if (!tool.optional) {
+		// Read-only tools must stay visible in every chat-facing profile and be
+		// safe to replay; empty metadata would silently drop them.
+		if (meta.replaySafe !== true) errors.push(`${tool.name}: read-only tool must set replaySafe: true`);
+		if (meta.sideEffecting === true) errors.push(`${tool.name}: read-only tool must not set sideEffecting`);
+		const profiles = Array.isArray(meta.profiles) ? meta.profiles : [];
+		for (const profile of ['coding', 'messaging', 'full']) {
+			if (!profiles.includes(profile)) errors.push(`${tool.name}: read-only tool missing profile "${profile}"`);
+		}
+	}
 }
 
 if (errors.length > 0) {
