@@ -10,6 +10,45 @@ import MarkdownPage from '../layouts/MarkdownPage.astro';
 
   <hr />
 
+  <h3>Version 1.0.11</h3>
+  <p class="timestamp">September 2026</p>
+  <h4>Security &amp; reliability</h4>
+  <ul>
+    <li>
+      <strong>Locked-down control socket</strong>: the local control socket is now restricted to your user
+      account, so other accounts on the same Mac can't send it commands.
+    </li>
+    <li>
+      Commands can target a single service on an accessory, and changes that can't be applied now report an
+      error instead of silently succeeding.
+    </li>
+    <li>Accessory types that used to show up as "other" are now identified by name.</li>
+  </ul>
+
+  <hr />
+
+  <h3>Version 1.0.10</h3>
+  <p class="timestamp">July 2026</p>
+  <h4>Automations &amp; scenes</h4>
+  <ul>
+    <li>
+      <strong>Clock-time conditions</strong>: trigger conditions now accept clock times, so an automation can be
+      limited to a fixed window, such as motion after 7:00 AM and before 8:30 PM. Clock times and sunrise or
+      sunset offsets can be combined.
+    </li>
+    <li>Conditions and time predicates now persist correctly when attached to event triggers.</li>
+    <li>
+      Updating a scene now changes its actions in place, so the scene keeps its identity and any automations or
+      Siri phrases that reference it keep working.
+    </li>
+    <li>Clearer errors when a scene is owned by an automation and can't be edited directly.</li>
+    <li>HomeKit bridge details are now reported for bridged accessories.</li>
+    <li>Consistent input handling across commands, including reading from standard input.</li>
+    <li>Scene and automation identifiers are uniform, so names and UUIDs work interchangeably.</li>
+  </ul>
+
+  <hr />
+
   <h3>Version 1.0.5</h3>
   <p class="timestamp">June 2026</p>
   <h4>Reliability &amp; filtering</h4>

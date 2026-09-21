@@ -16,6 +16,9 @@ struct DeviceMapCmd: ParsableCommand {
     @Option(name: .shortAndLong, help: "Write output to file instead of stdout")
     var output: String?
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     enum OutputFormat: String, ExpressibleByArgument, CaseIterable {
         case text
         case json
@@ -26,7 +29,9 @@ struct DeviceMapCmd: ParsableCommand {
     }
 
     func run() throws {
-        let response = try SocketClient.send(command: "device_map")
+        var args: [String: String] = [:]
+        if let home { args["home_id"] = home }
+        let response = try SocketClient.send(command: "device_map", args: args.isEmpty ? nil : args)
 
         guard response.success else {
             throw ValidationError(response.error ?? "Unknown error")

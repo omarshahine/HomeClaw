@@ -170,32 +170,38 @@ The `mcp-server.js` is bundled inside the app. You can also use the Integrations
 
 ## CLI
 
-The `homeclaw-cli` command-line tool communicates directly over the Unix domain socket. All read commands support `--json` for machine-readable output.
+The `homeclaw-cli` command-line tool communicates directly over the Unix domain socket. All read commands support `--json` for machine-readable output. Day-to-day commands also accept `--home <name-or-uuid>` to target a specific HomeKit home without changing the configured default (`config --default-home`).
 
 ```bash
 # List accessories
 homeclaw-cli list
 homeclaw-cli list --room "Kitchen"
 homeclaw-cli list --category thermostat
+homeclaw-cli list --home "Cabin" --room "Kitchen"   # Scope to a home (name or UUID)
 
 # Control devices
 homeclaw-cli set "Living Room Light" brightness 75
 homeclaw-cli set "Front Door Lock" lock_target_state locked
 homeclaw-cli set "Thermostat" target_temperature 72
+homeclaw-cli set "Kitchen Light" power true --home "Cabin"
 
 # Disambiguate when a characteristic exists on multiple services (e.g. bridged TVs)
 homeclaw-cli set "TV" active 0 --service-type 000000D8-0000-1000-8000-0026BB765291
 
 # Get detailed device info
 homeclaw-cli get "Kitchen Light" --json
+homeclaw-cli get "Kitchen Light" --home "Cabin"
 
-# Search across all homes
+# Search (optionally scoped to one home)
 homeclaw-cli search "bedroom" --category lightbulb
+homeclaw-cli search "lamp" --home "Cabin"
 
 # Scenes
 homeclaw-cli scenes
+homeclaw-cli scenes --home "Cabin"
 homeclaw-cli get-scene "Good Night" --json        # Full detail: all actions
 homeclaw-cli trigger "Good Night"
+homeclaw-cli trigger "Good Night" --home "Cabin"
 
 # Scene management
 homeclaw-cli delete-scene "Old Scene"
@@ -242,6 +248,7 @@ homeclaw-cli automations disable "<name-or-uuid>"            # Disable
 
 # LLM-optimized device map
 homeclaw-cli device-map
+homeclaw-cli device-map --home "Cabin"
 
 # Status and configuration
 homeclaw-cli status

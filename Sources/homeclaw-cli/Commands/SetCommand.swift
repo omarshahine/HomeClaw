@@ -33,6 +33,9 @@ struct Set: ParsableCommand {
     @Flag(name: .long, help: "Accept the write without reading the value back (skips the check that the device actually changed)")
     var noVerify = false
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
@@ -54,6 +57,7 @@ struct Set: ParsableCommand {
         if let serviceIndex { args["service_index"] = String(serviceIndex) }
         if dryRun { args["dry_run"] = "true" }
         if noVerify { args["verify"] = "false" }
+        if let home { args["home_id"] = home }
 
         let response = try SocketClient.send(
             command: "control",

@@ -15,6 +15,9 @@ struct Get: ParsableCommand {
     @Flag(name: .long, help: "Skip live characteristic reads; return last-known + static values only (fast — ideal for serial number / model / firmware sweeps)")
     var noRefresh = false
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     static func refreshContractError(
         noRefresh: Bool,
         detail: [String: Any]
@@ -64,6 +67,7 @@ struct Get: ParsableCommand {
         if let err = validateInput(accessory, label: "accessory") { throw ValidationError(err) }
         var args: [String: String] = ["id": accessory]
         if noRefresh { args["refresh"] = "false" }
+        if let home { args["home_id"] = home }
         let response = try SocketClient.send(command: "get_accessory", args: args)
 
         guard response.success else {

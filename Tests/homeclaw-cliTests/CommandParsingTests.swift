@@ -26,11 +26,20 @@ struct ReadCommandParsingTests {
         #expect(cmd.json == true)
     }
 
+    @Test("list takes optional --home")
+    func listHome() throws {
+        let cmd = try List.parse(["--home", "Tranquility", "--room", "Kitchen"])
+        #expect(cmd.home == "Tranquility")
+        #expect(cmd.room == "Kitchen")
+        #expect(try List.parse([]).home == nil)
+    }
+
     @Test("list parses with no arguments (all filters optional)")
     func listBare() throws {
         let cmd = try List.parse([])
         #expect(cmd.room == nil)
         #expect(cmd.category == nil)
+        #expect(cmd.home == nil)
         #expect(cmd.json == false)
     }
 
@@ -65,6 +74,14 @@ struct ReadCommandParsingTests {
         #expect(cmd.json == false)
     }
 
+    @Test("get takes optional --home")
+    func getHome() throws {
+        let cmd = try Get.parse(["Floor Lamp", "--home", "Cabin"])
+        #expect(cmd.accessory == "Floor Lamp")
+        #expect(cmd.home == "Cabin")
+        #expect(try Get.parse(["Floor Lamp"]).home == nil)
+    }
+
     @Test("get without an accessory is rejected")
     func getMissingAccessory() {
         #expect(throws: (any Error).self) { _ = try Get.parse([]) }
@@ -75,6 +92,12 @@ struct ReadCommandParsingTests {
         let cmd = try Search.parse(["lamp", "--category", "lightbulb"])
         #expect(cmd.query == "lamp")
         #expect(cmd.category == "lightbulb")
+    }
+
+    @Test("search takes optional --home")
+    func searchHome() throws {
+        #expect(try Search.parse(["lamp", "--home", "Cabin"]).home == "Cabin")
+        #expect(try Search.parse(["lamp"]).home == nil)
     }
 
     @Test("search without a query is rejected")
@@ -108,6 +131,13 @@ struct SetCommandParsingTests {
         #expect(cmd.serviceType == "uuid-123")
         #expect(cmd.dryRun == true)
         #expect(cmd.json == true)
+    }
+
+    @Test("set takes optional --home")
+    func setHome() throws {
+        let cmd = try Set.parse(["Lamp", "power", "on", "--home", "Cabin"])
+        #expect(cmd.home == "Cabin")
+        #expect(try Set.parse(["Lamp", "power", "on"]).home == nil)
     }
 
     @Test("missing value positional rejected")
@@ -162,14 +192,19 @@ struct SetCommandParsingTests {
 
 @Suite("scene command parsing")
 struct SceneCommandParsingTests {
-    @Test("scenes list takes only --json")
+    @Test("scenes list takes optional --json and --home")
     func scenes() throws {
         #expect(try Scenes.parse(["--json"]).json == true)
+        #expect(try Scenes.parse(["--home", "Cabin"]).home == "Cabin")
+        #expect(try Scenes.parse([]).home == nil)
     }
 
-    @Test("trigger requires a scene positional")
+    @Test("trigger requires a scene positional and takes optional --home")
     func trigger() throws {
-        #expect(try Trigger.parse(["Good Night"]).scene == "Good Night")
+        let bare = try Trigger.parse(["Good Night"])
+        #expect(bare.scene == "Good Night")
+        #expect(bare.home == nil)
+        #expect(try Trigger.parse(["Good Night", "--home", "Cabin"]).home == "Cabin")
         #expect(throws: (any Error).self) { _ = try Trigger.parse([]) }
     }
 
@@ -257,6 +292,42 @@ struct DeviceMapParsingTests {
     func output() throws {
         #expect(try DeviceMapCmd.parse(["-o", "/tmp/map.txt"]).output == "/tmp/map.txt")
         #expect(try DeviceMapCmd.parse([]).output == nil)
+    }
+
+    @Test("device-map takes optional --home")
+    func home() throws {
+        #expect(try DeviceMapCmd.parse(["--home", "Cabin"]).home == "Cabin")
+        #expect(try DeviceMapCmd.parse([]).home == nil)
+    }
+}
+
+// MARK: - hot-path --home (parity with structure/automations)
+
+@Suite("hot-path --home parsing")
+struct HotPathHomeParsingTests {
+    // Mirrors "--home is honoured across structure commands" / automations list:
+    // every day-to-day command that now forwards home_id must accept --home and
+    // default it to nil. Parse-only — run() talks to the socket (app target).
+    @Test("--home is honoured across hot-path commands")
+    func homeOption() throws {
+        #expect(try List.parse(["--home", "Cabin"]).home == "Cabin")
+        #expect(try Get.parse(["Lamp", "--home", "Cabin"]).home == "Cabin")
+        #expect(try Set.parse(["Lamp", "power", "on", "--home", "Cabin"]).home == "Cabin")
+        #expect(try Search.parse(["lamp", "--home", "Cabin"]).home == "Cabin")
+        #expect(try Scenes.parse(["--home", "Cabin"]).home == "Cabin")
+        #expect(try Trigger.parse(["Good Night", "--home", "Cabin"]).home == "Cabin")
+        #expect(try DeviceMapCmd.parse(["--home", "Cabin"]).home == "Cabin")
+    }
+
+    @Test("--home defaults to nil on hot-path commands")
+    func homeDefaultsNil() throws {
+        #expect(try List.parse([]).home == nil)
+        #expect(try Get.parse(["Lamp"]).home == nil)
+        #expect(try Set.parse(["Lamp", "power", "on"]).home == nil)
+        #expect(try Search.parse(["lamp"]).home == nil)
+        #expect(try Scenes.parse([]).home == nil)
+        #expect(try Trigger.parse(["Good Night"]).home == nil)
+        #expect(try DeviceMapCmd.parse([]).home == nil)
     }
 }
 

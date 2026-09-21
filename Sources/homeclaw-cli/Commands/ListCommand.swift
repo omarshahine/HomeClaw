@@ -12,6 +12,9 @@ struct List: ParsableCommand {
     @Option(name: .long, help: "Filter by category (e.g., lightbulb, lock, thermostat)")
     var category: String?
 
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
@@ -28,6 +31,7 @@ struct List: ParsableCommand {
     func run() throws {
         var args: [String: String] = [:]
         if let room { args["room"] = room }
+        if let home { args["home_id"] = home }
 
         let response = try SocketClient.send(command: "list_accessories", args: args.isEmpty ? nil : args)
 
