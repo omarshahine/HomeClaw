@@ -3743,6 +3743,24 @@ final class HomeKitManager: NSObject, Observable {
         return allowed.contains(accessory.uniqueIdentifier.uuidString)
     }
 
+    /// True when `id` names a known home by UUID or name, matching the rules
+    /// `filteredHomes` uses. An explicit home that matches nothing must be
+    /// rejected rather than silently falling back to the primary home, or a
+    /// typo in `--home` would act on a same-named accessory in another home.
+    /// Before HomeKit has loaded any homes there is nothing to check against,
+    /// so the request is let through to fail or wait as it does today.
+    func knowsHome(_ id: String) -> Bool {
+        if Self.isDemoMode {
+            return id == DemoFixtures.homeID
+                || id.localizedCaseInsensitiveCompare(DemoFixtures.homeName) == .orderedSame
+        }
+        if homes.isEmpty { return true }
+        return homes.contains {
+            $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(id) == .orderedSame
+                || $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
+        }
+    }
+
     private func filteredHomes(homeID: String?) -> [HMHome] {
         // Single home — no ambiguity
         if homes.count <= 1 { return homes }
@@ -3752,7 +3770,9 @@ final class HomeKitManager: NSObject, Observable {
 
         if let effectiveID {
             // Match by UUID first, then by name
-            let byUUID = homes.filter { $0.uniqueIdentifier.uuidString == effectiveID }
+            let byUUID = homes.filter {
+                $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(effectiveID) == .orderedSame
+            }
             if !byUUID.isEmpty { return byUUID }
 
             let byName = homes.filter { $0.name.localizedCaseInsensitiveCompare(effectiveID) == .orderedSame }
