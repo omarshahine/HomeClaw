@@ -13,7 +13,7 @@ struct Status: ParsableCommand {
         let response = try SocketClient.send(command: "status")
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

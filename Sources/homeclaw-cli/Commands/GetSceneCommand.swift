@@ -25,7 +25,7 @@ struct GetScene: ParsableCommand {
         let response = try SocketClient.send(command: "get_scene", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

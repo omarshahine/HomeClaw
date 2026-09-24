@@ -26,7 +26,7 @@ struct RemoveAccessory: ParsableCommand {
         let response = try SocketClient.sendAny(command: "remove_accessory", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

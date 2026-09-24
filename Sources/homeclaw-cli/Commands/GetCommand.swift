@@ -75,17 +75,17 @@ struct Get: ParsableCommand {
         let response = try SocketClient.send(command: "get_accessory", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         guard let detail = response.data?.value as? [String: Any] else {
-            throw ValidationError("HomeClaw returned an invalid accessory response")
+            throw CommandFailure("HomeClaw returned an invalid accessory response")
         }
         if let contractError = Self.refreshContractError(
             noRefresh: noRefresh,
             detail: detail
         ) {
-            throw ValidationError(contractError)
+            throw CommandFailure(contractError)
         }
 
         if shouldOutputJSON(json) {

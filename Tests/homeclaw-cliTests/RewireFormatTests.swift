@@ -75,9 +75,9 @@ struct RewireFormatTests {
     func warnings() {
         let lines = RewireAutomation.formatResult([
             "dry_run": true, "id": Self.autoID, "name": "Porch",
-            "warnings": ["Scene not found (add): Nope"],
+            "warnings": ["Scene not attached to this automation (remove): Nope"],
         ], fallbackName: "Porch")
-        #expect(lines.suffix(2) == ["Warnings:", "  ⚠ Scene not found (add): Nope"])
+        #expect(lines.suffix(2) == ["Warnings:", "  ⚠ Scene not attached to this automation (remove): Nope"])
     }
 
     @Test("falls back to the caller's identifier when the result has no name")

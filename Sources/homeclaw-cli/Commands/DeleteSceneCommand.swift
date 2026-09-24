@@ -29,7 +29,7 @@ struct DeleteScene: ParsableCommand {
         let response = try SocketClient.sendAny(command: "delete_scene", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

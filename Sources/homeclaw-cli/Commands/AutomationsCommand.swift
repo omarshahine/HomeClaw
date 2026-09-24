@@ -41,7 +41,7 @@ struct ListAutomations: ParsableCommand {
         let response = try SocketClient.send(command: "list_automations", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -75,13 +75,21 @@ struct ListAutomations: ParsableCommand {
 func formatSceneReferences(_ automation: [String: Any]) -> String {
     if let actionSets = automation["action_sets"] as? [[String: Any]] {
         return actionSets.map { set in
-            let name = set["name"] as? String ?? set["id"] as? String ?? "?"
+            let name = sceneDisplayName(set["name"] as? String, id: set["id"] as? String)
             let hidden = set["hidden"] as? Bool ?? false
             return hidden ? "\(name) (hidden)" : name
         }.joined(separator: ", ")
     }
     let scenes = automation["scenes"] as? [String] ?? []
-    return scenes.joined(separator: ", ")
+    return scenes.map { sceneDisplayName($0, id: nil) }.joined(separator: ", ")
+}
+
+/// Human-readable scene label. The Home app gives the hidden, trigger-owned
+/// action sets behind its button automations an empty name, so fall back to the
+/// UUID rather than printing a blank.
+func sceneDisplayName(_ name: String?, id: String?) -> String {
+    if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+    return id.map { "(unnamed \($0))" } ?? "(unnamed)"
 }
 
 // MARK: - Get
@@ -108,7 +116,7 @@ struct GetAutomation: ParsableCommand {
         let response = try SocketClient.send(command: "get_automation", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -286,7 +294,7 @@ struct CreateAutomation: ParsableCommand {
         let response = try SocketClient.sendAny(command: "create_automation", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -682,7 +690,7 @@ struct CreateTimeAutomation: ParsableCommand {
         let response = try SocketClient.sendAny(command: "create_time_automation", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -763,7 +771,7 @@ struct DeleteAutomation: ParsableCommand {
         let response = try SocketClient.sendAny(command: "delete_automation", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -809,7 +817,7 @@ struct EnableAutomation: ParsableCommand {
         let response = try SocketClient.sendAny(command: "enable_automation", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if let result = response.data?.value as? [String: Any],
@@ -841,7 +849,7 @@ struct DisableAutomation: ParsableCommand {
         let response = try SocketClient.sendAny(command: "enable_automation", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if let result = response.data?.value as? [String: Any],
@@ -897,7 +905,7 @@ struct RewireAutomation: ParsableCommand {
 
         let response = try SocketClient.sendAny(command: "update_automation", args: args)
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -1028,7 +1036,7 @@ struct AddAutomationCondition: ParsableCommand {
 
         let response = try SocketClient.sendAny(command: "add_automation_condition", args: args)
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

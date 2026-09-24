@@ -36,7 +36,7 @@ struct List: ParsableCommand {
         let response = try SocketClient.send(command: "list_accessories", args: args.isEmpty ? nil : args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         // If there's no category filter, JSON output can pass through the raw payload.

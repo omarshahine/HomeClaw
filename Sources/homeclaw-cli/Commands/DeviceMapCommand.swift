@@ -34,7 +34,7 @@ struct DeviceMapCmd: ParsableCommand {
         let response = try SocketClient.send(command: "device_map", args: args.isEmpty ? nil : args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         // Resolve effective format: --json flag, env var, or non-TTY auto-detects JSON

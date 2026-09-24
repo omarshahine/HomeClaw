@@ -2325,7 +2325,9 @@ final class HomeKitManager: NSObject, Observable {
                     resolvedAdd.append(actionSet)
                 }
             } else {
-                warnings.append("Scene not found (add): \(nameOrID)")
+                // An unknown scene is a typo, not a no-op: fail before mutating anything
+                // so a real run can't exit 0 having attached nothing.
+                throw ControlError.sceneNotFound(nameOrID)
             }
         }
 

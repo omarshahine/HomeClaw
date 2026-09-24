@@ -18,7 +18,7 @@ struct Scenes: ParsableCommand {
         let response = try SocketClient.send(command: "list_scenes", args: args.isEmpty ? nil : args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -36,12 +36,21 @@ struct Scenes: ParsableCommand {
             return
         }
 
-        for scene in scenes {
-            let name = scene["name"] as? String ?? "Unknown"
-            let type = scene["type"] as? String ?? "unknown"
-            let actionCount = scene["action_count"] as? Int ?? 0
-            print("  \(name) [\(type)] — \(actionCount) action(s)")
-        }
+        for scene in scenes { print(Self.formatLine(scene)) }
+    }
+
+    /// One text line per scene. Hidden, trigger-owned action sets often carry an
+    /// empty or opaque UUID-style name that can repeat, so they also show their
+    /// own ID; otherwise two distinct sets look like the same scene listed twice.
+    static func formatLine(_ scene: [String: Any]) -> String {
+        let id = scene["id"] as? String
+        let name = sceneDisplayName(scene["name"] as? String, id: id)
+        let type = scene["type"] as? String ?? "unknown"
+        let actionCount = scene["action_count"] as? Int ?? 0
+        let hidden = scene["hidden"] as? Bool ?? false
+        let tag = hidden ? "[\(type), hidden]" : "[\(type)]"
+        let idSuffix = hidden && !name.hasPrefix("(unnamed") ? id.map { " (\($0))" } ?? "" : ""
+        return "  \(name)\(idSuffix) \(tag) — \(actionCount) action(s)"
     }
 }
 
@@ -67,7 +76,7 @@ struct Trigger: ParsableCommand {
         let response = try SocketClient.send(command: "trigger_scene", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
