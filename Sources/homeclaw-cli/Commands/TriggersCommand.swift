@@ -29,7 +29,7 @@ struct ListTriggers: ParsableCommand {
     func run() throws {
         let response = try SocketClient.send(command: "list_triggers")
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -153,7 +153,7 @@ struct AddTrigger: ParsableCommand {
 
         let response = try SocketClient.send(command: "add_trigger", args: args)
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -189,7 +189,7 @@ struct RemoveTrigger: ParsableCommand {
         if let err = validateInput(id, label: "id") { throw ValidationError(err) }
         let response = try SocketClient.send(command: "remove_trigger", args: ["id": id])
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -284,7 +284,7 @@ struct UpdateTrigger: ParsableCommand {
 
         let response = try SocketClient.send(command: "update_trigger", args: args)
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

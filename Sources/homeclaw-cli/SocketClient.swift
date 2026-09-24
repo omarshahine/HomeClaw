@@ -1,5 +1,14 @@
 import Foundation
 
+/// A runtime failure reported by HomeClaw (not found, unreachable, HomeKit error).
+/// Unlike `ValidationError`, ArgumentParser prints only the message for this, with no
+/// usage block, and exits 1: the arguments were fine, the operation failed.
+struct CommandFailure: Error, LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
 /// Connects to the HomeClaw app via Unix domain socket.
 enum SocketClient {
     /// Socket path — uses the App Group container API (works in both sandboxed

@@ -55,7 +55,7 @@ struct Ui: ParsableCommand {
     private func fetchRooms() throws -> [RoomNode] {
         let response = try SocketClient.send(command: "list_rooms", args: nil)
         guard response.success else {
-            throw ValidationError(response.error ?? "Failed to load HomeKit data")
+            throw CommandFailure(response.error ?? "Failed to load HomeKit data")
         }
         return Self.parseRooms((response.data?.value as? [[String: Any]]) ?? [])
     }

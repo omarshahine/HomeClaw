@@ -450,10 +450,23 @@ enum AccessoryModel {
             dict["event_summary"] = summary
             dict["trigger_type"] = "significant_time"
         }
+        // Presence event ("when the first person arrives home").
+        else if let presenceEvent = trigger.events.first as? HMPresenceEvent {
+            dict["event_summary"] = presenceSummary(presenceEvent)
+            dict["trigger_type"] = "presence"
+        }
+        // No events at all. HomeKit drops an event whose accessory was removed from
+        // the home, leaving a trigger that can never fire. Common after re-pairing a
+        // button: the old per-press automations survive with their scenes attached.
+        else if trigger.events.isEmpty {
+            dict["event_summary"] = "no trigger event (the device it watched was likely removed); this automation never fires"
+            dict["trigger_type"] = "orphaned"
+        }
         // Unrecognized HMEvent subclass — keep schema's "unknown" contract
         // consistent with `triggerSummary`'s fallback for non-HMEventTrigger triggers.
         else {
             dict["trigger_type"] = "unknown"
+            dict["event_classes"] = trigger.events.map { String(describing: type(of: $0)) }
         }
 
         // Surface auto-off duration (HMDurationEvent in endEvents).
@@ -497,6 +510,32 @@ enum AccessoryModel {
         case let (min?, nil): return "≥ \(min)"
         case let (nil, max?): return "≤ \(max)"
         default: return "in range"
+        }
+    }
+
+    /// "when the first person arrives", "when I leave", etc.
+    static func presenceSummary(_ event: HMPresenceEvent) -> String {
+        let arriving: Bool
+        let boundary: String  // "" for every entry/exit, else "first"/"last"
+        switch event.presenceEventType {
+        case .everyEntry: (arriving, boundary) = (true, "")
+        case .everyExit: (arriving, boundary) = (false, "")
+        case .firstEntry: (arriving, boundary) = (true, "first")
+        case .lastExit: (arriving, boundary) = (false, "last")
+        @unknown default: return "on presence change"
+        }
+        let verb = arriving ? "arrives" : "leaves"
+        switch event.presenceUserType {
+        case .currentUser:
+            return arriving ? "when I arrive" : "when I leave"
+        case .customUsers:
+            return boundary.isEmpty
+                ? "when a selected person \(verb)"
+                : "when the \(boundary) selected person \(verb)"
+        case .homeUsers:
+            return boundary.isEmpty ? "when anyone \(verb)" : "when the \(boundary) person \(verb)"
+        @unknown default:
+            return boundary.isEmpty ? "when someone \(verb)" : "when the \(boundary) person \(verb)"
         }
     }
 
@@ -572,6 +611,14 @@ enum AccessoryModel {
                     eventDict["service_index"] = idx
                 }
                 return eventDict
+            }
+
+            if let presenceEvent = event as? HMPresenceEvent {
+                return [
+                    "type": "presence",
+                    "trigger_type": "presence",
+                    "summary": presenceSummary(presenceEvent),
+                ]
             }
 
             return nil

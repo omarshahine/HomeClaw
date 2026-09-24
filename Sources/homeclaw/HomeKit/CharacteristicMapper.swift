@@ -58,6 +58,14 @@ enum CharacteristicMapper {
         HMCharacteristicTypeVolume: "volume",
         HMCharacteristicTypeMute: "mute",
         HMCharacteristicTypeLockPhysicalControls: "lock_physical_controls",
+        // Accessory Information service. HAP UUIDs spelled out because the matching
+        // HMCharacteristicType constants are deprecated in favor of HMAccessory properties.
+        "00000020-0000-1000-8000-0026BB765291": "manufacturer",
+        "00000021-0000-1000-8000-0026BB765291": "model",
+        "00000030-0000-1000-8000-0026BB765291": "serial_number",
+        "00000052-0000-1000-8000-0026BB765291": "firmware_version",
+        "00000053-0000-1000-8000-0026BB765291": "hardware_version",
+        "00000054-0000-1000-8000-0026BB765291": "software_version",
     ]
 
     /// Returns a human-readable name for a characteristic type UUID.
@@ -117,6 +125,12 @@ enum CharacteristicMapper {
         "temperature_units",
         "identify",
         "name",
+        "manufacturer",
+        "model",
+        "serial_number",
+        "firmware_version",
+        "hardware_version",
+        "software_version",
     ]
 
     /// Returns true if a characteristic name (snake_case) represents observable state

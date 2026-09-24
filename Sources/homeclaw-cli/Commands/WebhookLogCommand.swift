@@ -30,7 +30,7 @@ struct WebhookLog: ParsableCommand {
 
             let response = try SocketClient.send(command: "webhook_log", args: args)
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
 
             if shouldOutputJSON(json) {
@@ -119,7 +119,7 @@ struct WebhookLog: ParsableCommand {
         func run() throws {
             let response = try SocketClient.send(command: "webhook_log_stats")
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
 
             if shouldOutputJSON(json) {
@@ -149,7 +149,7 @@ struct WebhookLog: ParsableCommand {
         func run() throws {
             let response = try SocketClient.send(command: "purge_webhook_log")
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
             print("Webhook log purged.")
         }

@@ -585,7 +585,7 @@ enum DemoFixtures {
                     toAdd.append(scene)
                 }
             } else {
-                warnings.append("Scene not found (add): \(query)")
+                throw HomeKitManager.ControlError.sceneNotFound(query)
             }
         }
         var toRemove: [String] = []

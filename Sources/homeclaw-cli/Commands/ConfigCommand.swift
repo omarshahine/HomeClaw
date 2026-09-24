@@ -56,7 +56,7 @@ struct Config: ParsableCommand {
         if webhookReset {
             let response = try SocketClient.send(command: "webhook_reset")
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
             if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
@@ -78,14 +78,14 @@ struct Config: ParsableCommand {
                 }
             }
             guard let homeID = primaryID else {
-                throw ValidationError("No homes available")
+                throw CommandFailure("No homes available")
             }
             let response = try SocketClient.send(
                 command: "set_config",
                 args: ["default_home_id": homeID]
             )
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
             if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
@@ -120,7 +120,7 @@ struct Config: ParsableCommand {
             }
             let response = try SocketClient.send(command: "set_webhook", args: args)
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
             if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
@@ -157,7 +157,7 @@ struct Config: ParsableCommand {
 
             let response = try SocketClient.sendAny(command: "set_config", args: args)
             guard response.success else {
-                throw ValidationError(response.error ?? "Unknown error")
+                throw CommandFailure(response.error ?? "Unknown error")
             }
             if shouldOutputJSON(json) {
                 printJSON(response.data?.value)
@@ -173,7 +173,7 @@ struct Config: ParsableCommand {
         // Show current config
         let response = try SocketClient.send(command: "get_config")
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
@@ -240,7 +240,7 @@ struct Config: ParsableCommand {
         // Get all accessories (unfiltered)
         let allResponse = try SocketClient.send(command: "list_all_accessories")
         guard allResponse.success else {
-            throw ValidationError(allResponse.error ?? "Unknown error")
+            throw CommandFailure(allResponse.error ?? "Unknown error")
         }
 
         // Get current config for allowed IDs
@@ -295,7 +295,7 @@ struct Config: ParsableCommand {
     private func runWebhookTest() throws {
         let response = try SocketClient.send(command: "webhook_test")
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {

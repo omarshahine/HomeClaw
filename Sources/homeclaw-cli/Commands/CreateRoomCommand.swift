@@ -26,7 +26,7 @@ struct CreateRoom: ParsableCommand {
         let response = try SocketClient.sendAny(command: "create_room", args: args)
 
         guard response.success else {
-            throw ValidationError(response.error ?? "Unknown error")
+            throw CommandFailure(response.error ?? "Unknown error")
         }
 
         if shouldOutputJSON(json) {
