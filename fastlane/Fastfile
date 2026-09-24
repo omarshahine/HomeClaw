@@ -358,7 +358,7 @@ platform :ios do
 
     # The bundle goes into the app, so it must match the committed source.
     dist = "mcp-server/dist/server.js"
-    unless system("git", "-C", PROJECT_ROOT, "diff", "--quiet", "--", dist)
+    unless system("git", "-C", PROJECT_ROOT, "diff", "--quiet", "HEAD", "--", dist)
       UI.user_error!("#{dist} differs from the committed bundle after a clean build. " \
                      "Commit the rebuilt bundle (via PR) before releasing.")
     end
