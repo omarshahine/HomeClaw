@@ -219,8 +219,11 @@ final class StreamableHTTPReviewRegressionTests: XCTestCase {
         }
 
         XCTAssertEqual(result, "done")
-        for _ in 0..<100 where MCPServer.testActiveTimeoutSleeperCount != 0 {
-            await Task.yield()
+        // The cancelled sleeper unwinds on another executor; a fixed number of yields
+        // isn't enough on a loaded CI runner, so poll against a wall-clock deadline.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while MCPServer.testActiveTimeoutSleeperCount != 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
         }
         XCTAssertEqual(MCPServer.testActiveTimeoutSleeperCount, 0)
     }

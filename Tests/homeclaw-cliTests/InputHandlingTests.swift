@@ -138,7 +138,7 @@ struct FormatSceneReferencesTests {
                 ["id": "A", "name": "9EDAED55-98B1-54E2-B865-2BEF24949DD3", "action_count": 2, "hidden": true]
             ]
         ]
-        #expect(formatSceneReferences(auto) == "9EDAED55-98B1-54E2-B865-2BEF24949DD3 (hidden)")
+        #expect(formatSceneReferences(auto) == "9EDAED55-98B1-54E2-B865-2BEF24949DD3 (A) (hidden)")
     }
 
     @Test("falls back to legacy scenes name array")

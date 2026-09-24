@@ -51,12 +51,60 @@ struct SceneDisplayTests {
     }
 }
 
+@Suite("Automation get rendering")
+struct AutomationGetRenderingTests {
+    @Test("presence events print their summary, not '?: ?'")
+    func presence() {
+        let line = GetAutomation.formatEventLine([
+            "type": "presence", "trigger_type": "presence", "summary": "when the first person arrives",
+        ])
+        #expect(line == "  when the first person arrives")
+    }
+
+    @Test("button events keep the press and button index")
+    func button() {
+        let line = GetAutomation.formatEventLine([
+            "type": "characteristic", "trigger_type": "button", "accessory": "Kitchen Remote",
+            "press_type": "single_press", "service_index": 2,
+        ])
+        #expect(line == "  Kitchen Remote: single_press (button 2)")
+    }
+
+    @Test("sensor and threshold events show what they watch")
+    func sensors() {
+        #expect(GetAutomation.formatEventLine([
+            "type": "characteristic", "trigger_type": "characteristic", "accessory": "Gate",
+            "characteristic": "contact_state", "trigger_value": "open",
+        ]) == "  Gate: contact_state = open")
+        #expect(GetAutomation.formatEventLine([
+            "type": "threshold", "trigger_type": "threshold", "accessory": "Porch",
+            "characteristic": "current_light_level", "summary": "≤ 15 lux",
+        ]) == "  Porch: current_light_level ≤ 15 lux")
+    }
+
+    @Test("hidden scenes with the same opaque name are told apart by ID")
+    func hiddenLabelsCarryID() {
+        let a = sceneLabel(["id": "AAAA", "name": "BC1D50D7", "hidden": true])
+        let b = sceneLabel(["id": "BBBB", "name": "BC1D50D7", "hidden": true])
+        #expect(a == "BC1D50D7 (AAAA)")
+        #expect(a != b)
+        #expect(sceneLabel(["id": "AAAA", "name": "Morning Blinds"]) == "Morning Blinds")
+    }
+}
+
 @Suite("CommandFailure")
 struct CommandFailureTests {
-    @Test("runtime failures carry only the message, so no usage block is printed")
-    func messageOnly() {
-        let error: Error = CommandFailure("Accessory not found: Lamp")
-        #expect(error.localizedDescription == "Accessory not found: Lamp")
-        #expect(!(error is ValidationError))
+    @Test("runtime failures print only the message and exit 1")
+    func runtimeFailure() {
+        let error = CommandFailure("Accessory not found: Lamp")
+        #expect(HomeKitCLI.fullMessage(for: error) == "Error: Accessory not found: Lamp")
+        #expect(HomeKitCLI.exitCode(for: error) == .failure)
+    }
+
+    @Test("argument errors still carry usage and exit 64")
+    func validationError() {
+        let error = ValidationError("--duration must be a positive integer")
+        #expect(HomeKitCLI.fullMessage(for: error).contains("Usage:"))
+        #expect(HomeKitCLI.exitCode(for: error) == .validationFailure)
     }
 }

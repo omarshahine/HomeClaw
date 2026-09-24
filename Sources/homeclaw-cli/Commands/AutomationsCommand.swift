@@ -75,13 +75,21 @@ struct ListAutomations: ParsableCommand {
 func formatSceneReferences(_ automation: [String: Any]) -> String {
     if let actionSets = automation["action_sets"] as? [[String: Any]] {
         return actionSets.map { set in
-            let name = sceneDisplayName(set["name"] as? String, id: set["id"] as? String)
             let hidden = set["hidden"] as? Bool ?? false
-            return hidden ? "\(name) (hidden)" : name
+            return hidden ? "\(sceneLabel(set)) (hidden)" : sceneLabel(set)
         }.joined(separator: ", ")
     }
     let scenes = automation["scenes"] as? [String] ?? []
     return scenes.map { sceneDisplayName($0, id: nil) }.joined(separator: ", ")
+}
+
+/// Label for a scene row or reference. Hidden sets also carry their UUID, since
+/// the Home app's opaque names for them can repeat across distinct sets.
+func sceneLabel(_ scene: [String: Any]) -> String {
+    let id = scene["id"] as? String
+    let name = sceneDisplayName(scene["name"] as? String, id: id)
+    guard scene["hidden"] as? Bool ?? false, !name.hasPrefix("(unnamed"), let id else { return name }
+    return "\(name) (\(id))"
 }
 
 /// Human-readable scene label. The Home app gives the hidden, trigger-owned
@@ -138,14 +146,11 @@ struct GetAutomation: ParsableCommand {
 
         if let events = result["events"] as? [[String: Any]] {
             print("\nEvents:")
-            for event in events {
-                let accessory = event["accessory"] as? String ?? "?"
-                let pressType = event["press_type"] as? String ?? "?"
-                let serviceIndex = event["service_index"] as? Int
-                var line = "  \(accessory): \(pressType)"
-                if let idx = serviceIndex { line += " (button \(idx))" }
-                print(line)
+            if events.isEmpty, let summary = result["event_summary"] as? String {
+                // Orphaned triggers have no events; the summary says why.
+                print("  (none: \(summary))")
             }
+            for event in events { print(Self.formatEventLine(event)) }
         }
 
         if let actionSets = result["action_sets"] as? [[String: Any]] {
@@ -154,13 +159,33 @@ struct GetAutomation: ParsableCommand {
                 print("  (none)")
             }
             for scene in actionSets {
-                let sceneName = scene["name"] as? String ?? "?"
                 let actionCount = scene["action_count"] as? Int ?? 0
                 let hidden = scene["hidden"] as? Bool ?? false
-                var line = "  \(sceneName) (\(actionCount) action(s))"
+                var line = "  \(sceneLabel(scene)) (\(actionCount) action(s))"
                 if hidden { line += " [hidden]" }
                 print(line)
             }
+        }
+    }
+
+    /// One `Events:` line per event, shaped by the event's `type`: buttons show the
+    /// press, sensors the watched value, presence and threshold events their summary.
+    static func formatEventLine(_ event: [String: Any]) -> String {
+        let accessory = event["accessory"] as? String
+        let characteristic = event["characteristic"] as? String ?? "?"
+        switch (event["type"] as? String, event["trigger_type"] as? String) {
+        case (_, "button"):
+            var line = "  \(accessory ?? "?"): \(event["press_type"] as? String ?? "any press")"
+            if let idx = event["service_index"] as? Int { line += " (button \(idx))" }
+            return line
+        case ("characteristic", _):
+            let value = event["trigger_value"].map { "\($0)" } ?? "?"
+            return "  \(accessory ?? "?"): \(characteristic) = \(value)"
+        case ("threshold", _):
+            return "  \(accessory ?? "?"): \(characteristic) \(event["summary"] as? String ?? "")"
+        default:
+            let summary = event["summary"] as? String ?? event["type"] as? String ?? "unrecognized event"
+            return accessory.map { "  \($0): \(summary)" } ?? "  \(summary)"
         }
     }
 }

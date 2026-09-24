@@ -43,14 +43,10 @@ struct Scenes: ParsableCommand {
     /// empty or opaque UUID-style name that can repeat, so they also show their
     /// own ID; otherwise two distinct sets look like the same scene listed twice.
     static func formatLine(_ scene: [String: Any]) -> String {
-        let id = scene["id"] as? String
-        let name = sceneDisplayName(scene["name"] as? String, id: id)
         let type = scene["type"] as? String ?? "unknown"
         let actionCount = scene["action_count"] as? Int ?? 0
-        let hidden = scene["hidden"] as? Bool ?? false
-        let tag = hidden ? "[\(type), hidden]" : "[\(type)]"
-        let idSuffix = hidden && !name.hasPrefix("(unnamed") ? id.map { " (\($0))" } ?? "" : ""
-        return "  \(name)\(idSuffix) \(tag) — \(actionCount) action(s)"
+        let tag = scene["hidden"] as? Bool ?? false ? "[\(type), hidden]" : "[\(type)]"
+        return "  \(sceneLabel(scene)) \(tag) — \(actionCount) action(s)"
     }
 }
 
