@@ -347,8 +347,21 @@ platform :ios do
     UI.message("Generating Xcode project...")
     sh("cd #{Shellwords.escape(PROJECT_ROOT)} && xcodegen generate --use-cache", log: false)
 
+    # npm ci, not the existing node_modules: a stale install silently bundles
+    # different dependency versions into the shipped mcp-server.js (build 196
+    # shipped MCP SDK 1.27.1 against a 1.30.0 lockfile).
+    UI.message("Installing locked npm dependencies...")
+    sh("cd #{Shellwords.escape(PROJECT_ROOT)} && npm ci --no-audit --no-fund", log: false)
+
     UI.message("Building MCP server...")
     sh("cd #{Shellwords.escape(PROJECT_ROOT)} && npm run build:mcp", log: false)
+
+    # The bundle goes into the app, so it must match the committed source.
+    dist = "mcp-server/dist/server.js"
+    unless system("git", "-C", PROJECT_ROOT, "diff", "--quiet", "--", dist)
+      UI.user_error!("#{dist} differs from the committed bundle after a clean build. " \
+                     "Commit the rebuilt bundle (via PR) before releasing.")
+    end
 
     verify_homekit_entitlement!
   end
