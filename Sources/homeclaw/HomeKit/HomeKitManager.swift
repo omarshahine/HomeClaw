@@ -470,10 +470,10 @@ final class HomeKitManager: NSObject, Observable {
     ///   number, model, firmware, manufacturer) never needs a live read, so a
     ///   non-refreshing get is instant — the right choice for whole-home metadata
     ///   sweeps that otherwise trigger the per-call ballooning in issue #66.
-    func getAccessory(id: String, homeID: String? = nil, refresh: Bool = true) async -> [String: Any]? {
+    func getAccessory(id: String, homeID: String? = nil, refresh: Bool = true) async throws -> [String: Any]? {
         await waitForReady()
         if Self.isDemoMode { return DemoFixtures.accessoryDetail(id: id, refresh: refresh) }
-        guard let accessory = findAccessory(id: id, homeID: homeID) else { return nil }
+        guard let accessory = try findAccessory(id: id, homeID: homeID) else { return nil }
         guard isAccessoryAllowed(accessory) else { return nil }
         let readReport: AccessoryReadReport?
         if refresh {
@@ -523,6 +523,9 @@ final class HomeKitManager: NSObject, Observable {
         /// Name matched more than one automation. Payload: the query and a
         /// pre-rendered candidate list (one "name (UUID)" per line).
         case ambiguousTrigger(String, String)
+        /// Name matched more than one visible accessory. Payload: the query and a
+        /// pre-rendered candidate list (one "name (room, UUID)" per line).
+        case ambiguousAccessory(String, String)
         /// Operation needs an HMEventTrigger but the resolved automation is some
         /// other HMTrigger subclass (e.g. a timer automation from the Home app).
         case unsupportedTriggerType(String)
@@ -554,6 +557,12 @@ final class HomeKitManager: NSObject, Observable {
                 """
                 Ambiguous: '\(name)' matches multiple automations. \
                 Pass the automation UUID instead:
+                \(options)
+                """
+            case .ambiguousAccessory(let name, let options):
+                """
+                Ambiguous: '\(name)' matches multiple accessories. \
+                Pass the accessory UUID instead:
                 \(options)
                 """
             case .unsupportedTriggerType(let detail): detail
@@ -595,7 +604,7 @@ final class HomeKitManager: NSObject, Observable {
             return result
         }
 
-        guard let accessory = findAccessory(id: id, homeID: homeID) else {
+        guard let accessory = try findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
         }
         guard isAccessoryAllowed(accessory) else {
@@ -994,12 +1003,25 @@ final class HomeKitManager: NSObject, Observable {
             let accessory: HMAccessory?
             let identifier: String
             if let uuidStr = entry["uuid"] {
-                accessory = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == uuidStr })
+                accessory = home.accessories.first(where: {
+                    $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(uuidStr) == .orderedSame
+                })
                 identifier = uuidStr
             } else if let accessoryName = entry["accessory"] {
-                accessory = home.accessories.first(where: {
-                    $0.name.localizedCaseInsensitiveCompare(accessoryName) == .orderedSame
-                })
+                // A duplicate name is skipped and reported, never resolved to
+                // whichever accessory HomeKit enumerates first.
+                do {
+                    accessory = try findAccessoryByName(accessoryName, room: nil, in: home)
+                } catch {
+                    skipped += 1
+                    details.append([
+                        "accessory": accessoryName,
+                        "room": targetRoomName,
+                        "status": "ambiguous",
+                        "error": error.localizedDescription,
+                    ])
+                    continue
+                }
                 identifier = accessoryName
             } else {
                 skipped += 1
@@ -1084,7 +1106,7 @@ final class HomeKitManager: NSObject, Observable {
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        guard let accessory = findAccessory(id: id, homeID: homeID) else {
+        guard let accessory = try findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
         }
 
@@ -1228,7 +1250,7 @@ final class HomeKitManager: NSObject, Observable {
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        guard let accessory = findAccessory(id: id, homeID: homeID) else {
+        guard let accessory = try findAccessory(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
         }
 
@@ -1467,7 +1489,7 @@ final class HomeKitManager: NSObject, Observable {
         }
         let home = try resolveHome(homeID: homeID)
 
-        guard let accessory = findAccessory(id: accessoryID, homeID: homeID) else {
+        guard let accessory = try findAccessory(id: accessoryID, homeID: homeID) else {
             throw ControlError.accessoryNotFound(accessoryID)
         }
 
@@ -2096,7 +2118,7 @@ final class HomeKitManager: NSObject, Observable {
             let condAccessory: HMAccessory
             if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(condAccessoryID) == .orderedSame }) {
                 condAccessory = found
-            } else if let found = findAccessoryByName(condAccessoryID, room: condRoom, in: home) {
+            } else if let found = try findAccessoryByName(condAccessoryID, room: condRoom, in: home) {
                 condAccessory = found
             } else {
                 throw ControlError.accessoryNotFound(condAccessoryID)
@@ -2229,6 +2251,8 @@ final class HomeKitManager: NSObject, Observable {
                 accessory = a
             case .notFound(let identifier, let roomName):
                 throw ControlError.accessoryNotFound(identifier + (roomName.map { " in \($0)" } ?? ""))
+            case .ambiguous(let error):
+                throw error
             case .missingReference:
                 throw ControlError.writeFailed("Action missing accessory reference (need accessory_id or accessory): \(action)")
             }
@@ -2499,7 +2523,7 @@ final class HomeKitManager: NSObject, Observable {
         if let found = home.accessories.first(where: { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(trimmedAccessoryID) == .orderedSame }) {
             condAccessory = found
             roomScopedLookup = false
-        } else if let found = findAccessoryByName(trimmedAccessoryID, room: trimmedRoom, in: home) {
+        } else if let found = try findAccessoryByName(trimmedAccessoryID, room: trimmedRoom, in: home) {
             condAccessory = found
             roomScopedLookup = (trimmedRoom != nil)
         } else {
@@ -2837,6 +2861,9 @@ final class HomeKitManager: NSObject, Observable {
             case .notFound(let identifier, let roomName):
                 warnings.append("Accessory not found: \(identifier)" + (roomName.map { " in \($0)" } ?? ""))
                 continue
+            case .ambiguous(let error):
+                warnings.append("Skipping action: \(error.localizedDescription)")
+                continue
             case .missingReference:
                 warnings.append("Skipping action with no accessory reference: \(action)")
                 continue
@@ -2978,6 +3005,9 @@ final class HomeKitManager: NSObject, Observable {
                 accessory = a
             case .notFound(let identifier, let roomName):
                 warnings.append("Accessory not found: \(identifier)" + (roomName.map { " in \($0)" } ?? ""))
+                continue
+            case .ambiguous(let error):
+                warnings.append("Skipping action: \(error.localizedDescription)")
                 continue
             case .missingReference:
                 warnings.append("Skipping action with no accessory reference: \(action)")
@@ -3160,6 +3190,8 @@ final class HomeKitManager: NSObject, Observable {
     enum ActionAccessoryLookup {
         case found(HMAccessory)
         case notFound(identifier: String, room: String?)
+        /// Name (and room, if given) matched several visible accessories.
+        case ambiguous(ControlError)
         case missingReference
     }
 
@@ -3190,24 +3222,28 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         let roomName = action["room"]
-        if let found = findAccessoryByName(identifier, room: roomName, in: home) {
-            return .found(found)
+        do {
+            if let found = try findAccessoryByName(identifier, room: roomName, in: home) {
+                return .found(found)
+            }
+        } catch let error as ControlError {
+            return .ambiguous(error)
+        } catch {
+            return .notFound(identifier: identifier, room: roomName)
         }
         return .notFound(identifier: identifier, room: roomName)
     }
 
     /// Find an accessory by name and optional room within a specific home.
-    private func findAccessoryByName(_ name: String, room roomName: String?, in home: HMHome) -> HMAccessory? {
-        for accessory in home.accessories {
-            guard accessory.name.localizedCaseInsensitiveCompare(name) == .orderedSame else { continue }
-            if let roomName {
-                guard let room = accessory.room,
-                      room.name.localizedCaseInsensitiveCompare(roomName) == .orderedSame
-                else { continue }
-            }
-            return accessory
+    /// Throws `.ambiguousAccessory` when the name (and room, if given) still
+    /// matches more than one visible accessory.
+    private func findAccessoryByName(_ name: String, room roomName: String?, in home: HMHome) throws -> HMAccessory? {
+        let matches = home.accessories.filter { accessory in
+            guard accessory.name.localizedCaseInsensitiveCompare(name) == .orderedSame else { return false }
+            guard let roomName else { return true }
+            return accessory.room?.name.localizedCaseInsensitiveCompare(roomName) == .orderedSame
         }
-        return nil
+        return try uniqueAccessory(named: name, among: matches)
     }
 
     /// Find a characteristic on an accessory by its manufacturer description (human-readable name).
@@ -3809,24 +3845,51 @@ final class HomeKitManager: NSObject, Observable {
         homes.first { $0.accessories.contains(where: { $0.uniqueIdentifier == accessory.uniqueIdentifier }) }
     }
 
-    private func findAccessory(id: String, homeID: String? = nil) -> HMAccessory? {
-        let targetHomes = filteredHomes(homeID: homeID)
+    /// Resolve an accessory by UUID (case-insensitive) or exact name. A name that
+    /// matches more than one visible accessory throws `.ambiguousAccessory` rather
+    /// than acting on whichever HomeKit enumerates first: duplicate names are
+    /// common after a re-pair, and every write path resolves through here.
+    private func findAccessory(id: String, homeID: String? = nil) throws -> HMAccessory? {
+        let accessories = filteredHomes(homeID: homeID).flatMap(\.accessories)
+        if let byID = accessories.first(where: {
+            $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(id) == .orderedSame
+        }) {
+            return byID
+        }
+        return try uniqueAccessory(
+            named: id, among: accessories.filter { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame })
+    }
 
-        // Try UUID first (within target homes)
-        for home in targetHomes {
-            if let accessory = home.accessories.first(where: { $0.uniqueIdentifier.uuidString == id }) {
-                return accessory
-            }
+    /// Pick the single visible accessory among same-name `matches`. Several visible
+    /// matches are ambiguous. Filter-hidden accessories never appear in candidate
+    /// lists; a lone hidden match is returned so callers' `isAccessoryAllowed`
+    /// check reports it as not found, exactly as before.
+    private func uniqueAccessory(named query: String, among matches: [HMAccessory]) throws -> HMAccessory? {
+        switch Self.pickVisibleMatch(matches, isVisible: { isAccessoryAllowed($0) }) {
+        case .found(let accessory): return accessory
+        case .ambiguous(let visible): throw ControlError.ambiguousAccessory(query, Self.accessoryCandidates(visible))
+        case .notFound: return nil
         }
-        // Try name match (within target homes)
-        for home in targetHomes {
-            if let accessory = home.accessories.first(where: {
-                $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame
-            }) {
-                return accessory
-            }
+    }
+
+    /// Choose among same-name matches: exactly one visible match wins; several
+    /// visible matches are ambiguous (and list only visible candidates); with no
+    /// visible match, the first hidden one is returned for the caller to reject.
+    nonisolated static func pickVisibleMatch<T>(_ matches: [T], isVisible: (T) -> Bool) -> IdentifierMatch<T> {
+        let visible = matches.filter(isVisible)
+        switch visible.count {
+        case 0: return matches.first.map { .found($0) } ?? .notFound
+        case 1: return .found(visible[0])
+        default: return .ambiguous(visible)
         }
-        return nil
+    }
+
+    /// "name (room, UUID)" lines for an accessory ambiguity error.
+    private static func accessoryCandidates(_ accessories: [HMAccessory]) -> String {
+        formatCandidates(accessories.map { accessory in
+            let room = accessory.room?.name ?? "Default Room"
+            return ("\(accessory.name) — \(room)", accessory.uniqueIdentifier.uuidString)
+        })
     }
 
     /// Identifying details for a single service, used to disambiguate characteristics
