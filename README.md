@@ -518,7 +518,7 @@ The `import-scene` command accepts a JSON file defining a scene and its actions:
 
 Action objects also accept `characteristic` as an alias for `property` (read commands emit `characteristic`, so their output round-trips as input).
 
-The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan):
+The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan). A name that matches several accessories is skipped with status `ambiguous` rather than guessed. Every other command that takes an accessory name (including scene import/update actions and automation conditions) fails on a duplicate before changing anything, and lists each match's room and UUID:
 
 ```json
 [
