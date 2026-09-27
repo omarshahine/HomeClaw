@@ -528,6 +528,8 @@ final class HomeKitManager: NSObject, Observable {
         case unsupportedTriggerType(String)
         case sceneNotFound(String)
         case serviceNotFound(String)
+        /// Service selectors matched more than one service. Payload: pre-rendered detail.
+        case ambiguousService(String)
         case invalidArgument(String)
         case writeNotApplied(String)
 
@@ -559,6 +561,7 @@ final class HomeKitManager: NSObject, Observable {
             case .unsupportedTriggerType(let detail): detail
             case .sceneNotFound(let id): "Scene not found: \(id)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
+            case .ambiguousService(let detail): "Ambiguous: \(detail)"
             case .invalidArgument(let detail): "Invalid argument: \(detail)"
             case .writeNotApplied(let detail):
                 "Write not applied: \(detail). Pass verify=false to accept unconfirmed writes."
@@ -1070,22 +1073,69 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
+    /// Renames an accessory, or one of its services.
+    ///
+    /// With no service selector, renames the accessory plus its primary service (the
+    /// Home app tile title). With a selector — or when `id` is a service UUID — renames
+    /// only that service, which is how a second gang's "Switch 2" tile on a multi-gang
+    /// accessory gets its own name. That writes the home's service name, so it works
+    /// even where the accessory reports its HAP Name characteristic as read-only.
     func renameAccessory(
         id: String,
         newName: String,
         homeID: String? = nil,
+        serviceType: String? = nil,
+        serviceName: String? = nil,
+        serviceID: String? = nil,
+        serviceIndex: Int? = nil,
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        let hasServiceSelector = serviceType != nil || serviceName != nil || serviceID != nil || serviceIndex != nil
         if Self.isDemoMode {
+            if hasServiceSelector {
+                throw ControlError.invalidArgument("service-level rename is not available in demo mode")
+            }
             guard let result = DemoFixtures.renameAccessory(id: id, newName: newName, dryRun: dryRun) else {
                 throw ControlError.accessoryNotFound(id)
             }
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        guard let accessory = findAccessory(id: id, homeID: homeID) else {
+        guard let target = findServiceTarget(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
+        }
+        let accessory = target.accessory
+
+        if hasServiceSelector || target.service != nil {
+            // Service-level rename is new surface, so it honours the device filter like
+            // control and set_display_as; the accessory-level path below predates it.
+            guard isAccessoryAllowed(accessory) else {
+                throw ControlError.accessoryNotFound(id)
+            }
+            let candidates = (target.service.map { [$0] } ?? accessory.services)
+                .filter { $0.serviceType != HMServiceTypeAccessoryInformation }
+            let service = try selectService(
+                on: accessory, from: candidates, purpose: "that can be renamed",
+                type: serviceType, name: serviceName, id: serviceID, index: serviceIndex
+            )
+            let oldServiceName = service.name
+            var result: [String: Any] = [
+                "accessory": accessory.name,
+                "service": ServiceDescriptor(service).dictionary,
+                "old_name": oldServiceName,
+                "new_name": newName,
+                "home": home.name,
+            ]
+            if dryRun {
+                result["dry_run"] = true
+                return result
+            }
+            try await homeKitAsync { service.updateName(newName, completionHandler: $0) }
+            AppLogger.homekit.info("[\(home.name)] Renamed service '\(oldServiceName)' on '\(accessory.name)' → '\(newName)'")
+            result["services_renamed"] = 1
+            result["dry_run"] = false
+            return result
         }
 
         let oldName = accessory.name
@@ -1126,6 +1176,381 @@ final class HomeKitManager: NSObject, Observable {
             "services_renamed": renamedServices.count,
             "dry_run": false
         ] as [String: Any]
+    }
+
+    /// Sets the Home app's "Display As" for a switch or outlet service: what the
+    /// switch controls ("light", "fan") or the service's own type ("switch" /
+    /// "outlet", also accepted as "default"). Writes the service's associated
+    /// service type in the home, as the Home app does.
+    ///
+    /// Only switch and outlet services support this, and the accessory's category
+    /// is unaffected — HomeKit exposes no public way to change either.
+    func setDisplayAs(
+        id: String,
+        displayAs: String,
+        homeID: String? = nil,
+        serviceType: String? = nil,
+        serviceName: String? = nil,
+        serviceID: String? = nil,
+        serviceIndex: Int? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode {
+            throw ControlError.invalidArgument("display_as is not available in demo mode")
+        }
+        let home = try resolveHome(homeID: homeID)
+        guard let target = findServiceTarget(id: id, homeID: homeID),
+              isAccessoryAllowed(target.accessory)
+        else {
+            throw ControlError.accessoryNotFound(id)
+        }
+        let accessory = target.accessory
+
+        let candidates = target.service.map { [$0] }
+            ?? accessory.services.filter { AccessoryModel.supportsDisplayAs($0) }
+        let service = try selectService(
+            on: accessory, from: candidates, purpose: "that supports Display As (switch or outlet)",
+            type: serviceType, name: serviceName, id: serviceID, index: serviceIndex
+        )
+        guard let own = AccessoryModel.ownDisplayAs(serviceType: service.serviceType) else {
+            throw ControlError.invalidArgument(
+                "Display As only applies to switch and outlet services; '\(service.name)' is \(CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType)"
+            )
+        }
+        guard let newType = AccessoryModel.associatedServiceType(forDisplayAs: displayAs, serviceType: service.serviceType) else {
+            throw ControlError.invalidArgument(
+                "display_as must be light, fan, or \(own) for '\(service.name)' (a \(own) can show as itself, a light, or a fan)"
+            )
+        }
+
+        let newDisplayAs = newType.map(AccessoryModel.displayAsName(forAssociatedType:)) ?? own
+        var result: [String: Any] = [
+            "accessory": accessory.name,
+            "service": ServiceDescriptor(service).dictionary,
+            "old_display_as": AccessoryModel.displayAs(of: service) ?? own,
+            "new_display_as": newDisplayAs,
+            "home": home.name,
+        ]
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+        try await homeKitAsync { service.updateAssociatedServiceType(newType, completionHandler: $0) }
+        AppLogger.homekit.info("[\(home.name)] Display As for '\(service.name)' on '\(accessory.name)' → \(newDisplayAs)")
+        result["dry_run"] = false
+        return result
+    }
+
+    // MARK: - Service Groups
+
+    // A Home app accessory group ("Group with Other Accessories") is an HMServiceGroup:
+    // a named set of services the Home app shows as one tile and Siri controls as one.
+    // Members are services, so one gang of a multi-gang accessory can join on its own.
+
+    /// Lists the home's service groups and their members. A group with any member
+    /// on an accessory the device filter hides is left out entirely (neither its name
+    /// nor its members are shown) and only counted in `hidden_groups`.
+    func listServiceGroups(homeID: String? = nil) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode { return ["groups": [] as [[String: Any]]] }
+        let home = try resolveHome(homeID: homeID)
+        let visible = home.serviceGroups.filter { isGroupVisible($0) }
+        var result: [String: Any] = [
+            "home": home.name,
+            "groups": visible.map { serviceGroupDictionary($0) },
+        ]
+        let hidden = home.serviceGroups.count - visible.count
+        if hidden > 0 { result["hidden_groups"] = hidden }
+        return result
+    }
+
+    /// Creates a service group with `members` (accessory names/UUIDs or service UUIDs).
+    /// Members must all be the same kind unless `allowMixed`. If HomeKit rejects a
+    /// member, the half-built group is removed again so no partial group is left.
+    func createServiceGroup(
+        name: String,
+        members: [String],
+        allowMixed: Bool = false,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
+        let home = try resolveHome(homeID: homeID)
+        guard !members.isEmpty else { throw ControlError.invalidArgument("a group needs at least one member") }
+        if let existing = home.serviceGroups.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+            throw ControlError.invalidArgument("a group named '\(existing.name)' already exists in \(home.name)")
+        }
+        let services = try resolveGroupMembers(members, homeID: homeID)
+        if !allowMixed { try requireSingleKind(services) }
+
+        var result: [String: Any] = [
+            "name": name,
+            "home": home.name,
+            "services": services.map { groupMemberDictionary($0) },
+        ]
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+
+        let group = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HMServiceGroup, Error>) in
+            home.addServiceGroup(withName: name) { group, error in
+                if let error { continuation.resume(throwing: error) }
+                else if let group { continuation.resume(returning: group) }
+                else { continuation.resume(throwing: ControlError.writeFailed("HomeKit returned no group")) }
+            }
+        }
+        for service in services {
+            do {
+                try await homeKitAsync { group.addService(service, completionHandler: $0) }
+            } catch {
+                let rejected = "HomeKit rejected '\(service.name)' on '\(service.accessory?.name ?? "?")' (\(error.localizedDescription))"
+                do {
+                    try await homeKitAsync { home.removeServiceGroup(group, completionHandler: $0) }
+                } catch let rollbackError {
+                    AppLogger.homekit.error("[\(home.name)] Rollback of group '\(name)' failed: \(rollbackError.localizedDescription)")
+                    throw ControlError.writeFailed(
+                        "\(rejected), and removing the half-built group '\(name)' also failed (\(rollbackError.localizedDescription)). Delete it with `groups delete \(group.uniqueIdentifier.uuidString)`"
+                    )
+                }
+                throw ControlError.writeFailed("\(rejected); the new group '\(name)' was removed again")
+            }
+        }
+        AppLogger.homekit.info("[\(home.name)] Created group '\(name)' with \(services.count) service(s)")
+        result["id"] = group.uniqueIdentifier.uuidString
+        result["dry_run"] = false
+        return result
+    }
+
+    /// Adds members to a group. Services already in it are skipped and reported.
+    func addToServiceGroup(
+        groupID: String,
+        members: [String],
+        allowMixed: Bool = false,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
+        let home = try resolveHome(homeID: homeID)
+        let group = try findServiceGroup(groupID, in: home)
+        guard !members.isEmpty else { throw ControlError.invalidArgument("no members given") }
+        let services = try resolveGroupMembers(members, homeID: homeID)
+        let existingIDs = Swift.Set(group.services.map(\.uniqueIdentifier))
+        let toAdd = services.filter { !existingIDs.contains($0.uniqueIdentifier) }
+        if !allowMixed { try requireSingleKind(group.services + toAdd) }
+
+        var result: [String: Any] = [
+            "group": group.name,
+            "id": group.uniqueIdentifier.uuidString,
+            "home": home.name,
+            "added": toAdd.map { groupMemberDictionary($0) },
+            "already_members": services.filter { existingIDs.contains($0.uniqueIdentifier) }.map { groupMemberDictionary($0) },
+        ]
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+        try await applyToGroup(group, services: toAdd, verb: "add") { service, done in
+            group.addService(service, completionHandler: done)
+        }
+        AppLogger.homekit.info("[\(home.name)] Added \(toAdd.count) service(s) to group '\(group.name)'")
+        result["dry_run"] = false
+        return result
+    }
+
+    /// Removes members from a group. Services not in it are skipped and reported.
+    func removeFromServiceGroup(
+        groupID: String,
+        members: [String],
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
+        let home = try resolveHome(homeID: homeID)
+        let group = try findServiceGroup(groupID, in: home)
+        guard !members.isEmpty else { throw ControlError.invalidArgument("no members given") }
+        let services = try resolveGroupMembers(members, homeID: homeID)
+        let existingIDs = Swift.Set(group.services.map(\.uniqueIdentifier))
+        let toRemove = services.filter { existingIDs.contains($0.uniqueIdentifier) }
+
+        var result: [String: Any] = [
+            "group": group.name,
+            "id": group.uniqueIdentifier.uuidString,
+            "home": home.name,
+            "removed": toRemove.map { groupMemberDictionary($0) },
+            "not_members": services.filter { !existingIDs.contains($0.uniqueIdentifier) }.map { groupMemberDictionary($0) },
+        ]
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+        try await applyToGroup(group, services: toRemove, verb: "remove") { service, done in
+            group.removeService(service, completionHandler: done)
+        }
+        AppLogger.homekit.info("[\(home.name)] Removed \(toRemove.count) service(s) from group '\(group.name)'")
+        // HomeKit may drop a group whose last member was removed; say so if it did.
+        if !home.serviceGroups.contains(where: { $0.uniqueIdentifier == group.uniqueIdentifier }) {
+            result["group_deleted"] = true
+        }
+        result["dry_run"] = false
+        return result
+    }
+
+    func renameServiceGroup(
+        groupID: String,
+        newName: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
+        let home = try resolveHome(homeID: homeID)
+        let group = try findServiceGroup(groupID, in: home)
+        let oldName = group.name
+        var result: [String: Any] = [
+            "old_name": oldName,
+            "new_name": newName,
+            "id": group.uniqueIdentifier.uuidString,
+            "home": home.name,
+        ]
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+        try await homeKitAsync { group.updateName(newName, completionHandler: $0) }
+        AppLogger.homekit.info("[\(home.name)] Renamed group '\(oldName)' → '\(newName)'")
+        result["dry_run"] = false
+        return result
+    }
+
+    /// Deletes a group. Its member accessories and services are untouched.
+    func removeServiceGroup(
+        groupID: String,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
+        let home = try resolveHome(homeID: homeID)
+        let group = try findServiceGroup(groupID, in: home)
+        var result = serviceGroupDictionary(group)
+        result["home"] = home.name
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+        try await homeKitAsync { home.removeServiceGroup(group, completionHandler: $0) }
+        AppLogger.homekit.info("[\(home.name)] Deleted group '\(group.name)'")
+        result["dry_run"] = false
+        return result
+    }
+
+    /// A group is visible when the device filter allows every member's accessory.
+    /// Hidden groups are treated as absent by every group operation, so a filtered
+    /// client can neither see nor rename, edit, or delete a group reaching past it.
+    private func isGroupVisible(_ group: HMServiceGroup) -> Bool {
+        group.services.allSatisfy { service in service.accessory.map { isAccessoryAllowed($0) } ?? false }
+    }
+
+    /// Finds a visible group by UUID, then by case-insensitive name. Two groups with
+    /// the same name is an error listing their UUIDs, never a pick of one of them.
+    private func findServiceGroup(_ id: String, in home: HMHome) throws -> HMServiceGroup {
+        let visible = home.serviceGroups.filter { isGroupVisible($0) }
+        func listing(_ groups: [HMServiceGroup]) -> String {
+            groups.map { "  - \($0.name) (\($0.uniqueIdentifier.uuidString))" }.joined(separator: "\n")
+        }
+        if let group = visible.first(where: { $0.uniqueIdentifier.uuidString.localizedCaseInsensitiveCompare(id) == .orderedSame }) {
+            return group
+        }
+        let named = visible.filter { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame }
+        if named.count == 1 { return named[0] }
+        if named.count > 1 {
+            throw ControlError.ambiguousService(
+                "\(named.count) groups in \(home.name) are named '\(id)'. Pass the group UUID:\n\(listing(named))"
+            )
+        }
+        throw ControlError.invalidArgument(
+            visible.isEmpty
+                ? "no group '\(id)' in \(home.name), which has no groups"
+                : "no group '\(id)' in \(home.name). Groups:\n\(listing(visible))"
+        )
+    }
+
+    /// Resolves each member to exactly one groupable service. An accessory with
+    /// several controllable services is an error listing them, never a guess.
+    private func resolveGroupMembers(_ members: [String], homeID: String?) throws -> [HMService] {
+        var services: [HMService] = []
+        var seen = Swift.Set<UUID>()
+        for member in members {
+            guard !member.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ControlError.invalidArgument("group members can't be blank")
+            }
+            guard let target = findServiceTarget(id: member, homeID: homeID),
+                  isAccessoryAllowed(target.accessory)
+            else {
+                throw ControlError.accessoryNotFound(member)
+            }
+            let candidates = (target.service.map { [$0] } ?? target.accessory.services)
+                .filter { AccessoryModel.groupKind(of: $0) != nil }
+            let service = try selectService(
+                on: target.accessory, from: candidates,
+                purpose: "that can join a group (light, switch, outlet, fan, or window covering)",
+                type: nil, name: nil, id: nil, index: nil
+            )
+            if seen.insert(service.uniqueIdentifier).inserted { services.append(service) }
+        }
+        return services
+    }
+
+    private func requireSingleKind(_ services: [HMService]) throws {
+        let kinds = services.compactMap { AccessoryModel.groupKind(of: $0) }
+        if let mixed = AccessoryModel.mixedKinds(kinds) {
+            throw ControlError.invalidArgument(
+                "members are of different kinds (\(mixed.joined(separator: ", "))); the Home app only groups one kind. Pass allow_mixed to group them anyway"
+            )
+        }
+    }
+
+    /// Applies one HomeKit mutation per service, reporting how far it got if HomeKit
+    /// rejects one, so a partial change is never reported as nothing or everything.
+    private func applyToGroup(
+        _ group: HMServiceGroup,
+        services: [HMService],
+        verb: String,
+        _ mutate: @escaping (HMService, @escaping @Sendable (Error?) -> Void) -> Void
+    ) async throws {
+        for (done, service) in services.enumerated() {
+            do {
+                try await homeKitAsync { mutate(service, $0) }
+            } catch {
+                throw ControlError.writeFailed(
+                    "HomeKit rejected '\(service.name)' on '\(service.accessory?.name ?? "?")' (\(error.localizedDescription)) after \(done) of \(services.count) \(verb) operation(s) on group '\(group.name)'"
+                )
+            }
+        }
+    }
+
+    private func serviceGroupDictionary(_ group: HMServiceGroup) -> [String: Any] {
+        [
+            "id": group.uniqueIdentifier.uuidString,
+            "name": group.name,
+            "services": group.services.map { groupMemberDictionary($0) },
+        ]
+    }
+
+    private func groupMemberDictionary(_ service: HMService) -> [String: Any] {
+        var dict = ServiceDescriptor(service).dictionary
+        if let accessory = service.accessory {
+            dict["accessory"] = accessory.name
+            dict["accessory_id"] = accessory.uniqueIdentifier.uuidString
+            if let room = accessory.room?.name { dict["room"] = room }
+        }
+        if let kind = AccessoryModel.groupKind(of: service) { dict["kind"] = kind }
+        return dict
     }
 
     // MARK: - Room Management
@@ -3827,6 +4252,59 @@ final class HomeKitManager: NSObject, Observable {
             }
         }
         return nil
+    }
+
+    /// Resolves the target of a service-level operation. `id` is an accessory name or
+    /// UUID, or the UUID of one of an accessory's services (the per-service `id` in
+    /// `get --json`), in which case `service` is that service.
+    private func findServiceTarget(id: String, homeID: String?) -> (accessory: HMAccessory, service: HMService?)? {
+        if let accessory = findAccessory(id: id, homeID: homeID) {
+            return (accessory, nil)
+        }
+        for home in filteredHomes(homeID: homeID) {
+            for accessory in home.accessories {
+                if let service = accessory.services.first(where: {
+                    $0.uniqueIdentifier.uuidString.localizedCaseInsensitiveCompare(id) == .orderedSame
+                }) {
+                    return (accessory, service)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Picks exactly one service from `candidates` with the service selectors.
+    /// Unset selectors match everything, so a lone candidate needs none. Throws when
+    /// none or several match, listing the services to pick from.
+    private func selectService(
+        on accessory: HMAccessory,
+        from candidates: [HMService],
+        purpose: String,
+        type: String?, name: String?, id: String?, index: Int?
+    ) throws -> HMService {
+        let matches = candidates.filter { serviceMatches($0, type: type, name: name, id: id, index: index) }
+        if matches.count == 1 { return matches[0] }
+        func hints(_ services: [HMService]) -> String {
+            services.map { ServiceDescriptor($0).selectorHint }.joined(separator: "\n")
+        }
+        if candidates.isEmpty {
+            throw ControlError.serviceNotFound("'\(accessory.name)' has no service \(purpose)")
+        }
+        if matches.isEmpty {
+            throw ControlError.serviceNotFound(
+                """
+                No service on '\(accessory.name)' \(purpose) matches the given selectors. Services \(purpose):
+                \(hints(candidates))
+                """
+            )
+        }
+        throw ControlError.ambiguousService(
+            """
+            '\(accessory.name)' has \(matches.count) services \(purpose). \
+            Pass service_name, service_index, or service_id to pick one:
+            \(hints(matches))
+            """
+        )
     }
 
     /// Identifying details for a single service, used to disambiguate characteristics

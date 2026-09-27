@@ -228,6 +228,34 @@ Programmable switches (Aqara, Hue, etc.) may operate in different modes:
 
 Use `--service-index` (CLI) or `service_index` (MCP) to target a specific button in fast mode. The mode itself is configured in the manufacturer's app (e.g., Aqara Home), not via HomeKit.
 
+### Name each gang of a multi-gang accessory, and set Display As
+
+A dual relay (e.g. Aqara Dual Relay T2) is one accessory with two switch services; every gang shares the accessory UUID and serial. Separating its tiles in the Home app only changes layout. Plain `rename` names the accessory and its primary tile only — name the other gang by service:
+
+```bash
+homeclaw-cli get "Downlight 1" --json          # services[] lists each gang's id, name, index, display_as
+homeclaw-cli rename "Downlight 1" "Downlight 2" --service-name "Switch 2"   # or --service-index 2 / --service-id <uuid>
+homeclaw-cli rename <service-uuid> "Downlight 2"                            # a service UUID also works as the target
+homeclaw-cli set-display-as "Downlight 1" light --service-name "Downlight 2" --dry-run
+```
+
+### Group accessories into one tile
+
+A Home app group ("Group with Other Accessories") is one tile and one Siri target for several accessories, e.g. all ceiling lights in a room. Members are services, so one gang of a dual relay can join on its own via its service UUID. Separating a multi-gang accessory's tiles is different: that's layout only, not a group.
+
+```bash
+homeclaw-cli groups                                                    # existing groups and members
+homeclaw-cli groups create "Lounge Ceiling" "Downlight 1" <switch-2-service-uuid> --dry-run
+homeclaw-cli groups add "Lounge Ceiling" "Stairs LED"
+homeclaw-cli groups remove "Lounge Ceiling" "Stairs LED"
+homeclaw-cli groups rename "Lounge Ceiling" "Lounge Lights"
+homeclaw-cli groups delete "Lounge Lights"                             # accessories are untouched
+```
+
+Members must be lights, switches, outlets, fans, or window coverings, and one kind per group (lights with lights), as in the Home app; set a relay's Display As to `light` first so it counts as a light, or pass `--allow-mixed`. MCP: `homekit_manage` actions `list_groups`, `create_group`, `add_to_group`, `remove_from_group`, `rename_group`, `delete_group` with `group`, `members`, `allow_mixed`.
+
+MCP: `homekit_manage` with `action: "rename"` or `action: "set_display_as"` plus `service_name` / `service_index` / `service_id`. This writes the home's service name, so it works even when the gang's HAP `name` characteristic is read-only. Display As (`light`, `fan`, or the service's own `switch` / `outlet`; `default` restores it) applies only to switch and outlet services — a gang bridged over Matter as a light has no Display As, in the Home app or here.
+
 ## Error Handling
 
 | Error | Cause | Resolution |

@@ -874,6 +874,94 @@ final class SocketServer: @unchecked Sendable {
                     id: id,
                     newName: newName,
                     homeID: args["home_id"] as? String,
+                    serviceType: args["service_type"] as? String,
+                    serviceName: args["service_name"] as? String,
+                    serviceID: args["service_id"] as? String,
+                    serviceIndex: try parseInt(args, key: "service_index"),
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "list_groups":
+                result = try await hk.listServiceGroups(homeID: args["home_id"] as? String)
+
+            case "create_group":
+                guard let name = args["name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'name' argument")
+                }
+                guard let members = args["members"] as? [String] else {
+                    return encodeResponse(success: false, error: "Missing 'members' argument (array of accessory names/UUIDs or service UUIDs)")
+                }
+                result = try await hk.createServiceGroup(
+                    name: name,
+                    members: members,
+                    allowMixed: parseBool(args, key: "allow_mixed"),
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "add_to_group", "remove_from_group":
+                guard let group = args["group"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'group' argument")
+                }
+                guard let members = args["members"] as? [String] else {
+                    return encodeResponse(success: false, error: "Missing 'members' argument (array of accessory names/UUIDs or service UUIDs)")
+                }
+                if command == "add_to_group" {
+                    result = try await hk.addToServiceGroup(
+                        groupID: group,
+                        members: members,
+                        allowMixed: parseBool(args, key: "allow_mixed"),
+                        homeID: args["home_id"] as? String,
+                        dryRun: parseBool(args, key: "dry_run")
+                    )
+                } else {
+                    result = try await hk.removeFromServiceGroup(
+                        groupID: group,
+                        members: members,
+                        homeID: args["home_id"] as? String,
+                        dryRun: parseBool(args, key: "dry_run")
+                    )
+                }
+
+            case "rename_group":
+                guard let group = args["group"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'group' argument")
+                }
+                guard let newName = args["new_name"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'new_name' argument")
+                }
+                result = try await hk.renameServiceGroup(
+                    groupID: group,
+                    newName: newName,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "delete_group":
+                guard let group = args["group"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'group' argument")
+                }
+                result = try await hk.removeServiceGroup(
+                    groupID: group,
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "set_display_as":
+                guard let id = args["id"] as? String ?? args["accessory"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'accessory' argument")
+                }
+                guard let displayAs = args["display_as"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'display_as' argument")
+                }
+                result = try await hk.setDisplayAs(
+                    id: id,
+                    displayAs: displayAs,
+                    homeID: args["home_id"] as? String,
+                    serviceType: args["service_type"] as? String,
+                    serviceName: args["service_name"] as? String,
+                    serviceID: args["service_id"] as? String,
+                    serviceIndex: try parseInt(args, key: "service_index"),
                     dryRun: parseBool(args, key: "dry_run")
                 )
 

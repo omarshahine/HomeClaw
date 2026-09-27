@@ -169,6 +169,7 @@ enum AccessoryModel {
                 "characteristics": chars,
             ]
             if let index = serviceLabelIndex(of: service) { serviceDict["index"] = index }
+            if let displayAs = displayAs(of: service) { serviceDict["display_as"] = displayAs }
             services.append(serviceDict)
         }
         dict["services"] = services
@@ -888,6 +889,101 @@ enum AccessoryModel {
               let value = indexChar.value as? NSNumber
         else { return nil }
         return value.intValue
+    }
+
+    // MARK: - Display As
+
+    /// Whether the Home app's "Display As" setting applies to this service.
+    /// HomeKit only accepts an associated service type on switch and outlet services.
+    static func supportsDisplayAs(_ service: HMService) -> Bool {
+        ownDisplayAs(serviceType: service.serviceType) != nil
+    }
+
+    /// A service type's own Display As value ("switch" or "outlet"), shown when no
+    /// associated service type is set. Nil for types Display As doesn't apply to.
+    static func ownDisplayAs(serviceType: String) -> String? {
+        switch serviceType {
+        case HMServiceTypeSwitch: "switch"
+        case HMServiceTypeOutlet: "outlet"
+        default: nil
+        }
+    }
+
+    /// The effective Display As of a switch or outlet service, as the Home app shows
+    /// it: "light" or "fan" when an associated service type is set, else the
+    /// service's own type. Nil for services Display As doesn't apply to.
+    static func displayAs(of service: HMService) -> String? {
+        displayAs(serviceType: service.serviceType, associatedServiceType: service.associatedServiceType)
+    }
+
+    static func displayAs(serviceType: String, associatedServiceType: String?) -> String? {
+        guard let own = ownDisplayAs(serviceType: serviceType) else { return nil }
+        guard let associatedServiceType else { return own }
+        return displayAsName(forAssociatedType: associatedServiceType)
+    }
+
+    /// Display As name for an associated service type. Types other than lightbulb
+    /// and fan (set by another app) fall back to their category name or raw UUID.
+    static func displayAsName(forAssociatedType type: String) -> String {
+        if type == HMServiceTypeLightbulb { return "light" }
+        if type == HMServiceTypeFan { return "fan" }
+        return CharacteristicMapper.serviceCategory(for: type) ?? type
+    }
+
+    /// Resolves a requested Display As value for a service of `serviceType` to the
+    /// associated service type to write. `.some(nil)` clears the association (the
+    /// service shows as its own type again); `nil` means the value isn't valid here.
+    ///
+    /// The Home app offers a switch Switch/Light/Fan and an outlet Outlet/Light/Fan,
+    /// so "outlet" is rejected on a switch service and vice versa.
+    static func associatedServiceType(forDisplayAs value: String, serviceType: String) -> String?? {
+        guard let own = ownDisplayAs(serviceType: serviceType) else { return nil }
+        switch value.lowercased() {
+        case "light": return .some(HMServiceTypeLightbulb)
+        case "fan": return .some(HMServiceTypeFan)
+        case own, "default": return .some(nil)
+        default: return nil
+        }
+    }
+
+    // MARK: - Service Groups
+
+    /// Kinds the Home app offers "Group with Other Accessories" for: on/off and
+    /// position tiles. Buttons, sensors, locks, cameras, climate and media are left
+    /// out, since the Home app never builds a group of them and its rendering of one
+    /// is unspecified.
+    static let groupableKinds: Swift.Set<String> = ["lightbulb", "switch", "outlet", "fan", "window_covering"]
+
+    /// The kind a service counts as when grouping, as the Home app judges it: its
+    /// category, except that a switch or outlet displayed as a light or fan counts
+    /// as that. Nil for services that can't be group members: supplementary ones
+    /// (battery, accessory info, labels, a blind's slats) and kinds outside
+    /// `groupableKinds`.
+    static func groupKind(serviceType: String, associatedServiceType: String?) -> String? {
+        // Slats tilt a blind whose WindowCovering service is the member; counting
+        // them would make every slatted blind ambiguous.
+        guard serviceType != HMServiceTypeSlats else { return nil }
+        var kind = CharacteristicMapper.serviceCategory(for: serviceType)
+        // Display As only ever sets light or fan; an association to anything else
+        // (another app's doing) leaves the switch or outlet grouping as itself.
+        if ownDisplayAs(serviceType: serviceType) != nil,
+           let associatedServiceType,
+           let associated = CharacteristicMapper.serviceCategory(for: associatedServiceType),
+           groupableKinds.contains(associated) {
+            kind = associated
+        }
+        return kind.flatMap { groupableKinds.contains($0) ? $0 : nil }
+    }
+
+    static func groupKind(of service: HMService) -> String? {
+        groupKind(serviceType: service.serviceType, associatedServiceType: service.associatedServiceType)
+    }
+
+    /// The distinct kinds in `kinds`, sorted, when there's more than one; nil when
+    /// they're all the same kind. The Home app only groups accessories of one kind.
+    static func mixedKinds(_ kinds: [String]) -> [String]? {
+        let distinct = Swift.Set(kinds)
+        return distinct.count > 1 ? distinct.sorted() : nil
     }
 
     // MARK: - Home App Display Name

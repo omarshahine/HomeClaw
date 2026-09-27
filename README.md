@@ -190,7 +190,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_rooms` | List rooms and their accessories |
 | `homekit_scenes` | List, get details, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
-| `homekit_manage` | Manage home structure: rename accessories/rooms, create/remove rooms and zones, manage zone membership |
+| `homekit_manage` | Manage home structure: rename accessories, individual services, and rooms; set a switch/outlet's Display As; list and manage accessory groups; create/remove rooms and zones, manage zone membership |
 | `homekit_automations` | Manage automations: list, create button-press triggers (single/double/long), link to scenes, enable/disable |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
@@ -257,6 +257,11 @@ homeclaw-cli assign-rooms rooms.json              # Bulk-assign accessories to r
 
 # Home management
 homeclaw-cli rename "Front Door" "Front Door Lock"          # Rename accessory
+homeclaw-cli rename "Dual Relay" "Downlight 2" --service-name "Switch 2"  # Rename one gang's tile
+homeclaw-cli set-display-as "Dual Relay" light --service-index 1         # Display As: light / fan / switch / outlet / default
+homeclaw-cli groups                                          # Home app accessory groups and members
+homeclaw-cli groups create "Ceiling Lights" "Downlight 1" <service-uuid>  # One tile for several lights (same kind)
+homeclaw-cli groups add "Ceiling Lights" "Stairs LED"       # Also: remove / rename / delete, --dry-run
 homeclaw-cli rename-room "Bedroom" "Primary Bedroom"        # Rename room
 homeclaw-cli create-room "Nursery"                          # Create room
 homeclaw-cli remove-room "Old Room"                         # Remove room
@@ -469,9 +474,9 @@ openclaw gateway restart
 
 ### Enabling Control Tools
 
-The plugin registers 16 agent tools. The read-only ones (`homekit_status`, `homekit_device_map`, `homekit_list`, `homekit_get`, `homekit_search`, `homekit_scenes`, `homekit_get_scene`, `homekit_events`, `homekit_automations_list`, `homekit_automations_get`) are on by default, including under the `coding` and `messaging` tool profiles.
+The plugin registers 19 agent tools. The read-only ones (`homekit_status`, `homekit_device_map`, `homekit_list`, `homekit_get`, `homekit_search`, `homekit_scenes`, `homekit_get_scene`, `homekit_events`, `homekit_groups`, `homekit_automations_list`, `homekit_automations_get`) are on by default, including under the `coding` and `messaging` tool profiles.
 
-The six tools that change your home (`homekit_set`, `homekit_trigger`, `homekit_import_scene`, `homekit_delete_scene`, `homekit_rename`, `homekit_automations_create`) are **optional**: OpenClaw hides them until you opt in. To allow all HomeClaw tools, add the plugin id to `tools.alsoAllow` in your OpenClaw config:
+The eight tools that change your home (`homekit_set`, `homekit_trigger`, `homekit_import_scene`, `homekit_delete_scene`, `homekit_rename`, `homekit_set_display_as`, `homekit_manage_group`, `homekit_automations_create`) are **optional**: OpenClaw hides them until you opt in. To allow all HomeClaw tools, add the plugin id to `tools.alsoAllow` in your OpenClaw config:
 
 ```json
 {

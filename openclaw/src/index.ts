@@ -313,18 +313,175 @@ const TOOLS: ToolDef[] = [
 		name: 'homekit_rename',
 		optional: true,
 		description:
-			'Rename a HomeKit accessory. Use dry_run to preview without applying.',
+			'Rename a HomeKit accessory, or one service (gang) of a multi-service accessory such as the "Switch 2" tile of a dual relay. Use dry_run to preview without applying.',
 		parameters: Type.Object({
-			accessory: Type.String({ description: 'Accessory name or UUID' }),
-			new_name: Type.String({ description: 'New name for the accessory' }),
+			accessory: Type.String({
+				description:
+					'Accessory name or UUID, or a service UUID (the per-service `id` in homekit_get output) to rename just that service',
+			}),
+			new_name: Type.String({ description: 'New name for the accessory or service' }),
+			service_type: Type.Optional(
+				Type.String({
+					description:
+						'Rename only services of this TYPE UUID. Every channel of a multi-gang switch shares one service type, so use service_name or service_index to pick a channel.',
+				})
+			),
+			service_name: Type.Optional(
+				Type.String({
+					description:
+						'Rename only the service with this name or unique UUID, e.g. "Switch 2", instead of the accessory.',
+				})
+			),
+			service_id: Type.Optional(
+				Type.String({
+					description:
+						'Rename only the service with this unique UUID, listed as `id` per service in homekit_get output.',
+				})
+			),
+			service_index: Type.Optional(
+				Type.Number({
+					description:
+						'Rename only the service with this channel number (ServiceLabelIndex), e.g. 2 for the second gang.',
+				})
+			),
 			dry_run: Type.Optional(
 				Type.Boolean({ description: 'Preview changes without applying' })
 			),
 		}),
 		buildArgs: (params) => {
 			const args = ['rename', String(params.accessory), String(params.new_name)];
+			optionalFlag(args, '--service-type', params.service_type);
+			optionalFlag(args, '--service-name', params.service_name);
+			optionalFlag(args, '--service-id', params.service_id);
+			optionalFlag(args, '--service-index', params.service_index);
 			optionalFlag(args, '--dry-run', params.dry_run);
 			args.push('--json');
+			return args;
+		},
+	},
+
+	{
+		name: 'homekit_set_display_as',
+		optional: true,
+		description:
+			'Set the Home app "Display As" of a switch or outlet service: light, fan, or its own type (switch / outlet; "default" restores it). Only switch and outlet services support this. On a multi-gang accessory, pick one gang with service_name, service_index, or service_id. Use dry_run to preview without applying.',
+		parameters: Type.Object({
+			accessory: Type.String({
+				description:
+					'Accessory name or UUID, or a service UUID (the per-service `id` in homekit_get output) to target that one service',
+			}),
+			display_as: Type.Union(
+				[
+					Type.Literal('light'),
+					Type.Literal('fan'),
+					Type.Literal('switch'),
+					Type.Literal('outlet'),
+					Type.Literal('default'),
+				],
+				{ description: 'What the switch or outlet displays as' }
+			),
+			service_type: Type.Optional(
+				Type.String({ description: 'Narrow to services of this TYPE UUID' })
+			),
+			service_name: Type.Optional(
+				Type.String({
+					description: 'Name or unique UUID of the one service to change, e.g. "Switch 2"',
+				})
+			),
+			service_id: Type.Optional(
+				Type.String({
+					description:
+						'Unique UUID of the one service to change, listed as `id` per service in homekit_get output',
+				})
+			),
+			service_index: Type.Optional(
+				Type.Number({
+					description:
+						'Channel number (ServiceLabelIndex) of the one service to change, e.g. 2 for the second gang',
+				})
+			),
+			dry_run: Type.Optional(
+				Type.Boolean({ description: 'Preview changes without applying' })
+			),
+		}),
+		buildArgs: (params) => {
+			const args = ['set-display-as', String(params.accessory), String(params.display_as)];
+			optionalFlag(args, '--service-type', params.service_type);
+			optionalFlag(args, '--service-name', params.service_name);
+			optionalFlag(args, '--service-id', params.service_id);
+			optionalFlag(args, '--service-index', params.service_index);
+			optionalFlag(args, '--dry-run', params.dry_run);
+			args.push('--json');
+			return args;
+		},
+	},
+
+	// ── Accessory groups ───────────────────────────────────────────────────
+
+	{
+		name: 'homekit_groups',
+		description:
+			'List Home app accessory groups ("Group with Other Accessories") and their member accessories/services. A group shows as one tile in the Home app and is one target for Siri.',
+		parameters: Type.Object({}),
+		buildArgs: () => ['groups', 'list', '--json'],
+	},
+	{
+		name: 'homekit_manage_group',
+		optional: true,
+		description:
+			'Create, add to, remove from, rename, or delete a Home app accessory group. Members are accessory names/UUIDs, or service UUIDs (per-service `id` in homekit_get) for one gang of a multi-gang accessory. Members must be one kind (lights with lights) unless allow_mixed. Deleting a group leaves its accessories untouched. Use dry_run to preview.',
+		parameters: Type.Object({
+			action: Type.Union(
+				[
+					Type.Literal('create'),
+					Type.Literal('add'),
+					Type.Literal('remove'),
+					Type.Literal('rename'),
+					Type.Literal('delete'),
+				],
+				{ description: 'What to do' }
+			),
+			group: Type.Optional(
+				Type.String({
+					description: 'Existing group name or UUID (add, remove, rename, delete)',
+				})
+			),
+			name: Type.Optional(Type.String({ description: 'Name for the new group (create)' })),
+			members: Type.Optional(
+				Type.Array(Type.String(), {
+					description: 'Members to create with, add, or remove (create/add/remove)',
+				})
+			),
+			new_name: Type.Optional(Type.String({ description: 'New group name (rename)' })),
+			allow_mixed: Type.Optional(
+				Type.Boolean({ description: 'Allow members of different kinds (create/add)' })
+			),
+			dry_run: Type.Optional(
+				Type.Boolean({ description: 'Preview changes without applying' })
+			),
+		}),
+		buildArgs: (params) => {
+			const action = String(params.action);
+			const target = action === 'create' ? params.name : params.group;
+			if (!target) throw new Error(action === 'create' ? 'name is required for create' : `group is required for ${action}`);
+			const args = ['groups', action];
+			if (action === 'create' || action === 'add') {
+				optionalFlag(args, '--allow-mixed', params.allow_mixed);
+			}
+			optionalFlag(args, '--dry-run', params.dry_run);
+			args.push('--json');
+			// Every positional goes after `--`: group names and members are free text,
+			// and one starting with "-" must not be read as a flag.
+			args.push('--', String(target));
+			if (action === 'rename') {
+				if (!params.new_name) throw new Error('new_name is required for rename');
+				args.push(String(params.new_name));
+			}
+			if (action === 'create' || action === 'add' || action === 'remove') {
+				const members = Array.isArray(params.members) ? params.members.map(String) : [];
+				if (members.length === 0) throw new Error(`members is required for ${action}`);
+				args.push(...members);
+			}
 			return args;
 		},
 	},
