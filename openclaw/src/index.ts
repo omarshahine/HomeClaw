@@ -313,16 +313,47 @@ const TOOLS: ToolDef[] = [
 		name: 'homekit_rename',
 		optional: true,
 		description:
-			'Rename a HomeKit accessory. Use dry_run to preview without applying.',
+			'Rename a HomeKit accessory, or one service (gang) of a multi-service accessory such as the "Switch 2" tile of a dual relay. Use dry_run to preview without applying.',
 		parameters: Type.Object({
-			accessory: Type.String({ description: 'Accessory name or UUID' }),
-			new_name: Type.String({ description: 'New name for the accessory' }),
+			accessory: Type.String({
+				description:
+					'Accessory name or UUID, or a service UUID (the per-service `id` in homekit_get output) to rename just that service',
+			}),
+			new_name: Type.String({ description: 'New name for the accessory or service' }),
+			service_type: Type.Optional(
+				Type.String({
+					description:
+						'Rename only services of this TYPE UUID. Every channel of a multi-gang switch shares one service type, so use service_name or service_index to pick a channel.',
+				})
+			),
+			service_name: Type.Optional(
+				Type.String({
+					description:
+						'Rename only the service with this name or unique UUID, e.g. "Switch 2", instead of the accessory.',
+				})
+			),
+			service_id: Type.Optional(
+				Type.String({
+					description:
+						'Rename only the service with this unique UUID, listed as `id` per service in homekit_get output.',
+				})
+			),
+			service_index: Type.Optional(
+				Type.Number({
+					description:
+						'Rename only the service with this channel number (ServiceLabelIndex), e.g. 2 for the second gang.',
+				})
+			),
 			dry_run: Type.Optional(
 				Type.Boolean({ description: 'Preview changes without applying' })
 			),
 		}),
 		buildArgs: (params) => {
 			const args = ['rename', String(params.accessory), String(params.new_name)];
+			optionalFlag(args, '--service-type', params.service_type);
+			optionalFlag(args, '--service-name', params.service_name);
+			optionalFlag(args, '--service-id', params.service_id);
+			optionalFlag(args, '--service-index', params.service_index);
 			optionalFlag(args, '--dry-run', params.dry_run);
 			args.push('--json');
 			return args;

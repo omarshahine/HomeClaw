@@ -190,7 +190,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_rooms` | List rooms and their accessories |
 | `homekit_scenes` | List, get details, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
-| `homekit_manage` | Manage home structure: rename accessories/rooms, create/remove rooms and zones, manage zone membership |
+| `homekit_manage` | Manage home structure: rename accessories, individual services, and rooms; set a switch/outlet's Display As; create/remove rooms and zones, manage zone membership |
 | `homekit_automations` | Manage automations: list, create button-press triggers (single/double/long), link to scenes, enable/disable |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
@@ -257,6 +257,8 @@ homeclaw-cli assign-rooms rooms.json              # Bulk-assign accessories to r
 
 # Home management
 homeclaw-cli rename "Front Door" "Front Door Lock"          # Rename accessory
+homeclaw-cli rename "Dual Relay" "Downlight 2" --service-name "Switch 2"  # Rename one gang's tile
+homeclaw-cli set-display-as "Dual Relay" light --service-index 1         # Display As: light / fan / switch / outlet / default
 homeclaw-cli rename-room "Bedroom" "Primary Bedroom"        # Rename room
 homeclaw-cli create-room "Nursery"                          # Create room
 homeclaw-cli remove-room "Old Room"                         # Remove room

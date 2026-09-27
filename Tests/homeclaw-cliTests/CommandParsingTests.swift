@@ -350,6 +350,29 @@ struct StructureCommandParsingTests {
         #expect(cmd.dryRun == true)
     }
 
+    @Test("rename targets one service (gang) with the service selectors")
+    func renameService() throws {
+        let cmd = try Rename.parse(["Downlight 1", "Downlight 2", "--service-name", "Switch 2", "--service-index", "2", "--service-id", "ABC", "--service-type", "T"])
+        #expect(cmd.serviceName == "Switch 2")
+        #expect(cmd.serviceIndex == 2)
+        #expect(cmd.serviceID == "ABC")
+        #expect(cmd.serviceType == "T")
+        let bare = try Rename.parse(["Old", "New"])
+        #expect(bare.serviceName == nil && bare.serviceIndex == nil && bare.serviceID == nil && bare.serviceType == nil)
+        #expect(throws: (any Error).self) { _ = try Rename.parse(["Old", "New", "--service-index", "two"]) }
+    }
+
+    @Test("set-display-as takes accessory + value, with service selectors")
+    func setDisplayAs() throws {
+        let cmd = try SetDisplayAs.parse(["Fan", "fan", "--service-index", "1", "--dry-run", "--home", "Lounge"])
+        #expect(cmd.accessory == "Fan")
+        #expect(cmd.displayAs == "fan")
+        #expect(cmd.serviceIndex == 1)
+        #expect(cmd.dryRun == true)
+        #expect(cmd.home == "Lounge")
+        #expect(throws: (any Error).self) { _ = try SetDisplayAs.parse(["Fan"]) }
+    }
+
     @Test("rename-room takes room + new name")
     func renameRoom() throws {
         let cmd = try RenameRoom.parse(["Den", "Office"])

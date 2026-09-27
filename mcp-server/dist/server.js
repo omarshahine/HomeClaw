@@ -15879,7 +15879,7 @@ var tools = [
   },
   {
     name: "homekit_manage",
-    description: "Manage HomeKit structure: rename accessories, assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
+    description: `Manage HomeKit structure: rename accessories or individual services (e.g. the "Switch 2" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -15887,6 +15887,7 @@ var tools = [
           type: "string",
           enum: [
             "rename",
+            "set_display_as",
             "remove_accessory",
             "assign_rooms",
             "create_room",
@@ -15905,11 +15906,32 @@ var tools = [
         },
         id: {
           type: "string",
-          description: "Accessory, room, or zone name/UUID (action-dependent)"
+          description: "Accessory, room, or zone name/UUID (action-dependent). For rename and set_display_as, may also be a service UUID (the per-service `id` in homekit_accessories get output) to target that one service."
         },
         new_name: {
           type: "string",
           description: "New name for rename actions"
+        },
+        display_as: {
+          type: "string",
+          enum: ["light", "fan", "switch", "outlet", "default"],
+          description: "What a switch or outlet service displays as (set_display_as action), matching the Home app's Display As: light, fan, or the service's own type (switch for a switch service, outlet for an outlet; default also restores it). Only switch and outlet services support this."
+        },
+        service_type: {
+          type: "string",
+          description: "Service TYPE UUID to narrow the target service (rename and set_display_as actions). Every channel of a multi-gang switch shares one service type, so use service_name, service_index, or service_id to pick a channel."
+        },
+        service_name: {
+          type: "string",
+          description: 'Name or unique UUID of the one service to act on (rename and set_display_as actions), e.g. "Switch 2". With rename, renames only that service instead of the accessory.'
+        },
+        service_id: {
+          type: "string",
+          description: "Unique UUID of the one service to act on (rename and set_display_as actions), listed as `id` per service in homekit_accessories get output."
+        },
+        service_index: {
+          type: "number",
+          description: "Channel number (ServiceLabelIndex) of the one service to act on, e.g. 2 for the second gang (rename and set_display_as actions). Listed as `index` in homekit_accessories get output when the accessory reports one."
         },
         name: {
           type: "string",
@@ -16516,6 +16538,12 @@ async function handleWebhook(args) {
       throw new Error(`Unknown webhook action: ${action}`);
   }
 }
+function addServiceSelectors(socketArgs, args) {
+  if (args.service_type) socketArgs.service_type = args.service_type;
+  if (args.service_name) socketArgs.service_name = args.service_name;
+  if (args.service_id) socketArgs.service_id = args.service_id;
+  if (args.service_index != null) socketArgs.service_index = String(args.service_index);
+}
 async function handleManage(args) {
   const action = args.action;
   if (!action) throw new Error("action is required");
@@ -16527,7 +16555,16 @@ async function handleManage(args) {
       if (!args.new_name) throw new Error("new_name is required for rename");
       const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
+      addServiceSelectors(socketArgs, args);
       return sendCommand("rename", socketArgs);
+    }
+    case "set_display_as": {
+      if (!args.id) throw new Error("id is required for set_display_as");
+      if (!args.display_as) throw new Error("display_as is required for set_display_as");
+      const socketArgs = { id: args.id, display_as: args.display_as, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      addServiceSelectors(socketArgs, args);
+      return sendCommand("set_display_as", socketArgs);
     }
     case "assign_rooms": {
       if (!args.assignments || !Array.isArray(args.assignments) || args.assignments.length === 0) {
