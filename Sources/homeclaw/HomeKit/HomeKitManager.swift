@@ -1108,8 +1108,13 @@ final class HomeKitManager: NSObject, Observable {
         let accessory = target.accessory
 
         if hasServiceSelector || target.service != nil {
-            let candidates = target.service.map { [$0] }
-                ?? accessory.services.filter { $0.serviceType != HMServiceTypeAccessoryInformation }
+            // Service-level rename is new surface, so it honours the device filter like
+            // control and set_display_as; the accessory-level path below predates it.
+            guard isAccessoryAllowed(accessory) else {
+                throw ControlError.accessoryNotFound(id)
+            }
+            let candidates = (target.service.map { [$0] } ?? accessory.services)
+                .filter { $0.serviceType != HMServiceTypeAccessoryInformation }
             let service = try selectService(
                 on: accessory, from: candidates, purpose: "that can be renamed",
                 type: serviceType, name: serviceName, id: serviceID, index: serviceIndex

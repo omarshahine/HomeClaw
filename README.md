@@ -471,9 +471,9 @@ openclaw gateway restart
 
 ### Enabling Control Tools
 
-The plugin registers 16 agent tools. The read-only ones (`homekit_status`, `homekit_device_map`, `homekit_list`, `homekit_get`, `homekit_search`, `homekit_scenes`, `homekit_get_scene`, `homekit_events`, `homekit_automations_list`, `homekit_automations_get`) are on by default, including under the `coding` and `messaging` tool profiles.
+The plugin registers 17 agent tools. The read-only ones (`homekit_status`, `homekit_device_map`, `homekit_list`, `homekit_get`, `homekit_search`, `homekit_scenes`, `homekit_get_scene`, `homekit_events`, `homekit_automations_list`, `homekit_automations_get`) are on by default, including under the `coding` and `messaging` tool profiles.
 
-The six tools that change your home (`homekit_set`, `homekit_trigger`, `homekit_import_scene`, `homekit_delete_scene`, `homekit_rename`, `homekit_automations_create`) are **optional**: OpenClaw hides them until you opt in. To allow all HomeClaw tools, add the plugin id to `tools.alsoAllow` in your OpenClaw config:
+The seven tools that change your home (`homekit_set`, `homekit_trigger`, `homekit_import_scene`, `homekit_delete_scene`, `homekit_rename`, `homekit_set_display_as`, `homekit_automations_create`) are **optional**: OpenClaw hides them until you opt in. To allow all HomeClaw tools, add the plugin id to `tools.alsoAllow` in your OpenClaw config:
 
 ```json
 {

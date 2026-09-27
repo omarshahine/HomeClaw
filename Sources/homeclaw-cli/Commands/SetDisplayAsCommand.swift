@@ -75,13 +75,13 @@ struct SetDisplayAs: ParsableCommand {
         }
 
         let accessoryName = result["accessory"] as? String ?? accessory
-        let serviceName = (result["service"] as? [String: Any])?["name"] as? String ?? "?"
+        let resolvedServiceName = (result["service"] as? [String: Any])?["name"] as? String ?? "?"
         let old = result["old_display_as"] as? String ?? "?"
         let new = result["new_display_as"] as? String ?? "?"
         if result["dry_run"] as? Bool == true {
-            print("DRY RUN — would display '\(serviceName)' on '\(accessoryName)' as \(new) (currently \(old))")
+            print("DRY RUN — would display '\(resolvedServiceName)' on '\(accessoryName)' as \(new) (currently \(old))")
         } else {
-            print("'\(serviceName)' on '\(accessoryName)' now displays as \(new) (was \(old))")
+            print("'\(resolvedServiceName)' on '\(accessoryName)' now displays as \(new) (was \(old))")
         }
     }
 }

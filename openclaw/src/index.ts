@@ -360,6 +360,62 @@ const TOOLS: ToolDef[] = [
 		},
 	},
 
+	{
+		name: 'homekit_set_display_as',
+		optional: true,
+		description:
+			'Set the Home app "Display As" of a switch or outlet service: light, fan, or its own type (switch / outlet; "default" restores it). Only switch and outlet services support this. On a multi-gang accessory, pick one gang with service_name, service_index, or service_id. Use dry_run to preview without applying.',
+		parameters: Type.Object({
+			accessory: Type.String({
+				description:
+					'Accessory name or UUID, or a service UUID (the per-service `id` in homekit_get output) to target that one service',
+			}),
+			display_as: Type.Union(
+				[
+					Type.Literal('light'),
+					Type.Literal('fan'),
+					Type.Literal('switch'),
+					Type.Literal('outlet'),
+					Type.Literal('default'),
+				],
+				{ description: 'What the switch or outlet displays as' }
+			),
+			service_type: Type.Optional(
+				Type.String({ description: 'Narrow to services of this TYPE UUID' })
+			),
+			service_name: Type.Optional(
+				Type.String({
+					description: 'Name or unique UUID of the one service to change, e.g. "Switch 2"',
+				})
+			),
+			service_id: Type.Optional(
+				Type.String({
+					description:
+						'Unique UUID of the one service to change, listed as `id` per service in homekit_get output',
+				})
+			),
+			service_index: Type.Optional(
+				Type.Number({
+					description:
+						'Channel number (ServiceLabelIndex) of the one service to change, e.g. 2 for the second gang',
+				})
+			),
+			dry_run: Type.Optional(
+				Type.Boolean({ description: 'Preview changes without applying' })
+			),
+		}),
+		buildArgs: (params) => {
+			const args = ['set-display-as', String(params.accessory), String(params.display_as)];
+			optionalFlag(args, '--service-type', params.service_type);
+			optionalFlag(args, '--service-name', params.service_name);
+			optionalFlag(args, '--service-id', params.service_id);
+			optionalFlag(args, '--service-index', params.service_index);
+			optionalFlag(args, '--dry-run', params.dry_run);
+			args.push('--json');
+			return args;
+		},
+	},
+
 	// ── Automations ────────────────────────────────────────────────────────
 
 	{

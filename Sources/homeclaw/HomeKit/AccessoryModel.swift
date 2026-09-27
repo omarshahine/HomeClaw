@@ -939,9 +939,9 @@ enum AccessoryModel {
     static func associatedServiceType(forDisplayAs value: String, serviceType: String) -> String?? {
         guard let own = ownDisplayAs(serviceType: serviceType) else { return nil }
         switch value.lowercased() {
-        case "light", "lightbulb": return .some(HMServiceTypeLightbulb)
+        case "light": return .some(HMServiceTypeLightbulb)
         case "fan": return .some(HMServiceTypeFan)
-        case own, "default", "none": return .some(nil)
+        case own, "default": return .some(nil)
         default: return nil
         }
     }
