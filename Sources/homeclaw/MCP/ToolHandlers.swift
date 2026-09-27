@@ -145,7 +145,7 @@ enum ToolHandlers {
       },
       {
         "name": "homekit_manage",
-        "description": "Manage HomeKit structure: rename accessories or individual services (e.g. the \"Switch 2\" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
+        "description": "Manage HomeKit structure: rename accessories or individual services (e.g. the \"Switch 2\" gang of a dual relay), set a switch or outlet's Display As (light/fan), list and manage Home app accessory groups (one tile for several accessories or gangs), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -162,7 +162,13 @@ enum ToolHandlers {
                 "create_zone",
                 "remove_zone",
                 "add_room_to_zone",
-                "remove_room_from_zone"
+                "remove_room_from_zone",
+                "list_groups",
+                "create_group",
+                "add_to_group",
+                "remove_from_group",
+                "rename_group",
+                "delete_group"
               ],
               "description": "Management action to perform"
             },
@@ -207,7 +213,22 @@ enum ToolHandlers {
             },
             "name": {
               "type": "string",
-              "description": "Name for create actions (create_room, create_zone)"
+              "description": "Name for create actions (create_room, create_zone, create_group)"
+            },
+            "group": {
+              "type": "string",
+              "description": "Group name or UUID (add_to_group, remove_from_group, rename_group, delete_group). Groups are listed by list_groups."
+            },
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Group members (create_group, add_to_group, remove_from_group): accessory names/UUIDs, or service UUIDs (the per-service `id` in homekit_accessories get output) to use one gang of a multi-gang accessory. An accessory with several controllable services is an error listing them."
+            },
+            "allow_mixed": {
+              "type": "boolean",
+              "description": "Allow group members of different kinds (create_group, add_to_group). Default false: like the Home app, a group holds one kind (lights with lights; a switch displayed as a light counts as a light)."
             },
             "room": {
               "type": "string",
@@ -668,10 +689,10 @@ enum ToolHandlers {
         if let index = args["service_index"] as? NSNumber, index.intValue < 1 { return false }
         if let limit = args["limit"] as? NSNumber, !(1...1000).contains(limit.intValue) { return false }
         if let duration = args["duration_seconds"] as? NSNumber, !(1...86400).contains(duration.intValue) { return false }
-        for key in ["dry_run", "verify", "no_refresh", "enabled"] where args[key] != nil { guard args[key] is Bool else { return false } }
-        for key in ["home_id", "accessory_id", "room", "query", "category", "characteristic", "value", "service_type", "service_name", "service_id", "scene_id", "id", "name", "new_name", "display_as", "time", "since", "type", "action"] where args[key] != nil { guard args[key] is String else { return false } }
+        for key in ["dry_run", "verify", "no_refresh", "enabled", "allow_mixed"] where args[key] != nil { guard args[key] is Bool else { return false } }
+        for key in ["home_id", "accessory_id", "room", "query", "category", "characteristic", "value", "service_type", "service_name", "service_id", "scene_id", "id", "name", "new_name", "display_as", "group", "time", "since", "type", "action"] where args[key] != nil { guard args[key] is String else { return false } }
         for key in ["actions", "conditions", "assignments"] where args[key] != nil { guard args[key] is [[String: Any]] || args[key] is [[String: String]] else { return false } }
-        for key in ["weekdays", "time_after", "time_before"] where args[key] != nil { guard let values = args[key] as? [Any] else { return false }; if key == "weekdays" { guard values.allSatisfy({ ($0 as? NSNumber).map { String(cString: $0.objCType) != "c" && $0.doubleValue.rounded() == $0.doubleValue && (1...7).contains($0.intValue) } == true }) else { return false } } else { guard values.allSatisfy({ $0 is String }) else { return false } } }
+        for key in ["weekdays", "time_after", "time_before", "members"] where args[key] != nil { guard let values = args[key] as? [Any] else { return false }; if key == "weekdays" { guard values.allSatisfy({ ($0 as? NSNumber).map { String(cString: $0.objCType) != "c" && $0.doubleValue.rounded() == $0.doubleValue && (1...7).contains($0.intValue) } == true }) else { return false } } else { guard values.allSatisfy({ $0 is String }) else { return false } } }
         _ = tool
         return true
     }
@@ -703,6 +724,12 @@ enum ToolHandlers {
         let home = string(args, "home_id"), id = string(args, "id"), dry = bool(args, "dry_run")
         switch action {
         case "rename": guard let id, let name = string(args, "new_name") else { throw HomeKitManager.ControlError.invalidArgument("id and new_name are required") }; return try await hk.renameAccessory(id: id, newName: name, homeID: home, serviceType: string(args, "service_type"), serviceName: string(args, "service_name"), serviceID: string(args, "service_id"), serviceIndex: int(args, "service_index"), dryRun: dry)
+        case "list_groups": return try await hk.listServiceGroups(homeID: home)
+        case "create_group": guard let name = string(args, "name"), let members = args["members"] as? [String], !members.isEmpty else { throw HomeKitManager.ControlError.invalidArgument("name and a non-empty members array are required") }; return try await hk.createServiceGroup(name: name, members: members, allowMixed: bool(args, "allow_mixed"), homeID: home, dryRun: dry)
+        case "add_to_group": guard let group = string(args, "group"), let members = args["members"] as? [String], !members.isEmpty else { throw HomeKitManager.ControlError.invalidArgument("group and a non-empty members array are required") }; return try await hk.addToServiceGroup(groupID: group, members: members, allowMixed: bool(args, "allow_mixed"), homeID: home, dryRun: dry)
+        case "remove_from_group": guard let group = string(args, "group"), let members = args["members"] as? [String], !members.isEmpty else { throw HomeKitManager.ControlError.invalidArgument("group and a non-empty members array are required") }; return try await hk.removeFromServiceGroup(groupID: group, members: members, homeID: home, dryRun: dry)
+        case "rename_group": guard let group = string(args, "group"), let name = string(args, "new_name") else { throw HomeKitManager.ControlError.invalidArgument("group and new_name are required") }; return try await hk.renameServiceGroup(groupID: group, newName: name, homeID: home, dryRun: dry)
+        case "delete_group": guard let group = string(args, "group") else { throw HomeKitManager.ControlError.invalidArgument("group is required") }; return try await hk.removeServiceGroup(groupID: group, homeID: home, dryRun: dry)
         case "set_display_as": guard let id, let displayAs = string(args, "display_as") else { throw HomeKitManager.ControlError.invalidArgument("id and display_as are required") }; return try await hk.setDisplayAs(id: id, displayAs: displayAs, homeID: home, serviceType: string(args, "service_type"), serviceName: string(args, "service_name"), serviceID: string(args, "service_id"), serviceIndex: int(args, "service_index"), dryRun: dry)
         case "remove_accessory": guard let id else { throw HomeKitManager.ControlError.invalidArgument("id is required") }; return try await hk.removeAccessory(id: id, homeID: home, dryRun: dry)
         case "assign_rooms": guard let assignments = args["assignments"] as? [[String: String]] else { throw HomeKitManager.ControlError.invalidArgument("assignments is required") }; return try await hk.assignRooms(homeName: home, assignments: assignments, dryRun: dry)

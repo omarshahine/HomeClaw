@@ -15879,7 +15879,7 @@ var tools = [
   },
   {
     name: "homekit_manage",
-    description: `Manage HomeKit structure: rename accessories or individual services (e.g. the "Switch 2" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.`,
+    description: `Manage HomeKit structure: rename accessories or individual services (e.g. the "Switch 2" gang of a dual relay), set a switch or outlet's Display As (light/fan), list and manage Home app accessory groups (one tile for several accessories or gangs), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -15896,7 +15896,13 @@ var tools = [
             "create_zone",
             "remove_zone",
             "add_room_to_zone",
-            "remove_room_from_zone"
+            "remove_room_from_zone",
+            "list_groups",
+            "create_group",
+            "add_to_group",
+            "remove_from_group",
+            "rename_group",
+            "delete_group"
           ],
           description: "Management action to perform"
         },
@@ -15935,7 +15941,20 @@ var tools = [
         },
         name: {
           type: "string",
-          description: "Name for create actions (create_room, create_zone)"
+          description: "Name for create actions (create_room, create_zone, create_group)"
+        },
+        group: {
+          type: "string",
+          description: "Group name or UUID (add_to_group, remove_from_group, rename_group, delete_group). Groups are listed by list_groups."
+        },
+        members: {
+          type: "array",
+          items: { type: "string" },
+          description: "Group members (create_group, add_to_group, remove_from_group): accessory names/UUIDs, or service UUIDs (the per-service `id` in homekit_accessories get output) to use one gang of a multi-gang accessory. An accessory with several controllable services is an error listing them."
+        },
+        allow_mixed: {
+          type: "boolean",
+          description: "Allow group members of different kinds (create_group, add_to_group). Default false: like the Home app, a group holds one kind (lights with lights; a switch displayed as a light counts as a light)."
         },
         room: {
           type: "string",
@@ -16538,6 +16557,11 @@ async function handleWebhook(args) {
       throw new Error(`Unknown webhook action: ${action}`);
   }
 }
+function requireMembers(args, action) {
+  if (!Array.isArray(args.members) || args.members.length === 0 || !args.members.every((m) => typeof m === "string" && m)) {
+    throw new Error(`members must be a non-empty array of accessory names/UUIDs or service UUIDs for ${action}`);
+  }
+}
 function addServiceSelectors(socketArgs, args) {
   if (args.service_type) socketArgs.service_type = args.service_type;
   if (args.service_name) socketArgs.service_name = args.service_name;
@@ -16557,6 +16581,40 @@ async function handleManage(args) {
       if (homeID) socketArgs.home_id = homeID;
       addServiceSelectors(socketArgs, args);
       return sendCommand("rename", socketArgs);
+    }
+    case "list_groups": {
+      const socketArgs = {};
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("list_groups", socketArgs);
+    }
+    case "create_group": {
+      if (!args.name) throw new Error("name is required for create_group");
+      requireMembers(args, "create_group");
+      const socketArgs = { name: args.name, members: args.members, allow_mixed: args.allow_mixed ?? false, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("create_group", socketArgs);
+    }
+    case "add_to_group":
+    case "remove_from_group": {
+      if (!args.group) throw new Error(`group is required for ${action}`);
+      requireMembers(args, action);
+      const socketArgs = { group: args.group, members: args.members, dry_run: dryRun };
+      if (action === "add_to_group") socketArgs.allow_mixed = args.allow_mixed ?? false;
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand(action, socketArgs);
+    }
+    case "rename_group": {
+      if (!args.group) throw new Error("group is required for rename_group");
+      if (!args.new_name) throw new Error("new_name is required for rename_group");
+      const socketArgs = { group: args.group, new_name: args.new_name, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("rename_group", socketArgs);
+    }
+    case "delete_group": {
+      if (!args.group) throw new Error("group is required for delete_group");
+      const socketArgs = { group: args.group, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return sendCommand("delete_group", socketArgs);
     }
     case "set_display_as": {
       if (!args.id) throw new Error("id is required for set_display_as");

@@ -239,6 +239,21 @@ homeclaw-cli rename <service-uuid> "Downlight 2"                            # a 
 homeclaw-cli set-display-as "Downlight 1" light --service-name "Downlight 2" --dry-run
 ```
 
+### Group accessories into one tile
+
+A Home app group ("Group with Other Accessories") is one tile and one Siri target for several accessories, e.g. all ceiling lights in a room. Members are services, so one gang of a dual relay can join on its own via its service UUID. Separating a multi-gang accessory's tiles is different: that's layout only, not a group.
+
+```bash
+homeclaw-cli groups                                                    # existing groups and members
+homeclaw-cli groups create "Lounge Ceiling" "Downlight 1" <switch-2-service-uuid> --dry-run
+homeclaw-cli groups add "Lounge Ceiling" "Stairs LED"
+homeclaw-cli groups remove "Lounge Ceiling" "Stairs LED"
+homeclaw-cli groups rename "Lounge Ceiling" "Lounge Lights"
+homeclaw-cli groups delete "Lounge Lights"                             # accessories are untouched
+```
+
+Members must be one kind (lights with lights), as in the Home app; set a relay's Display As to `light` first so it counts as a light, or pass `--allow-mixed`. MCP: `homekit_manage` actions `list_groups`, `create_group`, `add_to_group`, `remove_from_group`, `rename_group`, `delete_group` with `group`, `members`, `allow_mixed`.
+
 MCP: `homekit_manage` with `action: "rename"` or `action: "set_display_as"` plus `service_name` / `service_index` / `service_id`. This writes the home's service name, so it works even when the gang's HAP `name` characteristic is read-only. Display As (`light`, `fan`, or the service's own `switch` / `outlet`; `default` restores it) applies only to switch and outlet services — a gang bridged over Matter as a light has no Display As, in the Home app or here.
 
 ## Error Handling

@@ -946,6 +946,32 @@ enum AccessoryModel {
         }
     }
 
+    // MARK: - Service Groups
+
+    /// The kind a service counts as when grouping, as the Home app judges it: its
+    /// category, except that a switch or outlet displayed as a light or fan counts
+    /// as that. Nil for supplementary services (battery, accessory info, labels),
+    /// which can't be group members.
+    static func groupKind(serviceType: String, associatedServiceType: String?) -> String? {
+        if ownDisplayAs(serviceType: serviceType) != nil,
+           let associatedServiceType,
+           let associated = CharacteristicMapper.serviceCategory(for: associatedServiceType) {
+            return associated
+        }
+        return CharacteristicMapper.serviceCategory(for: serviceType)
+    }
+
+    static func groupKind(of service: HMService) -> String? {
+        groupKind(serviceType: service.serviceType, associatedServiceType: service.associatedServiceType)
+    }
+
+    /// The distinct kinds in `kinds`, sorted, when there's more than one; nil when
+    /// they're all the same kind. The Home app only groups accessories of one kind.
+    static func mixedKinds(_ kinds: [String]) -> [String]? {
+        let distinct = Swift.Set(kinds)
+        return distinct.count > 1 ? distinct.sorted() : nil
+    }
+
     // MARK: - Home App Display Name
 
     /// Service types where the Home app prefers the service name over the accessory name.

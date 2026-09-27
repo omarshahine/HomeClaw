@@ -373,6 +373,38 @@ struct StructureCommandParsingTests {
         #expect(throws: (any Error).self) { _ = try SetDisplayAs.parse(["Fan"]) }
     }
 
+    @Test("groups defaults to list and parses every subcommand")
+    func groups() throws {
+        #expect(try GroupsList.parse(["--home", "Lounge", "--json"]).home == "Lounge")
+        let create = try GroupsCreate.parse(["Ceiling", "Downlight 1", "ABC-123", "--allow-mixed", "--dry-run"])
+        #expect(create.name == "Ceiling")
+        #expect(create.members == ["Downlight 1", "ABC-123"])
+        #expect(create.allowMixed == true)
+        #expect(create.options.dryRun == true)
+        #expect(try GroupsAdd.parse(["Ceiling", "Stairs LED"]).members == ["Stairs LED"])
+        #expect(try GroupsRemove.parse(["Ceiling", "Stairs LED"]).group == "Ceiling")
+        #expect(try GroupsRename.parse(["Ceiling", "Lounge"]).newName == "Lounge")
+        #expect(try GroupsDelete.parse(["Lounge", "--home", "Cabin"]).options.home == "Cabin")
+    }
+
+    @Test("groups create/add/remove require at least one member")
+    func groupsNeedMembers() {
+        #expect(throws: (any Error).self) { _ = try GroupsCreate.parse(["Ceiling"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsAdd.parse(["Ceiling"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsRemove.parse(["Ceiling"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsRename.parse(["Ceiling"]) }
+    }
+
+    @Test("members after -- may start with a dash; flags before it still parse")
+    func groupsDashMembers() throws {
+        // The OpenClaw tool passes members last, after --, so a name like "-Lamp"
+        // is a member rather than an unknown flag.
+        let add = try GroupsAdd.parse(["Ceiling", "--dry-run", "--json", "--", "-Lamp", "--dry-run"])
+        #expect(add.members == ["-Lamp", "--dry-run"])
+        #expect(add.options.dryRun == true)
+        #expect(add.options.json == true)
+    }
+
     @Test("rename-room takes room + new name")
     func renameRoom() throws {
         let cmd = try RenameRoom.parse(["Den", "Office"])

@@ -103,6 +103,11 @@ homeclaw-cli rename "<name-or-uuid>" "<new-name>"           # Rename accessory
 homeclaw-cli rename "<name-or-uuid>" "<new-name>" --dry-run # Preview rename
 homeclaw-cli rename "<name-or-uuid>" "<new-name>" --service-name "Switch 2"  # Rename one gang of a multi-gang accessory (also --service-index / --service-id, or pass the service UUID)
 homeclaw-cli set-display-as "<name-or-uuid>" light|fan|switch|outlet|default [--service-index N]  # Home app Display As (switch/outlet services only)
+homeclaw-cli groups                                           # Home app accessory groups (one tile each) and members
+homeclaw-cli groups create "<group>" "<member>"... [--allow-mixed]  # Members: accessory name/UUID or service UUID; one kind unless --allow-mixed
+homeclaw-cli groups add|remove "<group>" "<member>"...        # Change members
+homeclaw-cli groups rename "<group>" "<new-name>"             # Rename group
+homeclaw-cli groups delete "<group>"                          # Delete group (accessories untouched)
 homeclaw-cli rename-room "<name-or-uuid>" "<new-name>"      # Rename room
 homeclaw-cli create-room "<name>"                            # Create room
 homeclaw-cli remove-room "<name-or-uuid>"                    # Remove room
