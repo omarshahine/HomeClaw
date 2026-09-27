@@ -145,7 +145,7 @@ enum ToolHandlers {
       },
       {
         "name": "homekit_manage",
-        "description": "Manage HomeKit structure: rename accessories, assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
+        "description": "Manage HomeKit structure: rename accessories or individual services (e.g. the \"Switch 2\" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -153,6 +153,7 @@ enum ToolHandlers {
               "type": "string",
               "enum": [
                 "rename",
+                "set_display_as",
                 "remove_accessory",
                 "assign_rooms",
                 "create_room",
@@ -171,11 +172,38 @@ enum ToolHandlers {
             },
             "id": {
               "type": "string",
-              "description": "Accessory, room, or zone name/UUID (action-dependent)"
+              "description": "Accessory, room, or zone name/UUID (action-dependent). For rename and set_display_as, may also be a service UUID (the per-service `id` in homekit_accessories get output) to target that one service."
             },
             "new_name": {
               "type": "string",
               "description": "New name for rename actions"
+            },
+            "display_as": {
+              "type": "string",
+              "enum": [
+                "light",
+                "fan",
+                "switch",
+                "outlet",
+                "default"
+              ],
+              "description": "What a switch or outlet service displays as (set_display_as action), matching the Home app's Display As: light, fan, or the service's own type (switch for a switch service, outlet for an outlet; default also restores it). Only switch and outlet services support this."
+            },
+            "service_type": {
+              "type": "string",
+              "description": "Service TYPE UUID to narrow the target service (rename and set_display_as actions). Every channel of a multi-gang switch shares one service type, so use service_name, service_index, or service_id to pick a channel."
+            },
+            "service_name": {
+              "type": "string",
+              "description": "Name or unique UUID of the one service to act on (rename and set_display_as actions), e.g. \"Switch 2\". With rename, renames only that service instead of the accessory."
+            },
+            "service_id": {
+              "type": "string",
+              "description": "Unique UUID of the one service to act on (rename and set_display_as actions), listed as `id` per service in homekit_accessories get output."
+            },
+            "service_index": {
+              "type": "number",
+              "description": "Channel number (ServiceLabelIndex) of the one service to act on, e.g. 2 for the second gang (rename and set_display_as actions). Listed as `index` in homekit_accessories get output when the accessory reports one."
             },
             "name": {
               "type": "string",
@@ -641,7 +669,7 @@ enum ToolHandlers {
         if let limit = args["limit"] as? NSNumber, !(1...1000).contains(limit.intValue) { return false }
         if let duration = args["duration_seconds"] as? NSNumber, !(1...86400).contains(duration.intValue) { return false }
         for key in ["dry_run", "verify", "no_refresh", "enabled"] where args[key] != nil { guard args[key] is Bool else { return false } }
-        for key in ["home_id", "accessory_id", "room", "query", "category", "characteristic", "value", "service_type", "service_name", "service_id", "scene_id", "id", "name", "new_name", "time", "since", "type", "action"] where args[key] != nil { guard args[key] is String else { return false } }
+        for key in ["home_id", "accessory_id", "room", "query", "category", "characteristic", "value", "service_type", "service_name", "service_id", "scene_id", "id", "name", "new_name", "display_as", "time", "since", "type", "action"] where args[key] != nil { guard args[key] is String else { return false } }
         for key in ["actions", "conditions", "assignments"] where args[key] != nil { guard args[key] is [[String: Any]] || args[key] is [[String: String]] else { return false } }
         for key in ["weekdays", "time_after", "time_before"] where args[key] != nil { guard let values = args[key] as? [Any] else { return false }; if key == "weekdays" { guard values.allSatisfy({ ($0 as? NSNumber).map { String(cString: $0.objCType) != "c" && $0.doubleValue.rounded() == $0.doubleValue && (1...7).contains($0.intValue) } == true }) else { return false } } else { guard values.allSatisfy({ $0 is String }) else { return false } } }
         _ = tool
@@ -674,7 +702,8 @@ enum ToolHandlers {
         guard let action = string(args, "action") else { throw HomeKitManager.ControlError.invalidArgument("action is required") }
         let home = string(args, "home_id"), id = string(args, "id"), dry = bool(args, "dry_run")
         switch action {
-        case "rename": guard let id, let name = string(args, "new_name") else { throw HomeKitManager.ControlError.invalidArgument("id and new_name are required") }; return try await hk.renameAccessory(id: id, newName: name, homeID: home, dryRun: dry)
+        case "rename": guard let id, let name = string(args, "new_name") else { throw HomeKitManager.ControlError.invalidArgument("id and new_name are required") }; return try await hk.renameAccessory(id: id, newName: name, homeID: home, serviceType: string(args, "service_type"), serviceName: string(args, "service_name"), serviceID: string(args, "service_id"), serviceIndex: int(args, "service_index"), dryRun: dry)
+        case "set_display_as": guard let id, let displayAs = string(args, "display_as") else { throw HomeKitManager.ControlError.invalidArgument("id and display_as are required") }; return try await hk.setDisplayAs(id: id, displayAs: displayAs, homeID: home, serviceType: string(args, "service_type"), serviceName: string(args, "service_name"), serviceID: string(args, "service_id"), serviceIndex: int(args, "service_index"), dryRun: dry)
         case "remove_accessory": guard let id else { throw HomeKitManager.ControlError.invalidArgument("id is required") }; return try await hk.removeAccessory(id: id, homeID: home, dryRun: dry)
         case "assign_rooms": guard let assignments = args["assignments"] as? [[String: String]] else { throw HomeKitManager.ControlError.invalidArgument("assignments is required") }; return try await hk.assignRooms(homeName: home, assignments: assignments, dryRun: dry)
         case "create_room": guard let name = string(args, "name") else { throw HomeKitManager.ControlError.invalidArgument("name is required") }; return try await hk.createRoom(name: name, homeID: home, dryRun: dry)

@@ -874,6 +874,28 @@ final class SocketServer: @unchecked Sendable {
                     id: id,
                     newName: newName,
                     homeID: args["home_id"] as? String,
+                    serviceType: args["service_type"] as? String,
+                    serviceName: args["service_name"] as? String,
+                    serviceID: args["service_id"] as? String,
+                    serviceIndex: try parseInt(args, key: "service_index"),
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
+            case "set_display_as":
+                guard let id = args["id"] as? String ?? args["accessory"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' or 'accessory' argument")
+                }
+                guard let displayAs = args["display_as"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'display_as' argument")
+                }
+                result = try await hk.setDisplayAs(
+                    id: id,
+                    displayAs: displayAs,
+                    homeID: args["home_id"] as? String,
+                    serviceType: args["service_type"] as? String,
+                    serviceName: args["service_name"] as? String,
+                    serviceID: args["service_id"] as? String,
+                    serviceIndex: try parseInt(args, key: "service_index"),
                     dryRun: parseBool(args, key: "dry_run")
                 )
 
