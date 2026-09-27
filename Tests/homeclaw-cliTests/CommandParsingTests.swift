@@ -395,14 +395,34 @@ struct StructureCommandParsingTests {
         #expect(throws: (any Error).self) { _ = try GroupsRename.parse(["Ceiling"]) }
     }
 
-    @Test("members after -- may start with a dash; flags before it still parse")
-    func groupsDashMembers() throws {
-        // The OpenClaw tool passes members last, after --, so a name like "-Lamp"
-        // is a member rather than an unknown flag.
-        let add = try GroupsAdd.parse(["Ceiling", "--dry-run", "--json", "--", "-Lamp", "--dry-run"])
+    @Test("--allow-mixed exists only where members are combined (create/add)")
+    func groupsAllowMixedScope() {
+        #expect(throws: (any Error).self) { _ = try GroupsRemove.parse(["Ceiling", "Lamp", "--allow-mixed"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsRename.parse(["Ceiling", "Lounge", "--allow-mixed"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsDelete.parse(["Ceiling", "--allow-mixed"]) }
+    }
+
+    @Test("positionals after -- may start with a dash; flags before it still parse")
+    func groupsDashPositionals() throws {
+        // The OpenClaw tool puts every positional after --, so free-text group names,
+        // new names, and members like "-Lamp" or "--json" are never read as flags.
+        let add = try GroupsAdd.parse(["--dry-run", "--json", "--", "Ceiling", "-Lamp", "--dry-run"])
+        #expect(add.group == "Ceiling")
         #expect(add.members == ["-Lamp", "--dry-run"])
         #expect(add.options.dryRun == true)
         #expect(add.options.json == true)
+
+        let create = try GroupsCreate.parse(["--allow-mixed", "--", "-Ceiling", "Lamp"])
+        #expect(create.name == "-Ceiling")
+        #expect(create.allowMixed == true)
+
+        let rename = try GroupsRename.parse(["--", "Ceiling", "-1"])
+        #expect(rename.newName == "-1")
+
+        let delete = try GroupsDelete.parse(["--dry-run", "--", "--json"])
+        #expect(delete.group == "--json")
+        #expect(delete.options.dryRun == true)
+        #expect(delete.options.json == false)
     }
 
     @Test("rename-room takes room + new name")

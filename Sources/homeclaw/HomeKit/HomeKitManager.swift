@@ -1248,19 +1248,21 @@ final class HomeKitManager: NSObject, Observable {
     // a named set of services the Home app shows as one tile and Siri controls as one.
     // Members are services, so one gang of a multi-gang accessory can join on its own.
 
-    /// Lists the home's service groups and their members. Members on accessories the
-    /// device filter hides are left out and counted in `hidden_members`.
+    /// Lists the home's service groups and their members. A group with any member
+    /// on an accessory the device filter hides is left out entirely (neither its name
+    /// nor its members are shown) and only counted in `hidden_groups`.
     func listServiceGroups(homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode { return ["groups": [] as [[String: Any]]] }
         let home = try resolveHome(homeID: homeID)
-        let groups: [[String: Any]] = home.serviceGroups.map { group in
-            var dict = serviceGroupDictionary(group)
-            let hidden = group.services.count - ((dict["services"] as? [[String: Any]])?.count ?? 0)
-            if hidden > 0 { dict["hidden_members"] = hidden }
-            return dict
-        }
-        return ["home": home.name, "groups": groups]
+        let visible = home.serviceGroups.filter { isGroupVisible($0) }
+        var result: [String: Any] = [
+            "home": home.name,
+            "groups": visible.map { serviceGroupDictionary($0) },
+        ]
+        let hidden = home.serviceGroups.count - visible.count
+        if hidden > 0 { result["hidden_groups"] = hidden }
+        return result
     }
 
     /// Creates a service group with `members` (accessory names/UUIDs or service UUIDs).
@@ -1304,10 +1306,16 @@ final class HomeKitManager: NSObject, Observable {
             do {
                 try await homeKitAsync { group.addService(service, completionHandler: $0) }
             } catch {
-                try? await homeKitAsync { home.removeServiceGroup(group, completionHandler: $0) }
-                throw ControlError.writeFailed(
-                    "HomeKit rejected '\(service.name)' on '\(service.accessory?.name ?? "?")' (\(error.localizedDescription)); the new group '\(name)' was removed again"
-                )
+                let rejected = "HomeKit rejected '\(service.name)' on '\(service.accessory?.name ?? "?")' (\(error.localizedDescription))"
+                do {
+                    try await homeKitAsync { home.removeServiceGroup(group, completionHandler: $0) }
+                } catch let rollbackError {
+                    AppLogger.homekit.error("[\(home.name)] Rollback of group '\(name)' failed: \(rollbackError.localizedDescription)")
+                    throw ControlError.writeFailed(
+                        "\(rejected), and removing the half-built group '\(name)' also failed (\(rollbackError.localizedDescription)). Delete it with `groups delete \(group.uniqueIdentifier.uuidString)`"
+                    )
+                }
+                throw ControlError.writeFailed("\(rejected); the new group '\(name)' was removed again")
             }
         }
         AppLogger.homekit.info("[\(home.name)] Created group '\(name)' with \(services.count) service(s)")
@@ -1384,6 +1392,10 @@ final class HomeKitManager: NSObject, Observable {
             group.removeService(service, completionHandler: done)
         }
         AppLogger.homekit.info("[\(home.name)] Removed \(toRemove.count) service(s) from group '\(group.name)'")
+        // HomeKit may drop a group whose last member was removed; say so if it did.
+        if !home.serviceGroups.contains(where: { $0.uniqueIdentifier == group.uniqueIdentifier }) {
+            result["group_deleted"] = true
+        }
         result["dry_run"] = false
         return result
     }
@@ -1437,17 +1449,34 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
-    /// Finds a group by UUID, then by case-insensitive name.
+    /// A group is visible when the device filter allows every member's accessory.
+    /// Hidden groups are treated as absent by every group operation, so a filtered
+    /// client can neither see nor rename, edit, or delete a group reaching past it.
+    private func isGroupVisible(_ group: HMServiceGroup) -> Bool {
+        group.services.allSatisfy { service in service.accessory.map { isAccessoryAllowed($0) } ?? false }
+    }
+
+    /// Finds a visible group by UUID, then by case-insensitive name. Two groups with
+    /// the same name is an error listing their UUIDs, never a pick of one of them.
     private func findServiceGroup(_ id: String, in home: HMHome) throws -> HMServiceGroup {
-        if let group = home.serviceGroups.first(where: { $0.uniqueIdentifier.uuidString.localizedCaseInsensitiveCompare(id) == .orderedSame })
-            ?? home.serviceGroups.first(where: { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame }) {
+        let visible = home.serviceGroups.filter { isGroupVisible($0) }
+        func listing(_ groups: [HMServiceGroup]) -> String {
+            groups.map { "  - \($0.name) (\($0.uniqueIdentifier.uuidString))" }.joined(separator: "\n")
+        }
+        if let group = visible.first(where: { $0.uniqueIdentifier.uuidString.localizedCaseInsensitiveCompare(id) == .orderedSame }) {
             return group
         }
-        let available = home.serviceGroups.map { "  - \($0.name) (\($0.uniqueIdentifier.uuidString))" }.joined(separator: "\n")
+        let named = visible.filter { $0.name.localizedCaseInsensitiveCompare(id) == .orderedSame }
+        if named.count == 1 { return named[0] }
+        if named.count > 1 {
+            throw ControlError.ambiguousService(
+                "\(named.count) groups in \(home.name) are named '\(id)'. Pass the group UUID:\n\(listing(named))"
+            )
+        }
         throw ControlError.invalidArgument(
-            available.isEmpty
+            visible.isEmpty
                 ? "no group '\(id)' in \(home.name), which has no groups"
-                : "no group '\(id)' in \(home.name). Groups:\n\(available)"
+                : "no group '\(id)' in \(home.name). Groups:\n\(listing(visible))"
         )
     }
 
@@ -1457,6 +1486,9 @@ final class HomeKitManager: NSObject, Observable {
         var services: [HMService] = []
         var seen = Swift.Set<UUID>()
         for member in members {
+            guard !member.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ControlError.invalidArgument("group members can't be blank")
+            }
             guard let target = findServiceTarget(id: member, homeID: homeID),
                   isAccessoryAllowed(target.accessory)
             else {
@@ -1465,7 +1497,8 @@ final class HomeKitManager: NSObject, Observable {
             let candidates = (target.service.map { [$0] } ?? target.accessory.services)
                 .filter { AccessoryModel.groupKind(of: $0) != nil }
             let service = try selectService(
-                on: target.accessory, from: candidates, purpose: "that can join a group",
+                on: target.accessory, from: candidates,
+                purpose: "that can join a group (light, switch, outlet, fan, or window covering)",
                 type: nil, name: nil, id: nil, index: nil
             )
             if seen.insert(service.uniqueIdentifier).inserted { services.append(service) }
@@ -1505,9 +1538,7 @@ final class HomeKitManager: NSObject, Observable {
         [
             "id": group.uniqueIdentifier.uuidString,
             "name": group.name,
-            "services": group.services
-                .filter { service in service.accessory.map { isAccessoryAllowed($0) } ?? false }
-                .map { groupMemberDictionary($0) },
+            "services": group.services.map { groupMemberDictionary($0) },
         ]
     }
 

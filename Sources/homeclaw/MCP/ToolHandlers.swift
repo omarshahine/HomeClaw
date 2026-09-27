@@ -228,7 +228,7 @@ enum ToolHandlers {
             },
             "allow_mixed": {
               "type": "boolean",
-              "description": "Allow group members of different kinds (create_group, add_to_group). Default false: like the Home app, a group holds one kind (lights with lights; a switch displayed as a light counts as a light)."
+              "description": "Allow group members of different kinds (create_group, add_to_group). Default false: like the Home app, a group holds one kind (lights with lights; a switch displayed as a light counts as a light). Members must always be a light, switch, outlet, fan, or window covering."
             },
             "room": {
               "type": "string",

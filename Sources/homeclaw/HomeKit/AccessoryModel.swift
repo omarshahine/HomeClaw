@@ -948,17 +948,31 @@ enum AccessoryModel {
 
     // MARK: - Service Groups
 
+    /// Kinds the Home app offers "Group with Other Accessories" for: on/off and
+    /// position tiles. Buttons, sensors, locks, cameras, climate and media are left
+    /// out, since the Home app never builds a group of them and its rendering of one
+    /// is unspecified.
+    static let groupableKinds: Swift.Set<String> = ["lightbulb", "switch", "outlet", "fan", "window_covering"]
+
     /// The kind a service counts as when grouping, as the Home app judges it: its
     /// category, except that a switch or outlet displayed as a light or fan counts
-    /// as that. Nil for supplementary services (battery, accessory info, labels),
-    /// which can't be group members.
+    /// as that. Nil for services that can't be group members: supplementary ones
+    /// (battery, accessory info, labels, a blind's slats) and kinds outside
+    /// `groupableKinds`.
     static func groupKind(serviceType: String, associatedServiceType: String?) -> String? {
+        // Slats tilt a blind whose WindowCovering service is the member; counting
+        // them would make every slatted blind ambiguous.
+        guard serviceType != HMServiceTypeSlats else { return nil }
+        var kind = CharacteristicMapper.serviceCategory(for: serviceType)
+        // Display As only ever sets light or fan; an association to anything else
+        // (another app's doing) leaves the switch or outlet grouping as itself.
         if ownDisplayAs(serviceType: serviceType) != nil,
            let associatedServiceType,
-           let associated = CharacteristicMapper.serviceCategory(for: associatedServiceType) {
-            return associated
+           let associated = CharacteristicMapper.serviceCategory(for: associatedServiceType),
+           groupableKinds.contains(associated) {
+            kind = associated
         }
-        return CharacteristicMapper.serviceCategory(for: serviceType)
+        return kind.flatMap { groupableKinds.contains($0) ? $0 : nil }
     }
 
     static func groupKind(of service: HMService) -> String? {

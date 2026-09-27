@@ -103,15 +103,15 @@ struct GroupsList: ParsableCommand {
             printJSON(response.data?.value)
             return
         }
-        let groups = (response.data?.value as? [String: Any])?["groups"] as? [[String: Any]] ?? []
-        guard !groups.isEmpty else {
-            print("No groups.")
-            return
-        }
+        let data = response.data?.value as? [String: Any] ?? [:]
+        let groups = data["groups"] as? [[String: Any]] ?? []
+        if groups.isEmpty { print("No groups.") }
         for group in groups {
-            let hidden = (group["hidden_members"] as? Int).map { " (+\($0) hidden by device filter)" } ?? ""
-            print("\(group["name"] as? String ?? "?")  \(group["id"] as? String ?? "")\(hidden)")
+            print("\(group["name"] as? String ?? "?")  \(group["id"] as? String ?? "")")
             print(formatGroupMembers(group["services"]))
+        }
+        if let hidden = data["hidden_groups"] as? Int, hidden > 0 {
+            print("(\(hidden) more group(s) include accessories hidden by the device filter)")
         }
     }
 }

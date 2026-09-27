@@ -441,9 +441,12 @@ const TOOLS: ToolDef[] = [
 				],
 				{ description: 'What to do' }
 			),
-			group: Type.String({
-				description: 'Group name or UUID; for create, the new group name',
-			}),
+			group: Type.Optional(
+				Type.String({
+					description: 'Existing group name or UUID (add, remove, rename, delete)',
+				})
+			),
+			name: Type.Optional(Type.String({ description: 'Name for the new group (create)' })),
 			members: Type.Optional(
 				Type.Array(Type.String(), {
 					description: 'Members to create with, add, or remove (create/add/remove)',
@@ -459,21 +462,25 @@ const TOOLS: ToolDef[] = [
 		}),
 		buildArgs: (params) => {
 			const action = String(params.action);
-			const args = ['groups', action, String(params.group)];
-			if (action === 'rename') {
-				if (!params.new_name) throw new Error('new_name is required for rename');
-				args.push(String(params.new_name));
-			}
+			const target = action === 'create' ? params.name : params.group;
+			if (!target) throw new Error(action === 'create' ? 'name is required for create' : `group is required for ${action}`);
+			const args = ['groups', action];
 			if (action === 'create' || action === 'add') {
 				optionalFlag(args, '--allow-mixed', params.allow_mixed);
 			}
 			optionalFlag(args, '--dry-run', params.dry_run);
 			args.push('--json');
+			// Every positional goes after `--`: group names and members are free text,
+			// and one starting with "-" must not be read as a flag.
+			args.push('--', String(target));
+			if (action === 'rename') {
+				if (!params.new_name) throw new Error('new_name is required for rename');
+				args.push(String(params.new_name));
+			}
 			if (action === 'create' || action === 'add' || action === 'remove') {
 				const members = Array.isArray(params.members) ? params.members.map(String) : [];
 				if (members.length === 0) throw new Error(`members is required for ${action}`);
-				// Members last, after `--`, so one starting with "-" is not read as a flag.
-				args.push('--', ...members);
+				args.push(...members);
 			}
 			return args;
 		},
