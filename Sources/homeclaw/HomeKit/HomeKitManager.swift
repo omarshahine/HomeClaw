@@ -2862,8 +2862,10 @@ final class HomeKitManager: NSObject, Observable {
                 warnings.append("Accessory not found: \(identifier)" + (roomName.map { " in \($0)" } ?? ""))
                 continue
             case .ambiguous(let error):
-                warnings.append("Skipping action: \(error.localizedDescription)")
-                continue
+                // Fail the whole command, before any write: skipping would let an
+                // import create a scene missing this action, or let an update drop
+                // the existing action it can't match.
+                throw error
             case .missingReference:
                 warnings.append("Skipping action with no accessory reference: \(action)")
                 continue
@@ -3007,8 +3009,10 @@ final class HomeKitManager: NSObject, Observable {
                 warnings.append("Accessory not found: \(identifier)" + (roomName.map { " in \($0)" } ?? ""))
                 continue
             case .ambiguous(let error):
-                warnings.append("Skipping action: \(error.localizedDescription)")
-                continue
+                // Fail the whole command, before any write: skipping would let an
+                // import create a scene missing this action, or let an update drop
+                // the existing action it can't match.
+                throw error
             case .missingReference:
                 warnings.append("Skipping action with no accessory reference: \(action)")
                 continue
