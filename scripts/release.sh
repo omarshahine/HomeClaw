@@ -565,9 +565,8 @@ prefer_live = sys.argv[1] == "true"
 d = json.load(sys.stdin)["data"]
 d.sort(key=lambda v: v["attributes"].get("createdDate") or "", reverse=True)
 state = lambda v: v["attributes"].get("appStoreState") or v["attributes"].get("appVersionState") or ""
-live_states = ("READY_FOR_SALE", "READY_FOR_DISTRIBUTION")
-live = [v for v in d if state(v) in live_states][:1]
-edit = [v for v in d if state(v) not in live_states + ("REMOVED_FROM_SALE", "DEVELOPER_REMOVED_FROM_SALE", "REPLACED_WITH_NEW_VERSION")][:1]
+live = [v for v in d if state(v) == "READY_FOR_SALE"][:1]
+edit = [v for v in d if state(v) not in ("READY_FOR_SALE", "REMOVED_FROM_SALE", "DEVELOPER_REMOVED_FROM_SALE", "REPLACED_WITH_NEW_VERSION")][:1]
 pick = (live or edit) if prefer_live else (edit or live)
 if pick:
     print(pick[0]["id"], pick[0]["attributes"]["versionString"], state(pick[0]))
@@ -869,8 +868,7 @@ cmd_metadata() {
   [[ -n "$vid" ]] || die "App Store version $version does not exist yet (\`release\` creates it)."
   state=$(version_state "$version")
   step "Metadata -> App Store version $version ($state)"
-  [[ "$state" == "READY_FOR_SALE" || "$state" == "READY_FOR_DISTRIBUTION" ]] \
-    && warn "$version is live; App Store Connect only accepts edits on a version being prepared."
+  [[ "$state" == "READY_FOR_SALE" ]] && warn "$version is live; App Store Connect only accepts edits on a version being prepared."
   push_metadata "$vid" "$dry_run"
 }
 
@@ -1113,6 +1111,7 @@ cmd_upload_screenshots() {
   load_credentials
   $dry_run && read_only
   version="${version:-$(marketing_version)}"
+  [[ -n "$(version_id "$version")" ]] || die "App Store version $version does not exist yet (\`release\` creates it)."
   local src="$FRAMED_DIR/$LOCALE" stage="$ARTIFACTS/screenshots"
   compgen -G "$src/*.png" >/dev/null || die "no framed screenshots in $src (run: scripts/release.sh frame)"
 
