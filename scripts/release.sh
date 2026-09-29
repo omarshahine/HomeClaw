@@ -634,7 +634,12 @@ verify_archive_contents() {
 }
 
 validate_package() {
-  step "Validate $PACKAGE_LABEL with Apple (altool --validate-app, no upload)"
+  # Not a zero-footprint check: like Xcode's "Validate App", Apple registers
+  # an AWAITING_UPLOAD slot for this version + build number on App Store
+  # Connect. It is not a build and testers never see it, but
+  # `asc builds next-build-number` counts it, so the next suggested number
+  # skips past it. Every app already has these from Xcode/fastlane validates.
+  step "Validate $PACKAGE_LABEL with Apple (altool --validate-app; registers a build-number slot, uploads nothing)"
   # altool finds AuthKey_<id>.p8 via API_PRIVATE_KEYS_DIR.
   API_PRIVATE_KEYS_DIR="$(dirname "$ASC_PRIVATE_KEY_PATH")" \
     asc xcode validate "--$PACKAGE_KIND" "$PACKAGE_PATH" --api-key "$ASC_KEY_ID" --api-issuer "$ASC_ISSUER_ID" --output json
