@@ -30,13 +30,19 @@ PLATFORM="MAC_OS"                         # asc platform: IOS | MAC_OS
 # Mac Catalyst archive: required for HomeKit entitlement support on macOS.
 DESTINATION="generic/platform=macOS,variant=Mac Catalyst"
 TEAM_ID_VARS="HOMEKIT_TEAM_ID APPLE_TEAM_ID"  # first one set wins
-# Bundle IDs exported with manual signing against their "<bundle id> AppStore"
-# profiles, downloaded fresh on every beta run. HOMECLAW_APPSTORE_PROFILE
-# overrides the profile name (single bundle id only).
-PROFILE_BUNDLE_IDS="com.shahine.homeclaw"
+# Profiles the export signs with manually, one "<bundle id>=<profile name>"
+# per line; the name must match the target's PROVISIONING_PROFILE_SPECIFIER.
+# Downloaded fresh on every beta run; `profiles --repair` regenerates them.
+PROFILES="
+com.shahine.homeclaw=com.shahine.homeclaw AppStore
+"
 # A Catalyst app's App Store profile is MAC_CATALYST_APP_STORE, not
 # MAC_APP_STORE (that is for native AppKit apps).
 PROFILE_TYPE="MAC_CATALYST_APP_STORE"
+# The profile embeds an Apple Distribution certificate (type DISTRIBUTION),
+# the same kind iOS uses; there is no separate Mac app certificate here.
+DIST_CERT_TYPE="DISTRIBUTION"             # certificate type repair signs new profiles with
+SIGNING_CERT="Apple Distribution"         # ExportOptions signingCertificate
 # The Mac .pkg is signed twice: the app with Apple Distribution, the installer
 # package with this certificate. (The old lane minted it with
 # `fastlane run cert type:mac_installer_distribution`.)
@@ -374,14 +380,24 @@ prepare() {
 # ─── Signing ─────────────────────────────────────────────────────────────
 #
 # Export with manual signing against freshly fetched App Store profiles.
-# Xcode's cached automatic "Team Store" profiles can lag behind the current
-# Apple Distribution certificate and make exportArchive fail with "doesn't
-# include signing certificate"; refreshing one is a cloud-signing operation
-# the ASC API key isn't permitted to do ("Cloud signing permission error").
-# Downloading is read-only on App Store Connect; if a profile is missing or
-# expired, regenerate it in the developer portal (or `asc profiles create`)
-# rather than letting a build script mint one silently.
+# Xcode's cached automatic "iOS Team Store Provisioning Profile" entries can
+# lag behind the current Apple Distribution certificate and make exportArchive
+# fail with "doesn't include signing certificate". Downloading is read-only on
+# the developer account. A profile goes INVALID when its bundle ID's
+# capabilities change; fastlane's sigh used to regenerate it silently on every
+# build. Here that is a separate, explicit step (`profiles --repair`) so a
+# build never changes the developer account behind your back.
 EXPORT_OPTIONS="$ARTIFACTS/ExportOptions.plist"
+
+# "<bundle id><TAB><profile name>" per configured profile.
+profile_entries() {
+  local line
+  while IFS= read -r line; do
+    [[ -n "${line// /}" ]] || continue
+    printf '%s\t%s\n' "${line%%=*}" "${line#*=}"
+  done <<<"$PROFILES"
+}
+
 refresh_profiles() {
   local dirs=("$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles")
   # iOS tooling still reads the legacy MobileDevice folder; macOS doesn't.
@@ -395,7 +411,7 @@ refresh_profiles() {
     -c "Add :method string app-store-connect" \
     -c "Add :destination string export" \
     -c "Add :signingStyle string manual" \
-    -c "Add :signingCertificate string Apple Distribution" \
+    -c "Add :signingCertificate string $SIGNING_CERT" \
     -c "Add :teamID string $TEAM_ID" \
     -c "Add :uploadSymbols bool true" \
     -c "Add :manageAppVersionAndBuildNumber bool false" \
@@ -404,25 +420,104 @@ refresh_profiles() {
   if [[ -n "$INSTALLER_CERT" ]]; then
     /usr/libexec/PlistBuddy -c "Add :installerSigningCertificate string $INSTALLER_CERT" "$EXPORT_OPTIONS" >/dev/null
   fi
-  for bundle in $PROFILE_BUNDLE_IDS; do
-    name="${HOMECLAW_APPSTORE_PROFILE:-$bundle AppStore}"
+  while IFS=$'\t' read -r bundle name; do
     # `--name` is not an exact match: it also returns the timestamp-suffixed
-    # copies `sigh --force` left behind ("<bundle> AppStore 1788724911"; the old
-    # Fastfile hit these), and data[0] can be one of those. Match the exact
-    # name and take the newest.
+    # copies `sigh --force` left behind ("<name> 1787293412"), and data[0] can
+    # be one of those. The archive's PROVISIONING_PROFILE_SPECIFIER wants the
+    # exact name, so match it exactly and take the newest.
     json=$(asc profiles list --name "$name" --profile-type "$PROFILE_TYPE" --profile-state ACTIVE --paginate --output json)
-    id=$(json_get 'max((p for p in d.get("data") or [] if p["attributes"]["name"] == "'"$name"'"), key=lambda p: p["attributes"].get("expirationDate") or "", default={}).get("id")' <<<"$json")
-    [[ -n "$id" ]] || die "no ACTIVE $PROFILE_TYPE profile named '$name'. Regenerate it in the developer portal."
+    id=$(NAME="$name" json_get 'max((p for p in d.get("data") or [] if p["attributes"]["name"] == __import__("os").environ["NAME"]), key=lambda p: p["attributes"].get("expirationDate") or "", default={}).get("id")' <<<"$json")
+    [[ -n "$id" ]] || die "no ACTIVE $PROFILE_TYPE profile named '$name'. Run: scripts/release.sh profiles --repair"
     file="$signing_dir/$bundle.$PROFILE_EXT"
     asc profiles download --id "$id" --output "$file" >/dev/null
-    require_profile_certificate "$file" "$name"
+    require_profile_certificate "$file" "$name"  # REPO-SPECIFIC
     uuid=$(asc profiles inspect --path "$file" --output json | json_get 'd.get("uuid") or d.get("UUID")')
     [[ -n "$uuid" ]] || uuid=$(security cms -D -i "$file" | plutil -extract UUID raw -o - -)
     local d
     for d in "${dirs[@]}"; do cp "$file" "$d/$uuid.$PROFILE_EXT"; done
     /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:$bundle string $uuid" "$EXPORT_OPTIONS" >/dev/null
     info "$bundle -> profile $uuid"
+  done < <(profile_entries)
+}
+
+# Check (default), repair, or prune the configured profiles.
+#   profiles                  read-only report
+#   profiles --repair         for each profile with no ACTIVE copy: delete the
+#                             INVALID one holding the name (names are unique,
+#                             and an INVALID profile can't be used), then create
+#                             a fresh one against the newest $DIST_CERT_TYPE cert
+#   profiles --prune          also delete INVALID "<name> <timestamp>" copies
+#                             that sigh --force left behind
+#   --dry-run                 print the plan, change nothing
+cmd_profiles() {
+  local repair=false prune=false dry_run=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --repair) repair=true ;;
+      --prune) prune=true ;;
+      --dry-run) dry_run=true ;;
+      *) die "unknown profiles option: $1" ;;
+    esac
+    shift
   done
+  load_credentials
+  if $dry_run || ! { $repair || $prune; }; then read_only; fi
+  step "$PROFILE_TYPE profiles$($repair && echo ' (repair)')$($prune && echo ' (prune)')$($dry_run && echo ' [dry run]')"
+  PROFILE_LINES="$(profile_entries)" "$PYTHON" - "$PROFILE_TYPE" "$DIST_CERT_TYPE" "$repair" "$prune" "$dry_run" <<'PY'
+import json, re, subprocess, sys
+ptype, cert_type = sys.argv[1], sys.argv[2]
+repair, prune, dry = (a == "true" for a in sys.argv[3:6])
+
+def asc(*args):
+    out = subprocess.run(["asc", *args, "--output", "json"], check=True, capture_output=True, text=True).stdout
+    return json.loads(out) if out.strip() else {}
+
+def cert_id():
+    certs = [c for c in asc("certificates", "list", "--paginate")["data"]
+             if c["attributes"].get("certificateType") == cert_type]
+    if not certs:
+        sys.exit(f"no {cert_type} certificate on the account")
+    return max(certs, key=lambda c: c["attributes"].get("expirationDate") or "")["id"]
+
+failed = False
+cert = None
+import os
+for line in os.environ["PROFILE_LINES"].splitlines():
+    bundle, name = line.split("\t", 1)
+    profiles = asc("profiles", "list", "--name", name, "--profile-type", ptype, "--paginate").get("data") or []
+    exact = [p for p in profiles if p["attributes"]["name"] == name]
+    leftovers = [p for p in profiles if re.fullmatch(re.escape(name) + r" \d{9,}", p["attributes"]["name"])]
+    active = [p for p in exact if p["attributes"].get("profileState") == "ACTIVE"]
+    invalid = [p for p in exact if p["attributes"].get("profileState") != "ACTIVE"]
+    stale = [p for p in leftovers if p["attributes"].get("profileState") != "ACTIVE"]
+    status = "ACTIVE" if active else ("INVALID" if invalid else "MISSING")
+    print(f"    {name}: {status}" + (f", {len(stale)} stale sigh copies" if stale else ""))
+    actions = []
+    if not active and repair:
+        actions += [("delete", p) for p in invalid] + [("create", None)]
+    elif not active:
+        failed = True
+    if prune:
+        actions += [("delete", p) for p in stale]
+    for verb, p in actions:
+        label = f'{p["attributes"]["name"]} ({p["id"]})' if p else name
+        if dry:
+            print(f"      would {verb} {label}")
+            continue
+        if verb == "delete":
+            asc("profiles", "delete", "--id", p["id"], "--confirm")
+        else:
+            cert = cert or cert_id()
+            bid = [b for b in asc("bundle-ids", "list", "--identifier", bundle, "--paginate")["data"]
+                   if b["attributes"]["identifier"] == bundle]
+            if not bid:
+                sys.exit(f"bundle id {bundle} is not registered")
+            asc("profiles", "create", "--name", name, "--profile-type", ptype,
+                "--bundle", bid[0]["id"], "--certificate", cert)
+        print(f"      {verb}d {label}")
+if failed:
+    sys.exit("some profiles have no ACTIVE copy; run: scripts/release.sh profiles --repair")
+PY
 }
 
 # REPO-SPECIFIC (from the old Fastfile's profile resolver): a profile minted on
@@ -601,6 +696,9 @@ Build + TestFlight
   beta [--dry-run]         Guards, fresh App Store profiles, archive, export .pkg, then upload
                            to TestFlight "$INTERNAL_GROUP" and wait for processing. Stops there.
                            --dry-run stops after 'asc xcode validate' (nothing uploaded).
+  profiles [--repair] [--prune] [--dry-run]
+                           Check the App Store signing profiles; --repair regenerates any with
+                           no ACTIVE copy, --prune deletes stale sigh copies. beta never does.
   external [--build N] [--version V] [--groups "A,B"] [--dry-run]
                            Add an uploaded build to "$EXTERNAL_GROUP", set What to Test,
                            notify testers, submit for beta review. Defaults to the project's
@@ -628,7 +726,6 @@ Screenshots
 Environment
   TF_CHANGELOG             TestFlight What to Test (default: metadata $LOCALE/release_notes.txt)
   DEVELOPER_DIR, XCODE_APP Pick an Xcode for this run (default: the one .xcode-version pins)
-  HOMECLAW_APPSTORE_PROFILE  Provisioning profile name (default: "<bundle id> AppStore")
 EOF
 }
 
@@ -1175,6 +1272,7 @@ main() {
     bump-build) cmd_bump_build ;;          # REPO-SPECIFIC
     archive) cmd_archive ;;                # REPO-SPECIFIC
     beta) cmd_beta "$@" ;;
+    profiles) cmd_profiles "$@" ;;
     external) cmd_external "$@" ;;
     metadata) cmd_metadata "$@" ;;
     metadata-pull) cmd_metadata_pull "$@" ;;

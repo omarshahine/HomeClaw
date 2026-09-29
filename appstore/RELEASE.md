@@ -45,9 +45,18 @@ automatic signing (headless, via the API key), but the **export** is manual:
 certificate is in this Mac's keychain, installs it, and exports pinned to it.
 The `.pkg` needs two certificates in your login keychain: **Apple
 Distribution** (the app) and **3rd Party Mac Developer Installer** (the
-package). The profile expires 2027-07-30; regenerate it in the developer
-portal when it does. `HOMECLAW_APPSTORE_PROFILE='<name>'` picks a different
-profile for one run.
+package). The profile expires 2027-07-30. `beta` never creates or repairs
+profiles. When one goes INVALID (a capability change on the bundle ID does
+that) or expires, repair it explicitly:
+
+```bash
+scripts/release.sh profiles                      # read-only report
+scripts/release.sh profiles --repair --dry-run   # show the plan
+scripts/release.sh profiles --repair             # recreate against the newest Apple Distribution cert
+scripts/release.sh profiles --prune              # delete stale "<name> <timestamp>" copies from sigh
+```
+
+The profile names live in `PROFILES` at the top of `release.sh`.
 
 Host gotchas the script handles:
 
@@ -70,6 +79,7 @@ Host gotchas the script handles:
 | `status [--build N]` | ASC versions, builds, TestFlight groups (read-only) | `fastlane status`, `auth_check` |
 | `bump-build` | Write the next build number (and the tag's version) to `Resources/Info.plist` | the post-upload `chore(release)` commit |
 | `archive` | xcodegen + MCP build + archive only | `fastlane archive` |
+| `profiles [--repair] [--prune]` | Check, regenerate, or prune the App Store profiles | `sigh` (implicit) |
 | `beta [--dry-run]` | Archive, export `.pkg`, validate, upload to **TestFlight Internal Testers** | `fastlane upload` |
 | `external [--build N]` | Add a build to External Testers, notify, submit beta review | second half of `fastlane beta`, `fastlane submit_only` |
 | `metadata [--dry-run]` | Push `appstore/metadata/` to the version | `fastlane upload_metadata` |
