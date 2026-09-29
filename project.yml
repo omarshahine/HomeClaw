@@ -107,7 +107,7 @@ targets:
           echo "Build number set to $BUILD_NUMBER"
 
           # Sync marketing version from the latest `v*` tag (mirrors
-          # fastlane/Fastfile's `marketing_version` helper). Without this,
+          # scripts/release.sh's `marketing_version`). Without this,
           # Info.plist's CFBundleShortVersionString stays at whatever was
           # committed and the xcodebuild MARKETING_VERSION flag only
           # reaches build settings, not the binary's plist — App Store
@@ -208,7 +208,7 @@ targets:
   # ─── UI Tests (App Store screenshot capture) ──────────────
   # Drives demo-mode HomeClaw via XCUITest to capture App Store screenshots.
   # Demo mode (HomeKitManager.isDemoMode) is gated on `--ui-test-demo` so we
-  # never touch real HomeKit data. See fastlane `screenshots` lane.
+  # never touch real HomeKit data. See scripts/screenshots.sh.
   HomeClawUITests:
     type: bundle.ui-testing
     platform: iOS

@@ -2,16 +2,20 @@
 # Composite raw window-grab screenshots into framed App Store screenshots
 # (gradient backdrop + rounded screenshot + drop shadow + tagline).
 #
-# Inputs:  fastlane/screenshots/en-US/*.png       (bare 2880x1800 window grabs)
-# Outputs: fastlane/screenshots-framed/en-US/*.png (App Store ready)
+# Inputs:  appstore/screenshots/en-US/*.png (bare 2880x1800 window grabs)
+# Outputs: appstore/framed/en-US/*.png      (App Store ready; what
+#          `scripts/release.sh upload-screenshots` uploads)
+#
+# Usually run as `scripts/release.sh frame`.
 #
 # Override per-file taglines by exporting `HC_TAGLINES_FILE=<path>` to a
 # `basename<TAB>tagline` TSV. Otherwise the defaults below are used.
 
 set -euo pipefail
 
-SRC_DIR="${SRC_DIR:-fastlane/screenshots-raw/en-US}"
-OUT_DIR="${OUT_DIR:-fastlane/screenshots/en-US}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC_DIR="${SRC_DIR:-$REPO_ROOT/appstore/screenshots/en-US}"
+OUT_DIR="${OUT_DIR:-$REPO_ROOT/appstore/framed/en-US}"
 CANVAS_W=2880
 CANVAS_H=1800
 SHOT_W=2200          # ~76% of canvas width

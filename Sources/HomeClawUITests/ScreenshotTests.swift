@@ -2,7 +2,7 @@ import XCTest
 
 /// Captures App Store screenshots of HomeClaw running in demo mode (synthetic
 /// HomeKit data — no real user homes are ever touched). One screenshot per
-/// test method; fastlane's `screenshots` lane runs `xcparse` to extract them.
+/// test method; `scripts/screenshots.sh` runs `xcparse` to extract them.
 ///
 /// Demo mode is enabled via the `--ui-test-demo` launch arg, which causes
 /// `HomeKitManager` to short-circuit `HMHomeManager` and serve `DemoFixtures`
