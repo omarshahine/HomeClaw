@@ -406,8 +406,12 @@ refresh_profiles() {
   fi
   for bundle in $PROFILE_BUNDLE_IDS; do
     name="${HOMECLAW_APPSTORE_PROFILE:-$bundle AppStore}"
-    json=$(asc profiles list --name "$name" --profile-type "$PROFILE_TYPE" --profile-state ACTIVE --output json)
-    id=$(json_get 'd["data"][0]["id"] if d.get("data") else None' <<<"$json")
+    # `--name` is not an exact match: it also returns the timestamp-suffixed
+    # copies `sigh --force` left behind ("<bundle> AppStore 1788724911"; the old
+    # Fastfile hit these), and data[0] can be one of those. Match the exact
+    # name and take the newest.
+    json=$(asc profiles list --name "$name" --profile-type "$PROFILE_TYPE" --profile-state ACTIVE --paginate --output json)
+    id=$(json_get 'max((p for p in d.get("data") or [] if p["attributes"]["name"] == "'"$name"'"), key=lambda p: p["attributes"].get("expirationDate") or "", default={}).get("id")' <<<"$json")
     [[ -n "$id" ]] || die "no ACTIVE $PROFILE_TYPE profile named '$name'. Regenerate it in the developer portal."
     file="$signing_dir/$bundle.$PROFILE_EXT"
     asc profiles download --id "$id" --output "$file" >/dev/null
