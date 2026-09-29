@@ -241,7 +241,7 @@ Install it, or override for this run: XCODE_APP=/Applications/Xcode.app scripts/
     [[ -d "$DEVELOPER_DIR" ]] || die "DEVELOPER_DIR does not exist: $DEVELOPER_DIR"
     export DEVELOPER_DIR
   fi
-  version=$(xcodebuild -version | head -n 1)
+  version=$(xcodebuild -version | sed -n 1p)
   info "Toolchain: $version ($(xcode-select -p))"
   [[ -z "$pin" || "$version" == *"$pin"* ]] || warn "toolchain $version does not match .xcode-version pin $pin"
 }
@@ -256,7 +256,7 @@ Install it, or override for this run: XCODE_APP=/Applications/Xcode.app scripts/
 require_release_xcode() {
   local developer_dir version build
   developer_dir=$(xcode-select -p)
-  version=$(xcodebuild -version | head -n 1)
+  version=$(xcodebuild -version | sed -n 1p)
   build=$(xcodebuild -version | sed -n 's/^Build version //p')
   # Only the app path is a reliable signal: GA build numbers also end in a
   # letter (16A242d) and some GA builds use beta-style numbers (16C5032a).
