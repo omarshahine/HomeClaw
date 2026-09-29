@@ -115,14 +115,16 @@ print("" if v is None else v)' "$1"
 # .env.local (per-project ASC_* / *_TEAM_ID overrides). Values are never
 # printed. The macOS Keychain is never used (ASC_BYPASS_KEYCHAIN=1).
 load_credentials() {
-  if [[ -z "${ASC_KEY_ID:-}" ]]; then
+  # Fall back when either half is missing; whatever the shell already set wins.
+  if [[ -z "${ASC_KEY_ID:-}" || -z "${ASC_ISSUER_ID:-}" ]]; then
+    local shell_key="${ASC_KEY_ID:-}" shell_issuer="${ASC_ISSUER_ID:-}"
     local secrets="$HOME/.secrets-macbook-pro.env"
     # shellcheck source=/dev/null
     [[ -f "$secrets" ]] && source "$secrets"
     # shellcheck source=/dev/null
     [[ -f "$REPO_ROOT/.env.local" ]] && source "$REPO_ROOT/.env.local"
-    ASC_KEY_ID="${ASC_KEY_ID:-${APP_STORE_CONNECT_API_KEY_ID:-}}"
-    ASC_ISSUER_ID="${ASC_ISSUER_ID:-${APP_STORE_CONNECT_API_ISSUER_ID:-}}"
+    ASC_KEY_ID="${shell_key:-${ASC_KEY_ID:-${APP_STORE_CONNECT_API_KEY_ID:-}}}"
+    ASC_ISSUER_ID="${shell_issuer:-${ASC_ISSUER_ID:-${APP_STORE_CONNECT_API_ISSUER_ID:-}}}"
   fi
   if [[ -z "${ASC_PRIVATE_KEY_PATH:-}" ]]; then
     # ASC_KEY_PATH is the name the old Fastfile/.env.local used.
@@ -311,6 +313,9 @@ check_release_tag() {
     || problems+=("$INFO_PLIST says version $plist_version but the nearest tag says $version. Run: scripts/release.sh bump-build")
   if [[ -z "$(git -C "$REPO_ROOT" branch -r --contains HEAD 2>/dev/null)" ]]; then
     problems+=("HEAD is not on any remote branch. Push the release commit before uploading.")
+  fi
+  if [[ -n "$tag" ]] && [[ -z "$(git -C "$REPO_ROOT" ls-remote --tags origin "refs/tags/$tag" 2>/dev/null)" ]]; then
+    problems+=("tag $tag is not on origin. Push it before uploading: git push origin $tag")
   fi
   local p
   for p in ${problems[@]+"${problems[@]}"}; do
@@ -1062,6 +1067,14 @@ submit_for_review() {
   local vid state found build_id build_num answer
   vid=$(version_id "$version")
 
+  # Find the build before touching the version, metadata or screenshots, so a
+  # missing or still-processing build fails with the listing unchanged.
+  step "Build"
+  found=$(find_build "$version" "$build")
+  [[ -n "$found" ]] || die "no VALID build${build:+ $build} for version $version on App Store Connect."
+  read -r build_id build_num answer <<<"$found"
+  info "Build $build_num ($build_id)"
+
   step "App Store version $version"
   if [[ -n "$vid" ]]; then
     state=$(version_state "$version")
@@ -1119,11 +1132,6 @@ submit_for_review() {
     fi
   fi
 
-  step "Build"
-  found=$(find_build "$version" "$build")
-  [[ -n "$found" ]] || die "no VALID build${build:+ $build} for version $version on App Store Connect."
-  read -r build_id build_num answer <<<"$found"
-  info "Build $build_num ($build_id)"
   ensure_encryption_answer "$build_id" "$answer" "$dry_run"
 
   step "Submit $version ($build_num) for App Review"
