@@ -50,7 +50,7 @@ check_prereqs() {
     if [[ -f "$HOME/.openclaw/openclaw.json" ]]; then
         ok "openclaw.json found"
     else
-        fail "~/.openclaw/openclaw.json not found"
+        fail "$HOME/.openclaw/openclaw.json not found"
         error "Run 'openclaw init' first"
         missing=1
     fi

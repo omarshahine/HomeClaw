@@ -30,6 +30,8 @@ printf "%-42s %s\n" ".claude-plugin/plugin.json"       "$v_cc_plugin"
 printf "%-42s %s\n" ".claude-plugin/marketplace.json"  "$v_cc_market"
 
 all="$v_root $v_openclaw $v_openclaw_m $v_mcp $v_cc_plugin $v_cc_market"
+# $all is split on purpose: one version per line.
+# shellcheck disable=SC2086
 uniq=$(printf '%s\n' $all | sort -u | wc -l | tr -d ' ')
 
 if [ "$uniq" != "1" ]; then
