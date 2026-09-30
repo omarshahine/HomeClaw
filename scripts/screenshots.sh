@@ -44,7 +44,7 @@ step() { printf '\n\033[1;34m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 
 case "${1:-}" in
   "") ;;
-  -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
+  -h|--help) awk 'NR > 1 { if (!/^#/) exit; print }' "$0"; exit 0 ;;
   *) die "unknown option: $1" ;;
 esac
 
