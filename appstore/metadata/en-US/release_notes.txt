@@ -1,1 +1,12 @@
-New Icon
+MCP over HTTP: HomeClaw can now serve MCP right from the app, for assistants that can't launch a local command. It's off by default (Settings → Integrations), only answers on this Mac, and only offers read-only tools.
+
+A second home, no fuss: list, get, set, search, scenes and device-map now take --home. A mistyped home name is now an error instead of quietly using your primary home.
+
+Fixes
+- Accessory reads no longer pass off old values as fresh ones. If a live read fails, HomeClaw tells you why.
+- Automation rewiring finds every automation the list shows, including time-based ones.
+- Automations triggered by people arriving or leaving show up as presence triggers, and ones pointing at removed accessories show as orphaned.
+- Accessory details show manufacturer, model, serial number and firmware instead of raw codes.
+- An ambiguous accessory name is now an error instead of picking the first match.
+- Runtime errors are shorter and no longer end with a usage block.
+- The OpenClaw plugin loads its tools again on current OpenClaw releases.
