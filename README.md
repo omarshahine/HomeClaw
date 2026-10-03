@@ -928,7 +928,7 @@ scripts/release.sh frame               # Frame them -> appstore/framed/en-US/
 scripts/release.sh upload-screenshots  # Replace the Mac App Store screenshot set
 ```
 
-The screenshot pipeline uses **demo mode** — `HomeKitManager.isDemoMode` (gated on `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1`) bypasses HomeKit and serves synthetic data from `Sources/homeclaw/HomeKit/DemoFixtures.swift`. Real HomeKit data is never read or shown. Requires `xcparse` (`brew install chargepoint/xcparse/xcparse`).
+The screenshot pipeline uses **demo mode** — `HomeKitManager.isDemoMode` (gated on `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1`) bypasses HomeKit and serves synthetic data from `Sources/homeclaw/HomeKit/DemoFixtures.swift`. Real HomeKit data is never read or shown. Attachments are extracted with `xcrun xcresulttool`, which ships with Xcode.
 
 Known follow-up: the menu-bar dropdown is `NSMenu` (AppKit), so it can't be auto-rendered via SwiftUI `ImageRenderer`. Capture it manually with `screencapture -x` of the running demo-mode app, or build a SwiftUI mockup of the dropdown.
 

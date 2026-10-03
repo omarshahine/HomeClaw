@@ -9,8 +9,9 @@
 #   1. regenerates the Xcode project (xcodegen)
 #   2. runs the HomeClawUITests scheme against "platform=macOS,variant=Mac
 #      Catalyst" into a result bundle
-#   3. extracts the attachments with xcparse and strips xcparse's
-#      `_<index>_<UUID>` suffix, so "01_Onboarding" lands as 01_Onboarding.png
+#   3. extracts the attachments with `xcrun xcresulttool export attachments`
+#      (ships with Xcode) and strips the `_<index>_<UUID>` suffix from each
+#      attachment's suggested name, so "01_Onboarding" lands as 01_Onboarding.png
 #   4. copies them into appstore/screenshots/<language>/, next to the
 #      hand-captured terminal shots (see appstore/MANUAL_SCREENSHOTS.md)
 #
@@ -53,7 +54,6 @@ move_to_trash() {
 }
 
 command -v xcodegen >/dev/null || die "xcodegen not installed. brew install xcodegen"
-command -v xcparse >/dev/null || die "xcparse not installed. brew install chargepoint/xcparse/xcparse"
 
 # The UI tests sign the app for this Mac; the team comes from .env.local.
 team=""
@@ -106,11 +106,26 @@ for language in "${LANGUAGES[@]}"; do
     die "UI tests failed (exit $status). Full log: $log"
   fi
 
+  # xcparse 2.3.x can't read Xcode 27 result bundles (it reported "no
+  # screenshot attachments" for a passing run whose PNGs were really there), so
+  # use Apple's xcresulttool. It exports each attachment under a UUID file name
+  # and writes manifest.json mapping that to the attachment's suggested name.
   shots="$run/attachments"
-  mkdir -p "$shots"
-  xcparse screenshots "$result" "$shots" >>"$log" 2>&1 || die "xcparse failed. Log: $log"
+  raw="$run/exported"
+  mkdir -p "$shots" "$raw"
+  xcrun xcresulttool export attachments --path "$result" --output-path "$raw" >>"$log" 2>&1 \
+    || die "xcresulttool attachment export failed. Log: $log"
+  python3 - "$raw" "$shots" <<'PY' || die "could not read $raw/manifest.json. Log: $log"
+import json, shutil, sys
+from pathlib import Path
+raw, shots = Path(sys.argv[1]), Path(sys.argv[2])
+for test in json.loads((raw / "manifest.json").read_text()):
+    for a in test.get("attachments", []):
+        if a["exportedFileName"].endswith(".png"):
+            shutil.copy2(raw / a["exportedFileName"], shots / a["suggestedHumanReadableName"])
+PY
 
-  # xcparse emits `01_Onboarding_0_<UUID>.png`. App Store order follows the
+  # Suggested names look like `01_Onboarding_0_<UUID>.png`. App Store order follows the
   # filename, so strip the suffix back to the attachment name set in
   # ScreenshotTests.
   count=0
@@ -125,7 +140,7 @@ for language in "${LANGUAGES[@]}"; do
     printf '    %s\n' "$language/$clean.png"
     count=$((count + 1))
   done < <(find "$shots" -name '*.png' -print0 | sort -z)
-  [[ $count -gt 0 ]] || die "tests passed but xcparse found no screenshot attachments in $result."
+  [[ $count -gt 0 ]] || die "tests passed but the result bundle has no PNG attachments: $result."
 done
 
 printf '\nRaw screenshots in %s. Next: scripts/release.sh frame\n' "$OUTPUT_DIR"

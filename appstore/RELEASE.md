@@ -8,8 +8,7 @@ scripts/release.sh help
 
 It drives the App Store Connect CLI, [`asc`](https://github.com/rorkai/App-Store-Connect-CLI)
 (`brew install asc`), plus `xcodegen`, `npm` and plain `xcodebuild`. There is
-no Ruby, bundler, or fastlane toolchain. Screenshot capture needs `xcparse`
-(`brew install chargepoint/xcparse/xcparse`), framing needs ImageMagick
+no Ruby, bundler, or fastlane toolchain. Screenshot capture uses `xcrun xcresulttool` (ships with Xcode), framing needs ImageMagick
 (`brew install imagemagick`), and staging screenshots for upload needs Pillow
 for Homebrew Python (`/opt/homebrew/bin/python3 -m pip install Pillow`).
 
@@ -203,7 +202,12 @@ version being prepared, falling back to the live one (deliver's precedence).
 
 `screenshots` runs the `HomeClawUITests` scheme on this Mac
 (`platform=macOS,variant=Mac Catalyst`) with plain `xcodebuild test`, then
-extracts the attachments with `xcparse`. The app runs in **demo mode**
+extracts the attachments with `xcrun xcresulttool export attachments`.
+The test window fills the screen, so hide the Dock first (System Settings, Desktop &
+Dock, "Automatically hide and show the Dock"). Otherwise a strip of the Dock shows
+along the bottom of every shot. UI tests can only start unattended once Automation
+Mode needs no authentication (`sudo automationmodetool
+enable-automationmode-without-authentication`). The app runs in **demo mode**
 (`--ui-test-demo`): `HomeKitManager` serves `DemoFixtures` instead of real
 HomeKit data. The tests drive real windows, so leave the Mac alone while they
 run.
