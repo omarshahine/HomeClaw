@@ -44,7 +44,7 @@ Sources/
     SocketClient.swift   # Direct socket communication
 Resources/               # Info.plist, entitlements, app icons
 scripts/build.sh         # Build & install script (debug/release for local use)
-fastlane/Fastfile        # Release pipeline: archive, upload, beta (TestFlight)
+scripts/release.sh       # Release pipeline (asc): archive, TestFlight, App Store; see appstore/RELEASE.md
 mcp-server/              # Node.js stdio MCP server (wraps homeclaw-cli)
 openclaw/                # HomeClaw — OpenClaw plugin
   openclaw.plugin.json   # Plugin manifest (configurable binDir)
@@ -81,7 +81,7 @@ npm run build:mcp                      # Build Node.js MCP server only
 ### Xcode version
 
 The Xcode this project builds with is pinned in `.xcode-version` (currently
-**27.0**, i.e. Xcode beta). `scripts/build.sh` and `fastlane` resolve that pin to
+**27.0**). `scripts/build.sh` and `scripts/release.sh` resolve that pin to
 an installed `Xcode.app` by its `CFBundleShortVersionString`, so a beta and a
 release build can sit side by side in `/Applications` under any name.
 
@@ -93,7 +93,7 @@ Override for a one-off build:
 
 ```bash
 XCODE_APP=/Applications/Xcode.app scripts/build.sh --debug
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer fastlane archive
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/release.sh archive
 ```
 
 Either variable may also live in `.env.local`. When bumping the pin, edit
@@ -241,7 +241,7 @@ CI builds and tests the Catalyst app **unsigned only**. The HomeKit entitlement
 cannot be provisioned on a runner. Unit tests avoid live HomeKit operations;
 passing them proves native code execution, not real accessory access, signing,
 or distributability. A signed build still has to happen locally
-(`scripts/build.sh`) or via `fastlane`.
+(`scripts/build.sh`) or via `scripts/release.sh`.
 
 ## Clawpatch Code Review
 
@@ -299,10 +299,10 @@ Durable memory promoted from `~/.claude/projects/-Users-omarshahine-GitHub-HomeC
 ## Release Workflow
 
 - After every archive + upload, generate a **TestFlight tester update** (see `memory/testflight-updates.md`)
-- Release tag must match the uploaded build number: `v{version}+{build}` (build number derived from `.build-number` file or git rev-list count)
+- Release tag must match the uploaded build number: `v{version}+{build}`. The build number is committed first (`scripts/release.sh bump-build`, commit, tag, push), then `beta` builds exactly that number
 - CLI binary is sandboxed (`com.apple.security.app-sandbox`) — file-based commands can only read from App Group container
-- [App Store Connect API setup](asc-api-setup.md) — fastlane `beta` lane drives the full TestFlight release loop
-- [Fastlane release pipeline](fastlane-release-pipeline.md) — lanes (archive/upload/beta/status/submit_only/auth_check), Mac Catalyst archive config, env loading from `.env.local` + `~/.secrets.env`
+- [App Store Connect API setup](asc-api-setup.md) — `scripts/release.sh` (asc) drives TestFlight and App Store releases
+- [Release pipeline](asc-release-pipeline.md) — `scripts/release.sh` subcommands, Mac Catalyst archive + .pkg export, credential loading
 
 ## Feedback: Skill Invocation
 - [Use fully qualified skill names for commit](feedback_commit_skill_name.md) — always `commit-commands:commit`, never bare `commit`
@@ -337,61 +337,47 @@ Durable memory promoted from `~/.claude/projects/-Users-omarshahine-GitHub-HomeC
 
 ---
 name: App Store Connect API setup
-description: ASC API credentials and fastlane TestFlight pipeline for HomeClaw builds
+description: ASC API credentials and the asc-based release pipeline for HomeClaw builds
 type: reference
 originSessionId: 0b8a6eb4-64d3-4fe3-9fa5-24b075852c4d
 ---
-App Store Connect API is configured for HomeClaw via fastlane.
+App Store Connect API is configured for HomeClaw via the `asc` CLI (`scripts/release.sh`).
 
-- **Credentials**: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH` in `~/.secrets.env` (loaded by `fastlane/Fastfile` automatically; `.env.local` for `HOMEKIT_TEAM_ID`)
+- **Credentials**: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH` from `~/.zshrc`; otherwise `release.sh` sources `~/.secrets-macbook-pro.env` (`APP_STORE_CONNECT_API_*`) and `.env.local` (`HOMEKIT_TEAM_ID`, optional `ASC_*`)
 - **API key file**: `~/.private_keys/AuthKey_<ASC_KEY_ID>.p8`
-- **Bundle ID**: `com.shahine.homeclaw`
-- **Pipeline**: `fastlane/Fastfile` (archive, upload, beta, status, submit_only, auth_check)
-- **External group name**: "External Testers" (resolved dynamically as the first non-internal group)
+- **App**: `6759682551`, bundle `com.shahine.homeclaw`, ASC platform `MAC_OS` (Mac Catalyst on the Mac App Store; no iOS listing)
+- **Groups**: "Internal Testers" (beta uploads), "External Testers" (`external`)
+- **Profile**: `com.shahine.homeclaw AppStore`, type `MAC_CATALYST_APP_STORE`
 
-Full pipeline (archive + upload + TestFlight submit):
 ```bash
-fastlane beta notes_file:/tmp/notes.txt
-# or inline notes:
-fastlane beta notes:"What to test notes here"
+scripts/release.sh status [--build 197]   # read-only: versions, builds, groups (also the auth check)
+scripts/release.sh bump-build             # then commit "chore(release): build N", tag v<ver>+N, push
+scripts/release.sh beta --dry-run         # archive + export .pkg + asc xcode validate, no upload
+TF_CHANGELOG="$(cat /tmp/notes.txt)" scripts/release.sh beta   # -> Internal Testers
+scripts/release.sh external [--build N]   # -> External Testers + beta review (was submit_only)
+scripts/release.sh archive                # archive only, no upload
 ```
 
-Standalone lanes:
-```bash
-fastlane status                          # latest build status
-fastlane status build:143                # specific build
-fastlane submit_only build:143 notes_file:/tmp/notes.txt   # recovery: re-submit existing build
-fastlane archive                         # archive only, no upload
-fastlane upload                          # archive + upload, no external submit
-fastlane auth_check                      # validate ASC API key
-```
+The `/upload` command drafts tester notes from git log and runs `beta` then `external` via Monitor.
 
-The `/upload` skill auto-generates release notes from git log and runs `fastlane beta` via Monitor.
-
-### memory/fastlane-release-pipeline.md
+### memory/asc-release-pipeline.md
 
 ---
-name: Fastlane release pipeline
-description: HomeClaw release tooling lives in fastlane/Fastfile (replaced scripts/archive.sh + scripts/asc-testflight.py on 2026-05-08)
+name: Release pipeline (asc)
+description: HomeClaw release tooling is scripts/release.sh on the asc CLI (replaced fastlane on 2026-09-29, which had replaced scripts/archive.sh + scripts/asc-testflight.py on 2026-05-08)
 type: project
-originSessionId: 9b33f14a-8ebf-4226-8eed-b23d580ee1f3
 ---
-HomeClaw's release pipeline runs through fastlane. The legacy `scripts/archive.sh` and `scripts/asc-testflight.py` have been removed.
-
-**Why:** Consolidate archive/export/upload/submit into a single tool that other Shahine iOS apps already use (OnThisDay, bouncer, openclaw/apps/ios), and replace the hand-rolled JWT/HTTP code in `asc-testflight.py` with fastlane's well-maintained pilot/spaceship.
+HomeClaw's release pipeline is `scripts/release.sh`, driving `asc`. Fastlane (Fastfile/Gymfile/Appfile, Gemfile) was removed on 2026-09-29; `fastlane/` became `appstore/` (metadata, raw `screenshots/`, `framed/`). Guide: `appstore/RELEASE.md`.
 
 **How to apply:**
-- Use `fastlane archive | upload | beta | status | submit_only | auth_check` for all release work
-- `fastlane beta` is the full external TestFlight loop (replaces `archive.sh --testflight`)
-- Tester notes: `fastlane beta notes_file:/tmp/notes.txt` or `notes:"text"` (also works on `submit_only`)
-- The Fastfile's `prepare` private_lane runs `xcodegen generate` + `npm run build:mcp` before every archive
-- Mac Catalyst archive uses `catalyst_platform("macos")` + `destination("generic/platform=macOS,variant=Mac Catalyst")` (set in Gymfile)
-- Auth: `app_store_connect_api_key` reads `ASC_KEY_ID` + `ASC_ISSUER_ID` + `ASC_KEY_PATH` from `~/.secrets.env`; team ID from `.env.local` (`HOMEKIT_TEAM_ID`)
-- Env loader uses `File.binread + .scrub` to survive non-UTF-8 bytes in unrelated values (the bug that broke build 142 with the Python loader)
-- External group is resolved dynamically via `Spaceship::ConnectAPI::App.find(BUNDLE_ID).get_beta_groups` (no hardcoded name)
-- Build number comes from `.build-number` file (incremented in-memory only, not written back) or `git rev-list --count HEAD` as fallback — same semantics as the old archive.sh
-- Marketing version comes from latest `v*` git tag with `+build` suffix stripped (Apple rejects 4-component versions)
-- HomeKit entitlement is verified before archive AND on the signed app post-archive (codesign -d --entitlements)
+- Subcommands: `info | status | bump-build | archive | beta | external | metadata | metadata-pull | release | submit | screenshots | frame | upload-screenshots`
+- `beta` stops at TestFlight Internal Testers; `external` sends to External Testers; `release` submits to App Review (manual release after approval unless `--auto-release`)
+- `prepare` runs `xcodegen generate` + `npm ci` + `npm run build:mcp` (and requires the committed `mcp-server/dist/server.js` to match) before every archive
+- Mac Catalyst archive: destination `generic/platform=macOS,variant=Mac Catalyst`; export is a `.pkg` with manual signing (Apple Distribution + 3rd Party Mac Developer Installer)
+- Marketing version comes from the nearest `v*` git tag with `+build` stripped (Apple rejects 4-component versions)
+- Build number is `CFBundleVersion` in the committed `Resources/Info.plist`; `beta` seeds `.build-number` so project.yml's pre-build script lands on it, and restores the plist afterwards
+- HomeKit entitlement is verified before archive AND on the signed app post-archive; `homeclaw-cli` must be sandboxed (ASC error 90296)
+- The Xcode comes from `.xcode-version`; beta Xcodes are refused
 
 ### memory/feedback_aqara_mcp_sticky_session.md
 
@@ -685,8 +671,8 @@ What to test:
 
 1. Update README with new features
 2. Merge PR to main
-3. Create release tag matching build number: `v{version}+{build}`
-4. Archive and upload: `fastlane upload` (or `fastlane beta` for full external TestFlight loop)
+3. `scripts/release.sh bump-build`, commit it, and tag `v{version}+{build}`
+4. Upload: `scripts/release.sh beta` (then `scripts/release.sh external` for external TestFlight); the tag must be on the build-bump commit first
 5. Create GitHub release: `gh release create ...`
 6. Generate tester update text for App Store Connect
 

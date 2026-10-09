@@ -2,7 +2,7 @@ import XCTest
 
 /// Captures App Store screenshots of HomeClaw running in demo mode (synthetic
 /// HomeKit data — no real user homes are ever touched). One screenshot per
-/// test method; fastlane's `screenshots` lane runs `xcparse` to extract them.
+/// test method; `scripts/screenshots.sh` extracts them with `xcrun xcresulttool export attachments`.
 ///
 /// Demo mode is enabled via the `--ui-test-demo` launch arg, which causes
 /// `HomeKitManager` to short-circuit `HMHomeManager` and serve `DemoFixtures`
@@ -97,7 +97,7 @@ final class ScreenshotTests: XCTestCase {
     /// XCTAttachment. We capture the element rather than `XCUIScreen.main`
     /// so the surrounding desktop, menu bar, and other apps never appear in
     /// the App Store screenshot. Lifetime `.keepAlways` so the .xcresult
-    /// bundle retains it for `xcparse` extraction.
+    /// bundle retains it for extraction.
     @MainActor
     private func attachScreenshot(of element: XCUIElement, named name: String) {
         let screenshot = element.screenshot()

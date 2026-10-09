@@ -29,7 +29,7 @@ echo ""
 update_file() {
     local file="$1"
     local description="$2"
-    local relative="${file#$PROJECT_ROOT/}"
+    local relative="${file#"$PROJECT_ROOT"/}"
 
     if [[ ! -f "$file" ]]; then
         echo "  SKIP  $relative (not found)"

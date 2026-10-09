@@ -224,7 +224,6 @@ fi
 # Phase 2: Build MCP server
 next_step
 step "$CURRENT_STEP" "$TOTAL_STEPS" "Building MCP server"
-MCP_SERVER_JS="$PROJECT_ROOT/mcp-server/dist/server.js"
 if command -v node &>/dev/null && [[ -f "$PROJECT_ROOT/mcp-server/build.mjs" ]]; then
     npm run --prefix "$PROJECT_ROOT" build:mcp 2>/dev/null || true
 fi
@@ -311,6 +310,8 @@ echo ""
 # ─── Install ────────────────────────────────────────────────────────
 
 if $DO_INSTALL; then
+    # bold prints no newline; echo supplies it.
+    # shellcheck disable=SC2005
     echo "$(bold "Installing...")"
 
     if [[ -d "/Applications/$APP_NAME.app" ]]; then

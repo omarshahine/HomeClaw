@@ -17,8 +17,14 @@ struct SetDisplayAs: ParsableCommand {
     @Argument(help: "Accessory name or UUID, or a service UUID")
     var accessory: String
 
-    @Argument(help: "light, fan, switch, outlet, or default")
-    var displayAs: String
+    /// The Home app's Display As choices. Which of switch/outlet is valid depends on
+    /// the service, so the app checks that; anything else is a usage error here.
+    enum Value: String, ExpressibleByArgument, CaseIterable {
+        case light, fan, `switch`, outlet, `default`
+    }
+
+    @Argument(help: "What the service displays as")
+    var displayAs: Value
 
     @Option(name: .long, help: "Target services by service type UUID")
     var serviceType: String?
@@ -41,15 +47,20 @@ struct SetDisplayAs: ParsableCommand {
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
+    func validate() throws {
+        if let serviceIndex, serviceIndex < 1 {
+            throw ValidationError("--service-index is 1-based; got \(serviceIndex)")
+        }
+    }
+
     func run() throws {
         if let err = validateInput(accessory, label: "accessory") { throw ValidationError(err) }
-        if let err = validateInput(displayAs, label: "display-as") { throw ValidationError(err) }
         if let serviceName, let err = validateInput(serviceName, label: "service-name") { throw ValidationError(err) }
         if let serviceID, let err = validateInput(serviceID, label: "service-id") { throw ValidationError(err) }
 
         var args: [String: Any] = [
             "id": accessory,
-            "display_as": displayAs,
+            "display_as": displayAs.rawValue,
             "dry_run": dryRun,
         ]
         if let home { args["home_id"] = home }
