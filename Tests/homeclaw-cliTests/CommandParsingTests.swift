@@ -360,17 +360,25 @@ struct StructureCommandParsingTests {
         let bare = try Rename.parse(["Old", "New"])
         #expect(bare.serviceName == nil && bare.serviceIndex == nil && bare.serviceID == nil && bare.serviceType == nil)
         #expect(throws: (any Error).self) { _ = try Rename.parse(["Old", "New", "--service-index", "two"]) }
+        #expect(throws: (any Error).self) { _ = try Rename.parse(["Old", "New", "--service-index", "0"]) }
+        #expect(throws: (any Error).self) { _ = try Rename.parse(["Old", "New", "--service-index", "-1"]) }
     }
 
     @Test("set-display-as takes accessory + value, with service selectors")
     func setDisplayAs() throws {
         let cmd = try SetDisplayAs.parse(["Fan", "fan", "--service-index", "1", "--dry-run", "--home", "Lounge"])
         #expect(cmd.accessory == "Fan")
-        #expect(cmd.displayAs == "fan")
+        #expect(cmd.displayAs == .fan)
         #expect(cmd.serviceIndex == 1)
         #expect(cmd.dryRun == true)
         #expect(cmd.home == "Lounge")
         #expect(throws: (any Error).self) { _ = try SetDisplayAs.parse(["Fan"]) }
+        for value in ["light", "fan", "switch", "outlet", "default"] {
+            #expect(try SetDisplayAs.parse(["Fan", value]).displayAs.rawValue == value)
+        }
+        // A bad value is a usage error (exit 64), not a runtime failure from the app.
+        #expect(throws: (any Error).self) { _ = try SetDisplayAs.parse(["Fan", "thermostat"]) }
+        #expect(throws: (any Error).self) { _ = try SetDisplayAs.parse(["Fan", "fan", "--service-index", "0"]) }
     }
 
     @Test("rename-room takes room + new name")

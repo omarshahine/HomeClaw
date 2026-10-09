@@ -41,6 +41,12 @@ struct Rename: ParsableCommand {
     @Flag(name: .long, help: "Output raw JSON")
     var json = false
 
+    func validate() throws {
+        if let serviceIndex, serviceIndex < 1 {
+            throw ValidationError("--service-index is 1-based; got \(serviceIndex)")
+        }
+    }
+
     func run() throws {
         if let err = validateInput(accessory, label: "accessory") { throw ValidationError(err) }
         if let err = validateInput(newName, label: "new name") { throw ValidationError(err) }

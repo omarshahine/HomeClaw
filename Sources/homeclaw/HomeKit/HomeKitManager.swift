@@ -1136,7 +1136,7 @@ final class HomeKitManager: NSObject, Observable {
                 throw ControlError.accessoryNotFound(id)
             }
             let candidates = (target.service.map { [$0] } ?? accessory.services)
-                .filter { $0.serviceType != HMServiceTypeAccessoryInformation }
+                .filter { Self.isRenamableService(type: $0.serviceType) }
             let service = try selectService(
                 on: accessory, from: candidates, purpose: "that can be renamed",
                 type: serviceType, name: serviceName, id: serviceID, index: serviceIndex
@@ -1222,7 +1222,7 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.invalidArgument("display_as is not available in demo mode")
         }
         let home = try resolveHome(homeID: homeID)
-        guard let target = findServiceTarget(id: id, homeID: homeID),
+        guard let target = try findServiceTarget(id: id, homeID: homeID),
               isAccessoryAllowed(target.accessory)
         else {
             throw ControlError.accessoryNotFound(id)
@@ -4038,29 +4038,62 @@ final class HomeKitManager: NSObject, Observable {
         purpose: String,
         type: String?, name: String?, id: String?, index: Int?
     ) throws -> HMService {
-        let matches = candidates.filter { serviceMatches($0, type: type, name: name, id: id, index: index) }
-        if matches.count == 1 { return matches[0] }
+        if let index, index < 1 {
+            throw ControlError.invalidArgument("service_index is 1-based; got \(index)")
+        }
         func hints(_ services: [HMService]) -> String {
             services.map { ServiceDescriptor($0).selectorHint }.joined(separator: "\n")
         }
-        if candidates.isEmpty {
+        switch Self.pickService(from: candidates, where: { serviceMatches($0, type: type, name: name, id: id, index: index) }) {
+        case .found(let service):
+            return service
+        case .noCandidates:
             throw ControlError.serviceNotFound("'\(accessory.name)' has no service \(purpose)")
-        }
-        if matches.isEmpty {
+        case .noMatch:
             throw ControlError.serviceNotFound(
                 """
                 No service on '\(accessory.name)' \(purpose) matches the given selectors. Services \(purpose):
                 \(hints(candidates))
                 """
             )
+        case .ambiguous(let matches):
+            throw ControlError.ambiguousService(
+                """
+                '\(accessory.name)' has \(matches.count) services \(purpose). \
+                Pass service_name, service_index, or service_id to pick one:
+                \(hints(matches))
+                """
+            )
         }
-        throw ControlError.ambiguousService(
-            """
-            '\(accessory.name)' has \(matches.count) services \(purpose). \
-            Pass service_name, service_index, or service_id to pick one:
-            \(hints(matches))
-            """
-        )
+    }
+
+    /// Outcome of choosing one service from a candidate list.
+    enum ServicePick<T> {
+        case found(T)
+        /// The accessory has no service eligible for the operation at all.
+        case noCandidates
+        /// Eligible services exist, but the selectors excluded all of them.
+        case noMatch
+        case ambiguous([T])
+    }
+
+    /// Choose exactly one of `candidates` that `matches`. Never falls back to the
+    /// first candidate: several matches are `.ambiguous`, so a write can't land on
+    /// whichever service HomeKit happens to list first.
+    nonisolated static func pickService<T>(from candidates: [T], where matches: (T) -> Bool) -> ServicePick<T> {
+        if candidates.isEmpty { return .noCandidates }
+        let hits = candidates.filter(matches)
+        switch hits.count {
+        case 0: return .noMatch
+        case 1: return .found(hits[0])
+        default: return .ambiguous(hits)
+        }
+    }
+
+    /// Whether a service can be renamed on its own. The Accessory Information service
+    /// carries the accessory's identity, not a Home app tile, so it's never a target.
+    nonisolated static func isRenamableService(type: String) -> Bool {
+        type != HMServiceTypeAccessoryInformation
     }
 
     /// Identifying details for a single service, used to disambiguate characteristics
@@ -4129,19 +4162,33 @@ final class HomeKitManager: NSObject, Observable {
     private func serviceMatches(
         _ service: HMService, type: String?, name: String?, id: String?, index: Int?
     ) -> Bool {
-        let uuid = service.uniqueIdentifier.uuidString
-        if let type, service.serviceType.localizedCaseInsensitiveCompare(type) != .orderedSame {
+        Self.serviceMatches(
+            serviceType: service.serviceType,
+            serviceName: service.name,
+            serviceUUID: service.uniqueIdentifier.uuidString,
+            labelIndex: ServiceDescriptor.labelIndex(of: service),
+            type: type, name: name, id: id, index: index
+        )
+    }
+
+    /// `serviceMatches` over plain values, so the selector rules are unit-testable
+    /// (`HMService` has no public initializer).
+    nonisolated static func serviceMatches(
+        serviceType: String, serviceName: String, serviceUUID: String, labelIndex: Int?,
+        type: String?, name: String?, id: String?, index: Int?
+    ) -> Bool {
+        if let type, serviceType.localizedCaseInsensitiveCompare(type) != .orderedSame {
             return false
         }
-        if let id, uuid.localizedCaseInsensitiveCompare(id) != .orderedSame {
+        if let id, serviceUUID.localizedCaseInsensitiveCompare(id) != .orderedSame {
             return false
         }
         if let name {
-            let matchesName = service.name.localizedCaseInsensitiveCompare(name) == .orderedSame
-            let matchesID = uuid.localizedCaseInsensitiveCompare(name) == .orderedSame
+            let matchesName = serviceName.localizedCaseInsensitiveCompare(name) == .orderedSame
+            let matchesID = serviceUUID.localizedCaseInsensitiveCompare(name) == .orderedSame
             if !matchesName && !matchesID { return false }
         }
-        if let index, ServiceDescriptor.labelIndex(of: service) != index {
+        if let index, labelIndex != index {
             return false
         }
         return true
