@@ -1275,7 +1275,7 @@ final class HomeKitManager: NSObject, Observable {
     /// nor its members are shown) and only counted in `hidden_groups`.
     func listServiceGroups(homeID: String? = nil) async throws -> [String: Any] {
         await waitForReady()
-        if Self.isDemoMode { return ["groups": [] as [[String: Any]]] }
+        if Self.isDemoMode { return ["home": DemoFixtures.homeName, "groups": [] as [[String: Any]]] }
         let home = try resolveHome(homeID: homeID)
         let visible = home.serviceGroups.filter { isGroupVisible($0) }
         var result: [String: Any] = [
@@ -1301,9 +1301,7 @@ final class HomeKitManager: NSObject, Observable {
         if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
         let home = try resolveHome(homeID: homeID)
         guard !members.isEmpty else { throw ControlError.invalidArgument("a group needs at least one member") }
-        if let existing = home.serviceGroups.first(where: { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
-            throw ControlError.invalidArgument("a group named '\(existing.name)' already exists in \(home.name)")
-        }
+        try requireAvailableGroupName(name, in: home)
         let services = try resolveGroupMembers(members, homeID: homeID)
         if !allowMixed { try requireSingleKind(services) }
 
@@ -1395,16 +1393,14 @@ final class HomeKitManager: NSObject, Observable {
         let home = try resolveHome(homeID: homeID)
         let group = try findServiceGroup(groupID, in: home)
         guard !members.isEmpty else { throw ControlError.invalidArgument("no members given") }
-        let services = try resolveGroupMembers(members, homeID: homeID)
-        let existingIDs = Swift.Set(group.services.map(\.uniqueIdentifier))
-        let toRemove = services.filter { existingIDs.contains($0.uniqueIdentifier) }
+        let (toRemove, notMembers) = try resolveMembersToRemove(members, from: group, homeID: homeID)
 
         var result: [String: Any] = [
             "group": group.name,
             "id": group.uniqueIdentifier.uuidString,
             "home": home.name,
             "removed": toRemove.map { groupMemberDictionary($0) },
-            "not_members": services.filter { !existingIDs.contains($0.uniqueIdentifier) }.map { groupMemberDictionary($0) },
+            "not_members": notMembers,
         ]
         if dryRun {
             result["dry_run"] = true
@@ -1432,6 +1428,7 @@ final class HomeKitManager: NSObject, Observable {
         if Self.isDemoMode { throw ControlError.invalidArgument("groups are not available in demo mode") }
         let home = try resolveHome(homeID: homeID)
         let group = try findServiceGroup(groupID, in: home)
+        try requireAvailableGroupName(newName, in: home, excluding: group)
         let oldName = group.name
         var result: [String: Any] = [
             "old_name": oldName,
@@ -1511,7 +1508,7 @@ final class HomeKitManager: NSObject, Observable {
             guard !member.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw ControlError.invalidArgument("group members can't be blank")
             }
-            guard let target = findServiceTarget(id: member, homeID: homeID),
+            guard let target = try findServiceTarget(id: member, homeID: homeID),
                   isAccessoryAllowed(target.accessory)
             else {
                 throw ControlError.accessoryNotFound(member)
@@ -1521,11 +1518,83 @@ final class HomeKitManager: NSObject, Observable {
             let service = try selectService(
                 on: target.accessory, from: candidates,
                 purpose: "that can join a group (light, switch, outlet, fan, or window covering)",
-                type: nil, name: nil, id: nil, index: nil
+                type: nil, name: nil, id: nil, index: nil,
+                pickHint: Self.groupMemberPickHint
             )
             if seen.insert(service.uniqueIdentifier).inserted { services.append(service) }
         }
         return services
+    }
+
+    /// Resolves members to remove against the group's current members, not against
+    /// what could join a group: an accessory with two groupable services, only one
+    /// of them in the group, resolves to that one, and a member that wouldn't pass
+    /// the add rules (added in the Home app, or with allow_mixed) is still removable
+    /// by name. Members with no service in the group come back as `notMembers`.
+    private func resolveMembersToRemove(
+        _ members: [String], from group: HMServiceGroup, homeID: String?
+    ) throws -> (services: [HMService], notMembers: [[String: Any]]) {
+        let memberIDs = Swift.Set(group.services.map(\.uniqueIdentifier))
+        var services: [HMService] = []
+        var notMembers: [[String: Any]] = []
+        var seen = Swift.Set<UUID>()
+        for member in members {
+            guard !member.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ControlError.invalidArgument("group members can't be blank")
+            }
+            guard let target = try findServiceTarget(id: member, homeID: homeID),
+                  isAccessoryAllowed(target.accessory)
+            else {
+                throw ControlError.accessoryNotFound(member)
+            }
+            let inGroup = (target.service.map { [$0] } ?? target.accessory.services)
+                .filter { memberIDs.contains($0.uniqueIdentifier) }
+            if inGroup.isEmpty {
+                var entry: [String: Any] = [
+                    "member": member,
+                    "accessory": target.accessory.name,
+                    "accessory_id": target.accessory.uniqueIdentifier.uuidString,
+                ]
+                if let service = target.service { entry.merge(ServiceDescriptor(service).dictionary) { $1 } }
+                notMembers.append(entry)
+                continue
+            }
+            let service = try selectService(
+                on: target.accessory, from: inGroup,
+                purpose: "in group '\(group.name)'",
+                type: nil, name: nil, id: nil, index: nil,
+                pickHint: Self.groupMemberPickHint
+            )
+            if seen.insert(service.uniqueIdentifier).inserted { services.append(service) }
+        }
+        return (services, notMembers)
+    }
+
+    /// Group commands take a service UUID as the member, not the service_* selectors.
+    private static let groupMemberPickHint = "Pass one of these service UUIDs (service_id) as the member instead"
+
+    /// Rejects a blank group name, or one that matches another group in the home
+    /// (case-insensitively, as lookups by name are). Groups the device filter hides
+    /// count as clashes too, but the error never names them.
+    private func requireAvailableGroupName(_ name: String, in home: HMHome, excluding current: HMServiceGroup? = nil) throws {
+        let others = home.serviceGroups
+            .filter { $0.uniqueIdentifier != current?.uniqueIdentifier }
+            .map(\.name)
+        if let problem = Self.groupNameProblem(name, existingNames: others) {
+            throw ControlError.invalidArgument("\(problem) in \(home.name)")
+        }
+    }
+
+    /// Why `name` can't be used for a group alongside `existingNames`, or nil if it
+    /// can. The message repeats only the caller's own name, never an existing one.
+    nonisolated static func groupNameProblem(_ name: String, existingNames: [String]) -> String? {
+        if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "a group name can't be blank"
+        }
+        if existingNames.contains(where: { $0.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
+            return "the group name '\(name)' is already taken"
+        }
+        return nil
     }
 
     private func requireSingleKind(_ services: [HMService]) throws {
@@ -4347,7 +4416,8 @@ final class HomeKitManager: NSObject, Observable {
         on accessory: HMAccessory,
         from candidates: [HMService],
         purpose: String,
-        type: String?, name: String?, id: String?, index: Int?
+        type: String?, name: String?, id: String?, index: Int?,
+        pickHint: String = "Pass service_name, service_index, or service_id to pick one"
     ) throws -> HMService {
         if let index, index < 1 {
             throw ControlError.invalidArgument("service_index is 1-based; got \(index)")
@@ -4370,8 +4440,7 @@ final class HomeKitManager: NSObject, Observable {
         case .ambiguous(let matches):
             throw ControlError.ambiguousService(
                 """
-                '\(accessory.name)' has \(matches.count) services \(purpose). \
-                Pass service_name, service_index, or service_id to pick one:
+                '\(accessory.name)' has \(matches.count) services \(purpose). \(pickHint):
                 \(hints(matches))
                 """
             )

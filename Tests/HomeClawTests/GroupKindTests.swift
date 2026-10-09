@@ -72,4 +72,19 @@ final class GroupKindTests: XCTestCase {
         // …but a plain switch next to a bulb is mixed.
         XCTAssertEqual(AccessoryModel.mixedKinds(["lightbulb", "switch"]), ["lightbulb", "switch"])
     }
+
+    func testGroupNamesMustBeNonBlankAndUnique() {
+        XCTAssertNil(HomeKitManager.groupNameProblem("Lounge Lights", existingNames: ["Desk Lamps"]))
+        XCTAssertNotNil(HomeKitManager.groupNameProblem("", existingNames: []))
+        XCTAssertNotNil(HomeKitManager.groupNameProblem("   ", existingNames: []))
+        // Lookups by name are case-insensitive, so a clash is too.
+        XCTAssertNotNil(HomeKitManager.groupNameProblem("desk lamps", existingNames: ["Desk Lamps"]))
+    }
+
+    func testNameClashErrorNeverNamesTheExistingGroup() {
+        // The existing group may be hidden by the device filter; only echo the caller's name.
+        let problem = HomeKitManager.groupNameProblem("desk lamps", existingNames: ["Desk Lamps"])
+        XCTAssertEqual(problem?.contains("Desk Lamps"), false)
+        XCTAssertEqual(problem?.contains("desk lamps"), true)
+    }
 }
