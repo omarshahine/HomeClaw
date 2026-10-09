@@ -520,7 +520,7 @@ The `import-scene` command accepts a JSON file defining a scene and its actions:
 
 Action objects also accept `characteristic` as an alias for `property` (read commands emit `characteristic`, so their output round-trips as input).
 
-The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan):
+The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan). A name that matches several accessories is skipped with status `ambiguous` rather than guessed. Every other command that takes an accessory name (including scene import/update actions and automation conditions) fails on a duplicate before changing anything, and lists each match's room and UUID:
 
 ```json
 [
@@ -909,36 +909,38 @@ Your Apple Developer Team ID is required, provided via `.env.local`, `--team-id`
 
 ### Archiving for App Store / TestFlight
 
-The release pipeline is driven by [fastlane](https://fastlane.tools). Lanes:
+The release pipeline is `scripts/release.sh`, driving the App Store Connect CLI [`asc`](https://github.com/rorkai/App-Store-Connect-CLI). Full guide: [appstore/RELEASE.md](appstore/RELEASE.md).
 
 ```bash
-fastlane archive       # Build a release .xcarchive (no upload)
-fastlane upload        # Archive + upload to App Store Connect (no external submission)
-fastlane beta          # Archive + upload + submit to external TestFlight (full release loop)
-fastlane status        # Show TestFlight processing/external state for the latest build
-fastlane submit_only build:NNN   # Recovery: submit an already-uploaded build
-fastlane auth_check    # Validate ASC API key setup
+scripts/release.sh help
+scripts/release.sh status              # ASC versions, builds, TestFlight groups (read-only)
+scripts/release.sh bump-build          # Next build number -> Resources/Info.plist (commit + tag it)
+scripts/release.sh archive             # Build a release .xcarchive (no upload)
+scripts/release.sh beta --dry-run      # Archive + export .pkg + validate with Apple, no upload
+scripts/release.sh beta                # ... then upload to TestFlight (Internal Testers)
+scripts/release.sh external            # Send the build to External Testers + beta review
+scripts/release.sh release --dry-run   # Push metadata + screenshots, submit for App Review
 
-# Pass tester notes (used by `beta` and `submit_only`):
-fastlane beta notes_file:/tmp/notes.txt
-fastlane beta notes:"Bug fixes and improvements"
+# Tester notes default to appstore/metadata/en-US/release_notes.txt:
+TF_CHANGELOG="Bug fixes and improvements" scripts/release.sh beta
 
 # App Store screenshot pipeline (XCUITest-driven, demo mode, zero personal data):
-fastlane screenshots          # Run HomeClawUITests in demo mode, extract PNGs to fastlane/screenshots/en-US/
-fastlane upload_screenshots   # Push screenshots to App Store Connect
+scripts/release.sh screenshots         # Run HomeClawUITests in demo mode -> appstore/screenshots/en-US/
+scripts/release.sh frame               # Frame them -> appstore/framed/en-US/
+scripts/release.sh upload-screenshots  # Replace the Mac App Store screenshot set
 ```
 
-The screenshot pipeline uses **demo mode** — `HomeKitManager.isDemoMode` (gated on `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1`) bypasses HomeKit and serves synthetic data from `Sources/homeclaw/HomeKit/DemoFixtures.swift`. Real HomeKit data is never read or shown. Requires `xcparse` (`brew install chargepoint/xcparse/xcparse`).
+The screenshot pipeline uses **demo mode** — `HomeKitManager.isDemoMode` (gated on `--ui-test-demo` launch arg or `HOMECLAW_DEMO=1`) bypasses HomeKit and serves synthetic data from `Sources/homeclaw/HomeKit/DemoFixtures.swift`. Real HomeKit data is never read or shown. Attachments are extracted with `xcrun xcresulttool`, which ships with Xcode.
 
 Known follow-up: the menu-bar dropdown is `NSMenu` (AppKit), so it can't be auto-rendered via SwiftUI `ImageRenderer`. Capture it manually with `screencapture -x` of the running demo-mode app, or build a SwiftUI mockup of the dropdown.
 
-Auth uses an App Store Connect API key from `~/.secrets.env` (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_PATH`). Team ID comes from `.env.local` (`HOMEKIT_TEAM_ID`).
+Auth uses an App Store Connect API key (`ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH`, or the `APP_STORE_CONNECT_API_*` names). Team ID comes from `.env.local` (`HOMEKIT_TEAM_ID`).
 
 To open the archive in Xcode Organizer instead of uploading:
 
 ```bash
-fastlane archive
-open '.build/archives/HomeClaw.xcarchive'
+scripts/release.sh archive
+open '.asc/artifacts/HomeClaw.xcarchive'
 ```
 
 ### Version Bumping
@@ -1017,10 +1019,14 @@ Resources/                 Info.plist, entitlements, app icons
 scripts/
   build.sh                 Build, sign, and install
   bump-version.sh          Update version across source files
-fastlane/
-  Fastfile                 Release pipeline: archive, upload, beta (TestFlight)
-  Appfile                  Bundle ID + team ID
-  Gymfile                  Mac Catalyst archive defaults
+  release.sh               Release pipeline (asc): archive, TestFlight, App Store
+  screenshots.sh           Capture App Store screenshots via XCUITest
+  frame_screenshots.sh     Frame screenshots for the App Store
+appstore/
+  metadata/                App Store listing (source of truth)
+  screenshots/             Raw screenshots
+  framed/                  Framed screenshots (uploaded)
+  RELEASE.md               Release guide
 mcp-server/                Node.js stdio MCP server (wraps homeclaw-cli)
 openclaw/                  OpenClaw plugin (HomeClaw)
   skills/homekit/          HomeKit skill with full characteristic reference

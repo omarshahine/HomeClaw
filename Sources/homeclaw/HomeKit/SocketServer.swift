@@ -551,7 +551,7 @@ final class SocketServer: @unchecked Sendable {
                 // all that's needed for serial-number / model / firmware sweeps.
                 // Defaults to true to preserve prior behavior.
                 let refresh = parseBool(args, key: "refresh", default: true)
-                guard let accessory = await hk.getAccessory(id: id, homeID: args["home_id"] as? String, refresh: refresh) else {
+                guard let accessory = try await hk.getAccessory(id: id, homeID: args["home_id"] as? String, refresh: refresh) else {
                     return encodeResponse(success: false, error: "Accessory not found: \(id)")
                 }
                 result = accessory
