@@ -174,7 +174,7 @@ final class WebhookEventLogger {
     // MARK: - Private
 
     private func writeEntry(_ entry: [String: Any]) {
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]),
+        guard let jsonData = SafeJSON.data(withJSONObject: entry, options: [.sortedKeys]),
               var line = String(data: jsonData, encoding: .utf8)
         else { return }
 

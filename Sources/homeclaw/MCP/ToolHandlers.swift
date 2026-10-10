@@ -716,7 +716,7 @@ enum ToolHandlers {
         return Int(exactly: number.int64Value)
     }
     private static func bool(_ args: [String: Any], _ key: String) -> Bool { args[key] as? Bool ?? false }
-    private static func json(_ value: Any) -> Data { (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{}".utf8) }
+    private static func json(_ value: Any) -> Data { SafeJSON.data(withJSONObject: value) ?? Data("{}".utf8) }
     private static func error(_ message: String) -> Data { json(["error": message]) }
 
     @MainActor private static func manage(_ args: [String: Any], hk: HomeKitManager) async throws -> Any {

@@ -243,7 +243,7 @@ actor MCPServer {
         // slot until the underlying work really ends, so abandoned work cannot
         // pile up beyond the cap.
         guard let slot = toolAdmission.acquire() else { return Self.jsonRPCErrorData(id: id, code: -32003, message: "Server busy: too many concurrent tool calls") }
-        let args = (try? JSONSerialization.data(withJSONObject: arguments)) ?? Data("{}".utf8)
+        let args = SafeJSON.data(withJSONObject: arguments) ?? Data("{}".utf8)
         let data = await dispatchWithTimeout(name: name, arguments: args, slot: slot)
         let isError = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error"] != nil
         return jsonData(["jsonrpc":"2.0", "id":id, "result":["content":[["type":"text", "text":String(decoding:data, as: UTF8.self)]], "isError":isError]])
@@ -397,8 +397,8 @@ private extension MCPServer {
     }
 
     private func protocolError(status: Int, code: Int, message: String, headers: [String:String] = [:]) -> HTTPResponse { return HTTPResponse(statusCode: status, headers: headers.merging(["Content-Type":"application/json; charset=utf-8"]) { _, new in new }, bodyData: Self.jsonRPCErrorData(code: code, message: message)) }
-    private func jsonData(_ value: [String: Any]) -> Data { (try? JSONSerialization.data(withJSONObject: value)) ?? Data() }
-    static func jsonRPCErrorData(id: Any? = nil, code: Int, message: String) -> Data { var object: [String: Any] = ["jsonrpc":"2.0", "error":["code":code, "message":message]]; if let id { object["id"] = id }; return (try? JSONSerialization.data(withJSONObject: object)) ?? Data() }
+    private func jsonData(_ value: [String: Any]) -> Data { SafeJSON.data(withJSONObject: value) ?? Data() }
+    static func jsonRPCErrorData(id: Any? = nil, code: Int, message: String) -> Data { var object: [String: Any] = ["jsonrpc":"2.0", "error":["code":code, "message":message]]; if let id { object["id"] = id }; return SafeJSON.data(withJSONObject: object) ?? Data() }
     private struct AcceptRange {
         let mediaType: String
         let quality: Double
