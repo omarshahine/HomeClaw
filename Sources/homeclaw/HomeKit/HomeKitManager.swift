@@ -531,6 +531,8 @@ final class HomeKitManager: NSObject, Observable {
         case unsupportedTriggerType(String)
         case sceneNotFound(String)
         case serviceNotFound(String)
+        /// Service selectors matched more than one service. Payload: pre-rendered detail.
+        case ambiguousService(String)
         case invalidArgument(String)
         case writeNotApplied(String)
 
@@ -568,6 +570,7 @@ final class HomeKitManager: NSObject, Observable {
             case .unsupportedTriggerType(let detail): detail
             case .sceneNotFound(let id): "Scene not found: \(id)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
+            case .ambiguousService(let detail): "Ambiguous: \(detail)"
             case .invalidArgument(let detail): "Invalid argument: \(detail)"
             case .writeNotApplied(let detail):
                 "Write not applied: \(detail). Pass verify=false to accept unconfirmed writes."
@@ -1092,22 +1095,69 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
+    /// Renames an accessory, or one of its services.
+    ///
+    /// With no service selector, renames the accessory plus its primary service (the
+    /// Home app tile title). With a selector — or when `id` is a service UUID — renames
+    /// only that service, which is how a second gang's "Switch 2" tile on a multi-gang
+    /// accessory gets its own name. That writes the home's service name, so it works
+    /// even where the accessory reports its HAP Name characteristic as read-only.
     func renameAccessory(
         id: String,
         newName: String,
         homeID: String? = nil,
+        serviceType: String? = nil,
+        serviceName: String? = nil,
+        serviceID: String? = nil,
+        serviceIndex: Int? = nil,
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        let hasServiceSelector = serviceType != nil || serviceName != nil || serviceID != nil || serviceIndex != nil
         if Self.isDemoMode {
+            if hasServiceSelector {
+                throw ControlError.invalidArgument("service-level rename is not available in demo mode")
+            }
             guard let result = DemoFixtures.renameAccessory(id: id, newName: newName, dryRun: dryRun) else {
                 throw ControlError.accessoryNotFound(id)
             }
             return result
         }
         let home = try resolveHome(homeID: homeID)
-        guard let accessory = try findAccessory(id: id, homeID: homeID) else {
+        guard let target = try findServiceTarget(id: id, homeID: homeID) else {
             throw ControlError.accessoryNotFound(id)
+        }
+        let accessory = target.accessory
+
+        if hasServiceSelector || target.service != nil {
+            // Service-level rename is new surface, so it honours the device filter like
+            // control and set_display_as; the accessory-level path below predates it.
+            guard isAccessoryAllowed(accessory) else {
+                throw ControlError.accessoryNotFound(id)
+            }
+            let candidates = (target.service.map { [$0] } ?? accessory.services)
+                .filter { Self.isRenamableService(type: $0.serviceType) }
+            let service = try selectService(
+                on: accessory, from: candidates, purpose: "that can be renamed",
+                type: serviceType, name: serviceName, id: serviceID, index: serviceIndex
+            )
+            let oldServiceName = service.name
+            var result: [String: Any] = [
+                "accessory": accessory.name,
+                "service": ServiceDescriptor(service).dictionary,
+                "old_name": oldServiceName,
+                "new_name": newName,
+                "home": home.name,
+            ]
+            if dryRun {
+                result["dry_run"] = true
+                return result
+            }
+            try await homeKitAsync { service.updateName(newName, completionHandler: $0) }
+            AppLogger.homekit.info("[\(home.name)] Renamed service '\(oldServiceName)' on '\(accessory.name)' → '\(newName)'")
+            result["services_renamed"] = 1
+            result["dry_run"] = false
+            return result
         }
 
         let oldName = accessory.name
@@ -1148,6 +1198,70 @@ final class HomeKitManager: NSObject, Observable {
             "services_renamed": renamedServices.count,
             "dry_run": false
         ] as [String: Any]
+    }
+
+    /// Sets the Home app's "Display As" for a switch or outlet service: what the
+    /// switch controls ("light", "fan") or the service's own type ("switch" /
+    /// "outlet", also accepted as "default"). Writes the service's associated
+    /// service type in the home, as the Home app does.
+    ///
+    /// Only switch and outlet services support this, and the accessory's category
+    /// is unaffected — HomeKit exposes no public way to change either.
+    func setDisplayAs(
+        id: String,
+        displayAs: String,
+        homeID: String? = nil,
+        serviceType: String? = nil,
+        serviceName: String? = nil,
+        serviceID: String? = nil,
+        serviceIndex: Int? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode {
+            throw ControlError.invalidArgument("display_as is not available in demo mode")
+        }
+        let home = try resolveHome(homeID: homeID)
+        guard let target = try findServiceTarget(id: id, homeID: homeID),
+              isAccessoryAllowed(target.accessory)
+        else {
+            throw ControlError.accessoryNotFound(id)
+        }
+        let accessory = target.accessory
+
+        let candidates = target.service.map { [$0] }
+            ?? accessory.services.filter { AccessoryModel.supportsDisplayAs($0) }
+        let service = try selectService(
+            on: accessory, from: candidates, purpose: "that supports Display As (switch or outlet)",
+            type: serviceType, name: serviceName, id: serviceID, index: serviceIndex
+        )
+        guard let own = AccessoryModel.ownDisplayAs(serviceType: service.serviceType) else {
+            throw ControlError.invalidArgument(
+                "Display As only applies to switch and outlet services; '\(service.name)' is \(CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType)"
+            )
+        }
+        guard let newType = AccessoryModel.associatedServiceType(forDisplayAs: displayAs, serviceType: service.serviceType) else {
+            throw ControlError.invalidArgument(
+                "display_as must be light, fan, or \(own) for '\(service.name)' (\(own == "outlet" ? "an" : "a") \(own) can show as itself, a light, or a fan)"
+            )
+        }
+
+        let newDisplayAs = newType.map(AccessoryModel.displayAsName(forAssociatedType:)) ?? own
+        var result: [String: Any] = [
+            "accessory": accessory.name,
+            "service": ServiceDescriptor(service).dictionary,
+            "old_display_as": AccessoryModel.displayAs(of: service) ?? own,
+            "new_display_as": newDisplayAs,
+            "home": home.name,
+        ]
+        if dryRun {
+            result["dry_run"] = true
+            return result
+        }
+        try await homeKitAsync { service.updateAssociatedServiceType(newType, completionHandler: $0) }
+        AppLogger.homekit.info("[\(home.name)] Display As for '\(service.name)' on '\(accessory.name)' → \(newDisplayAs)")
+        result["dry_run"] = false
+        return result
     }
 
     // MARK: - Room Management
@@ -3896,6 +4010,92 @@ final class HomeKitManager: NSObject, Observable {
         })
     }
 
+    /// Resolves the target of a service-level operation. `id` is an accessory name or
+    /// UUID, or the UUID of one of an accessory's services (the per-service `id` in
+    /// `get --json`), in which case `service` is that service.
+    private func findServiceTarget(id: String, homeID: String?) throws -> (accessory: HMAccessory, service: HMService?)? {
+        if let accessory = try findAccessory(id: id, homeID: homeID) {
+            return (accessory, nil)
+        }
+        for home in filteredHomes(homeID: homeID) {
+            for accessory in home.accessories {
+                if let service = accessory.services.first(where: {
+                    $0.uniqueIdentifier.uuidString.localizedCaseInsensitiveCompare(id) == .orderedSame
+                }) {
+                    return (accessory, service)
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Picks exactly one service from `candidates` with the service selectors.
+    /// Unset selectors match everything, so a lone candidate needs none. Throws when
+    /// none or several match, listing the services to pick from.
+    private func selectService(
+        on accessory: HMAccessory,
+        from candidates: [HMService],
+        purpose: String,
+        type: String?, name: String?, id: String?, index: Int?
+    ) throws -> HMService {
+        if let index, index < 1 {
+            throw ControlError.invalidArgument("service_index is 1-based; got \(index)")
+        }
+        func hints(_ services: [HMService]) -> String {
+            services.map { ServiceDescriptor($0).selectorHint }.joined(separator: "\n")
+        }
+        switch Self.pickService(from: candidates, where: { serviceMatches($0, type: type, name: name, id: id, index: index) }) {
+        case .found(let service):
+            return service
+        case .noCandidates:
+            throw ControlError.serviceNotFound("'\(accessory.name)' has no service \(purpose)")
+        case .noMatch:
+            throw ControlError.serviceNotFound(
+                """
+                No service on '\(accessory.name)' \(purpose) matches the given selectors. Services \(purpose):
+                \(hints(candidates))
+                """
+            )
+        case .ambiguous(let matches):
+            throw ControlError.ambiguousService(
+                """
+                '\(accessory.name)' has \(matches.count) services \(purpose). \
+                Pass service_name, service_index, or service_id to pick one:
+                \(hints(matches))
+                """
+            )
+        }
+    }
+
+    /// Outcome of choosing one service from a candidate list.
+    enum ServicePick<T> {
+        case found(T)
+        /// The accessory has no service eligible for the operation at all.
+        case noCandidates
+        /// Eligible services exist, but the selectors excluded all of them.
+        case noMatch
+        case ambiguous([T])
+    }
+
+    /// Choose exactly one of `candidates` that `matches`. Never falls back to the
+    /// first candidate: several matches are `.ambiguous`, so a write can't land on
+    /// whichever service HomeKit happens to list first.
+    nonisolated static func pickService<T>(from candidates: [T], where matches: (T) -> Bool) -> ServicePick<T> {
+        if candidates.isEmpty { return .noCandidates }
+        let hits = candidates.filter(matches)
+        switch hits.count {
+        case 0: return .noMatch
+        case 1: return .found(hits[0])
+        default: return .ambiguous(hits)
+        }
+    }
+
+    /// Whether a service can be renamed on its own. The Accessory Information service
+    /// carries the accessory's identity, not a Home app tile, so it's never a target.
+    nonisolated static func isRenamableService(type: String) -> Bool {
+        type != HMServiceTypeAccessoryInformation
+    }
+
     /// Identifying details for a single service, used to disambiguate characteristics
     /// that appear on several services of the same accessory (multi-gang switches,
     /// multi-button remotes) and to describe the service a write landed on.
@@ -3962,19 +4162,33 @@ final class HomeKitManager: NSObject, Observable {
     private func serviceMatches(
         _ service: HMService, type: String?, name: String?, id: String?, index: Int?
     ) -> Bool {
-        let uuid = service.uniqueIdentifier.uuidString
-        if let type, service.serviceType.localizedCaseInsensitiveCompare(type) != .orderedSame {
+        Self.serviceMatches(
+            serviceType: service.serviceType,
+            serviceName: service.name,
+            serviceUUID: service.uniqueIdentifier.uuidString,
+            labelIndex: ServiceDescriptor.labelIndex(of: service),
+            type: type, name: name, id: id, index: index
+        )
+    }
+
+    /// `serviceMatches` over plain values, so the selector rules are unit-testable
+    /// (`HMService` has no public initializer).
+    nonisolated static func serviceMatches(
+        serviceType: String, serviceName: String, serviceUUID: String, labelIndex: Int?,
+        type: String?, name: String?, id: String?, index: Int?
+    ) -> Bool {
+        if let type, serviceType.localizedCaseInsensitiveCompare(type) != .orderedSame {
             return false
         }
-        if let id, uuid.localizedCaseInsensitiveCompare(id) != .orderedSame {
+        if let id, serviceUUID.localizedCaseInsensitiveCompare(id) != .orderedSame {
             return false
         }
         if let name {
-            let matchesName = service.name.localizedCaseInsensitiveCompare(name) == .orderedSame
-            let matchesID = uuid.localizedCaseInsensitiveCompare(name) == .orderedSame
+            let matchesName = serviceName.localizedCaseInsensitiveCompare(name) == .orderedSame
+            let matchesID = serviceUUID.localizedCaseInsensitiveCompare(name) == .orderedSame
             if !matchesName && !matchesID { return false }
         }
-        if let index, ServiceDescriptor.labelIndex(of: service) != index {
+        if let index, labelIndex != index {
             return false
         }
         return true

@@ -11467,7 +11467,7 @@ var optionalProcessor = (schema, ctx, _json, params) => {
   seen.ref = def.innerType;
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -12469,7 +12469,7 @@ function preprocess(fn, schema) {
 // node_modules/zod/v4/classic/external.js
 config(en_default());
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
@@ -13988,7 +13988,7 @@ var UrlElicitationRequiredError = class extends McpError {
   }
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
@@ -13996,7 +13996,7 @@ function isTerminal(status) {
 // node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function getMethodLiteral(schema) {
   const shape = getObjectShape(schema);
   const methodSchema = shape?.method;
@@ -14017,7 +14017,7 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 var DEFAULT_REQUEST_TIMEOUT_MSEC = 6e4;
 var Protocol = class {
   constructor(_options) {
@@ -14971,7 +14971,7 @@ function mergeCapabilities(base, additional) {
   return result;
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 var import_ajv = __toESM(require_ajv(), 1);
 var import_ajv_formats = __toESM(require_dist(), 1);
 function createDefaultAjvInstance() {
@@ -15039,7 +15039,7 @@ var AjvJsonSchemaValidator = class {
   }
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 var ExperimentalServerTasks = class {
   constructor(_server) {
     this._server = _server;
@@ -15252,7 +15252,7 @@ var ExperimentalServerTasks = class {
   }
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -15287,7 +15287,7 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 var Server = class extends Protocol {
   /**
    * Initializes this server with the given name and version information.
@@ -15658,10 +15658,10 @@ var Server = class extends Protocol {
   }
 };
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 var STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 var ReadBuffer = class {
   constructor(options) {
@@ -15698,7 +15698,7 @@ function serializeMessage(message) {
   return JSON.stringify(message) + "\n";
 }
 
-// node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// mcp-server/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var StdioServerTransport = class {
   constructor(_stdin = process2.stdin, _stdout = process2.stdout, options) {
     this._stdin = _stdin;
@@ -15891,7 +15891,7 @@ var tools = [
   },
   {
     name: "homekit_manage",
-    description: "Manage HomeKit structure: rename accessories, assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
+    description: `Manage HomeKit structure: rename accessories or individual services (e.g. the "Switch 2" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -15899,6 +15899,7 @@ var tools = [
           type: "string",
           enum: [
             "rename",
+            "set_display_as",
             "remove_accessory",
             "assign_rooms",
             "create_room",
@@ -15917,11 +15918,32 @@ var tools = [
         },
         id: {
           type: "string",
-          description: "Accessory, room, or zone name/UUID (action-dependent)"
+          description: "Accessory, room, or zone name/UUID (action-dependent). For rename and set_display_as, may also be a service UUID (the per-service `id` in homekit_accessories get output) to target that one service."
         },
         new_name: {
           type: "string",
           description: "New name for rename actions"
+        },
+        display_as: {
+          type: "string",
+          enum: ["light", "fan", "switch", "outlet", "default"],
+          description: "What a switch or outlet service displays as (set_display_as action), matching the Home app's Display As: light, fan, or the service's own type (switch for a switch service, outlet for an outlet; default also restores it). Only switch and outlet services support this."
+        },
+        service_type: {
+          type: "string",
+          description: "Service TYPE UUID to narrow the target service (rename and set_display_as actions). Every channel of a multi-gang switch shares one service type, so use service_name, service_index, or service_id to pick a channel."
+        },
+        service_name: {
+          type: "string",
+          description: 'Name or unique UUID of the one service to act on (rename and set_display_as actions), e.g. "Switch 2". With rename, renames only that service instead of the accessory.'
+        },
+        service_id: {
+          type: "string",
+          description: "Unique UUID of the one service to act on (rename and set_display_as actions), listed as `id` per service in homekit_accessories get output."
+        },
+        service_index: {
+          type: "number",
+          description: "Channel number (ServiceLabelIndex) of the one service to act on, e.g. 2 for the second gang (rename and set_display_as actions). Listed as `index` in homekit_accessories get output when the accessory reports one."
         },
         name: {
           type: "string",
@@ -16528,6 +16550,12 @@ async function handleWebhook(args) {
       throw new Error(`Unknown webhook action: ${action}`);
   }
 }
+function addServiceSelectors(socketArgs, args) {
+  if (args.service_type) socketArgs.service_type = args.service_type;
+  if (args.service_name) socketArgs.service_name = args.service_name;
+  if (args.service_id) socketArgs.service_id = args.service_id;
+  if (args.service_index != null) socketArgs.service_index = String(args.service_index);
+}
 async function handleManage(args) {
   const action = args.action;
   if (!action) throw new Error("action is required");
@@ -16539,7 +16567,16 @@ async function handleManage(args) {
       if (!args.new_name) throw new Error("new_name is required for rename");
       const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
+      addServiceSelectors(socketArgs, args);
       return sendCommand("rename", socketArgs);
+    }
+    case "set_display_as": {
+      if (!args.id) throw new Error("id is required for set_display_as");
+      if (!args.display_as) throw new Error("display_as is required for set_display_as");
+      const socketArgs = { id: args.id, display_as: args.display_as, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      addServiceSelectors(socketArgs, args);
+      return sendCommand("set_display_as", socketArgs);
     }
     case "assign_rooms": {
       if (!args.assignments || !Array.isArray(args.assignments) || args.assignments.length === 0) {

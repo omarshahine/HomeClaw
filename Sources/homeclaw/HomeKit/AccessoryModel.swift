@@ -169,6 +169,7 @@ enum AccessoryModel {
                 "characteristics": chars,
             ]
             if let index = serviceLabelIndex(of: service) { serviceDict["index"] = index }
+            if let displayAs = displayAs(of: service) { serviceDict["display_as"] = displayAs }
             services.append(serviceDict)
         }
         dict["services"] = services
@@ -888,6 +889,61 @@ enum AccessoryModel {
               let value = indexChar.value as? NSNumber
         else { return nil }
         return value.intValue
+    }
+
+    // MARK: - Display As
+
+    /// Whether the Home app's "Display As" setting applies to this service.
+    /// HomeKit only accepts an associated service type on switch and outlet services.
+    static func supportsDisplayAs(_ service: HMService) -> Bool {
+        ownDisplayAs(serviceType: service.serviceType) != nil
+    }
+
+    /// A service type's own Display As value ("switch" or "outlet"), shown when no
+    /// associated service type is set. Nil for types Display As doesn't apply to.
+    static func ownDisplayAs(serviceType: String) -> String? {
+        switch serviceType {
+        case HMServiceTypeSwitch: "switch"
+        case HMServiceTypeOutlet: "outlet"
+        default: nil
+        }
+    }
+
+    /// The effective Display As of a switch or outlet service, as the Home app shows
+    /// it: "light" or "fan" when an associated service type is set, else the
+    /// service's own type. Nil for services Display As doesn't apply to.
+    static func displayAs(of service: HMService) -> String? {
+        displayAs(serviceType: service.serviceType, associatedServiceType: service.associatedServiceType)
+    }
+
+    static func displayAs(serviceType: String, associatedServiceType: String?) -> String? {
+        guard let own = ownDisplayAs(serviceType: serviceType) else { return nil }
+        guard let associatedServiceType else { return own }
+        return displayAsName(forAssociatedType: associatedServiceType)
+    }
+
+    /// Display As name for an associated service type. Types other than lightbulb
+    /// and fan (set by another app) fall back to their category name or raw UUID.
+    static func displayAsName(forAssociatedType type: String) -> String {
+        if type == HMServiceTypeLightbulb { return "light" }
+        if type == HMServiceTypeFan { return "fan" }
+        return CharacteristicMapper.serviceCategory(for: type) ?? type
+    }
+
+    /// Resolves a requested Display As value for a service of `serviceType` to the
+    /// associated service type to write. `.some(nil)` clears the association (the
+    /// service shows as its own type again); `nil` means the value isn't valid here.
+    ///
+    /// The Home app offers a switch Switch/Light/Fan and an outlet Outlet/Light/Fan,
+    /// so "outlet" is rejected on a switch service and vice versa.
+    static func associatedServiceType(forDisplayAs value: String, serviceType: String) -> String?? {
+        guard let own = ownDisplayAs(serviceType: serviceType) else { return nil }
+        switch value.lowercased() {
+        case "light": return .some(HMServiceTypeLightbulb)
+        case "fan": return .some(HMServiceTypeFan)
+        case own, "default": return .some(nil)
+        default: return nil
+        }
     }
 
     // MARK: - Home App Display Name

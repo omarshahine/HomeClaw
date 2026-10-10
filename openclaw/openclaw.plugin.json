@@ -36,6 +36,7 @@
       "homekit_delete_scene",
       "homekit_events",
       "homekit_rename",
+      "homekit_set_display_as",
       "homekit_automations_list",
       "homekit_automations_get",
       "homekit_automations_create"
@@ -123,6 +124,10 @@
       "replaySafe": true
     },
     "homekit_rename": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_set_display_as": {
       "optional": true,
       "sideEffecting": true
     },

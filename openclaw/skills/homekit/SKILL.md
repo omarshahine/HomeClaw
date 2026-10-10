@@ -101,6 +101,8 @@ echo '[{"accessory": "...", "room": "..."}]' | homeclaw-cli assign-rooms -   # s
 # Management — rename, rooms, zones
 homeclaw-cli rename "<name-or-uuid>" "<new-name>"           # Rename accessory
 homeclaw-cli rename "<name-or-uuid>" "<new-name>" --dry-run # Preview rename
+homeclaw-cli rename "<name-or-uuid>" "<new-name>" --service-name "Switch 2"  # Rename one gang of a multi-gang accessory (also --service-index / --service-id, or pass the service UUID)
+homeclaw-cli set-display-as "<name-or-uuid>" light|fan|switch|outlet|default [--service-index N]  # Home app Display As (switch/outlet services only)
 homeclaw-cli rename-room "<name-or-uuid>" "<new-name>"      # Rename room
 homeclaw-cli create-room "<name>"                            # Create room
 homeclaw-cli remove-room "<name-or-uuid>"                    # Remove room
