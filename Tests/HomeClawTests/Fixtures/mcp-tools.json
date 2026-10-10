@@ -132,7 +132,7 @@
   },
   {
     "name": "homekit_manage",
-    "description": "Manage HomeKit structure: rename accessories or individual services (e.g. the \"Switch 2\" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
+    "description": "Manage HomeKit structure: rename accessories or individual services (e.g. the \"Switch 2\" gang of a dual relay), set a switch or outlet's Display As (light/fan), list and manage Home app accessory groups (one tile for several accessories or gangs), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -149,7 +149,13 @@
             "create_zone",
             "remove_zone",
             "add_room_to_zone",
-            "remove_room_from_zone"
+            "remove_room_from_zone",
+            "list_groups",
+            "create_group",
+            "add_to_group",
+            "remove_from_group",
+            "rename_group",
+            "delete_group"
           ],
           "description": "Management action to perform"
         },
@@ -194,7 +200,22 @@
         },
         "name": {
           "type": "string",
-          "description": "Name for create actions (create_room, create_zone)"
+          "description": "Name for create actions (create_room, create_zone, create_group)"
+        },
+        "group": {
+          "type": "string",
+          "description": "Group name or UUID (add_to_group, remove_from_group, rename_group, delete_group). Groups are listed by list_groups."
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Group members (create_group, add_to_group, remove_from_group): accessory names/UUIDs, or service UUIDs (the per-service `id` in homekit_accessories get output) to use one gang of a multi-gang accessory. An accessory with several controllable services is an error listing them."
+        },
+        "allow_mixed": {
+          "type": "boolean",
+          "description": "Allow group members of different kinds (create_group, add_to_group). Default false: like the Home app, a group holds one kind (lights with lights; a switch displayed as a light counts as a light). Members must always be a light, switch, outlet, fan, or window covering."
         },
         "room": {
           "type": "string",

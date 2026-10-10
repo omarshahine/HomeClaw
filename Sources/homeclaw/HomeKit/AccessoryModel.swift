@@ -946,6 +946,46 @@ enum AccessoryModel {
         }
     }
 
+    // MARK: - Service Groups
+
+    /// Kinds the Home app offers "Group with Other Accessories" for: on/off and
+    /// position tiles. Buttons, sensors, locks, cameras, climate and media are left
+    /// out, since the Home app never builds a group of them and its rendering of one
+    /// is unspecified.
+    static let groupableKinds: Swift.Set<String> = ["lightbulb", "switch", "outlet", "fan", "window_covering"]
+
+    /// The kind a service counts as when grouping, as the Home app judges it: its
+    /// category, except that a switch or outlet displayed as a light or fan counts
+    /// as that. Nil for services that can't be group members: supplementary ones
+    /// (battery, accessory info, labels, a blind's slats) and kinds outside
+    /// `groupableKinds`.
+    static func groupKind(serviceType: String, associatedServiceType: String?) -> String? {
+        // Slats tilt a blind whose WindowCovering service is the member; counting
+        // them would make every slatted blind ambiguous.
+        guard serviceType != HMServiceTypeSlats else { return nil }
+        var kind = CharacteristicMapper.serviceCategory(for: serviceType)
+        // Display As only ever sets light or fan; an association to anything else
+        // (another app's doing) leaves the switch or outlet grouping as itself.
+        if ownDisplayAs(serviceType: serviceType) != nil,
+           let associatedServiceType,
+           let associated = CharacteristicMapper.serviceCategory(for: associatedServiceType),
+           groupableKinds.contains(associated) {
+            kind = associated
+        }
+        return kind.flatMap { groupableKinds.contains($0) ? $0 : nil }
+    }
+
+    static func groupKind(of service: HMService) -> String? {
+        groupKind(serviceType: service.serviceType, associatedServiceType: service.associatedServiceType)
+    }
+
+    /// The distinct kinds in `kinds`, sorted, when there's more than one; nil when
+    /// they're all the same kind. The Home app only groups accessories of one kind.
+    static func mixedKinds(_ kinds: [String]) -> [String]? {
+        let distinct = Swift.Set(kinds)
+        return distinct.count > 1 ? distinct.sorted() : nil
+    }
+
     // MARK: - Home App Display Name
 
     /// Service types where the Home app prefers the service name over the accessory name.

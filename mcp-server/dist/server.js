@@ -15891,7 +15891,7 @@ var tools = [
   },
   {
     name: "homekit_manage",
-    description: `Manage HomeKit structure: rename accessories or individual services (e.g. the "Switch 2" gang of a dual relay), set a switch or outlet's Display As (light/fan), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.`,
+    description: `Manage HomeKit structure: rename accessories or individual services (e.g. the "Switch 2" gang of a dual relay), set a switch or outlet's Display As (light/fan), list and manage Home app accessory groups (one tile for several accessories or gangs), assign rooms (with UUID support for duplicate names), create/rename/remove rooms, remove accessories, create/remove zones, and manage zone membership. All actions support dry_run for safe previews.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -15908,7 +15908,13 @@ var tools = [
             "create_zone",
             "remove_zone",
             "add_room_to_zone",
-            "remove_room_from_zone"
+            "remove_room_from_zone",
+            "list_groups",
+            "create_group",
+            "add_to_group",
+            "remove_from_group",
+            "rename_group",
+            "delete_group"
           ],
           description: "Management action to perform"
         },
@@ -15947,7 +15953,20 @@ var tools = [
         },
         name: {
           type: "string",
-          description: "Name for create actions (create_room, create_zone)"
+          description: "Name for create actions (create_room, create_zone, create_group)"
+        },
+        group: {
+          type: "string",
+          description: "Group name or UUID (add_to_group, remove_from_group, rename_group, delete_group). Groups are listed by list_groups."
+        },
+        members: {
+          type: "array",
+          items: { type: "string" },
+          description: "Group members (create_group, add_to_group, remove_from_group): accessory names/UUIDs, or service UUIDs (the per-service `id` in homekit_accessories get output) to use one gang of a multi-gang accessory. An accessory with several controllable services is an error listing them."
+        },
+        allow_mixed: {
+          type: "boolean",
+          description: "Allow group members of different kinds (create_group, add_to_group). Default false: like the Home app, a group holds one kind (lights with lights; a switch displayed as a light counts as a light). Members must always be a light, switch, outlet, fan, or window covering."
         },
         room: {
           type: "string",
@@ -16550,15 +16569,25 @@ async function handleWebhook(args) {
       throw new Error(`Unknown webhook action: ${action}`);
   }
 }
+function requireMembers(args, action) {
+  if (!Array.isArray(args.members) || args.members.length === 0 || !args.members.every((m) => typeof m === "string" && m.trim())) {
+    throw new Error(`members must be a non-empty array of accessory names/UUIDs or service UUIDs for ${action}`);
+  }
+}
 function addServiceSelectors(socketArgs, args) {
   if (args.service_type) socketArgs.service_type = args.service_type;
   if (args.service_name) socketArgs.service_name = args.service_name;
   if (args.service_id) socketArgs.service_id = args.service_id;
   if (args.service_index != null) socketArgs.service_index = String(args.service_index);
 }
-async function handleManage(args) {
+async function handleManage(args, send = sendCommand) {
   const action = args.action;
   if (!action) throw new Error("action is required");
+  for (const key of ["dry_run", "allow_mixed"]) {
+    if (args[key] !== void 0 && typeof args[key] !== "boolean") {
+      throw new Error(`${key} must be a boolean (true or false), got ${JSON.stringify(args[key])}`);
+    }
+  }
   const dryRun = args.dry_run ?? false;
   const homeID = args.home_id;
   switch (action) {
@@ -16568,7 +16597,41 @@ async function handleManage(args) {
       const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
       addServiceSelectors(socketArgs, args);
-      return sendCommand("rename", socketArgs);
+      return send("rename", socketArgs);
+    }
+    case "list_groups": {
+      const socketArgs = {};
+      if (homeID) socketArgs.home_id = homeID;
+      return send("list_groups", socketArgs);
+    }
+    case "create_group": {
+      if (!args.name) throw new Error("name is required for create_group");
+      requireMembers(args, "create_group");
+      const socketArgs = { name: args.name, members: args.members, allow_mixed: args.allow_mixed ?? false, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return send("create_group", socketArgs);
+    }
+    case "add_to_group":
+    case "remove_from_group": {
+      if (!args.group) throw new Error(`group is required for ${action}`);
+      requireMembers(args, action);
+      const socketArgs = { group: args.group, members: args.members, dry_run: dryRun };
+      if (action === "add_to_group") socketArgs.allow_mixed = args.allow_mixed ?? false;
+      if (homeID) socketArgs.home_id = homeID;
+      return send(action, socketArgs);
+    }
+    case "rename_group": {
+      if (!args.group) throw new Error("group is required for rename_group");
+      if (!args.new_name) throw new Error("new_name is required for rename_group");
+      const socketArgs = { group: args.group, new_name: args.new_name, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return send("rename_group", socketArgs);
+    }
+    case "delete_group": {
+      if (!args.group) throw new Error("group is required for delete_group");
+      const socketArgs = { group: args.group, dry_run: dryRun };
+      if (homeID) socketArgs.home_id = homeID;
+      return send("delete_group", socketArgs);
     }
     case "set_display_as": {
       if (!args.id) throw new Error("id is required for set_display_as");
@@ -16576,7 +16639,7 @@ async function handleManage(args) {
       const socketArgs = { id: args.id, display_as: args.display_as, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
       addServiceSelectors(socketArgs, args);
-      return sendCommand("set_display_as", socketArgs);
+      return send("set_display_as", socketArgs);
     }
     case "assign_rooms": {
       if (!args.assignments || !Array.isArray(args.assignments) || args.assignments.length === 0) {
@@ -16584,58 +16647,58 @@ async function handleManage(args) {
       }
       const socketArgs = { assignments: args.assignments, dry_run: dryRun };
       if (homeID) socketArgs.home = homeID;
-      return sendCommand("assign_rooms", socketArgs);
+      return send("assign_rooms", socketArgs);
     }
     case "remove_accessory": {
       if (!args.id) throw new Error("id is required for remove_accessory");
       const socketArgs = { id: args.id, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("remove_accessory", socketArgs);
+      return send("remove_accessory", socketArgs);
     }
     case "create_room": {
       if (!args.name) throw new Error("name is required for create_room");
       const socketArgs = { name: args.name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("create_room", socketArgs);
+      return send("create_room", socketArgs);
     }
     case "rename_room": {
       if (!args.id) throw new Error("id is required for rename_room");
       if (!args.new_name) throw new Error("new_name is required for rename_room");
       const socketArgs = { id: args.id, new_name: args.new_name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("rename_room", socketArgs);
+      return send("rename_room", socketArgs);
     }
     case "remove_room": {
       if (!args.id) throw new Error("id is required for remove_room");
       const socketArgs = { id: args.id, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("remove_room", socketArgs);
+      return send("remove_room", socketArgs);
     }
     case "create_zone": {
       if (!args.name) throw new Error("name is required for create_zone");
       const socketArgs = { name: args.name, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("create_zone", socketArgs);
+      return send("create_zone", socketArgs);
     }
     case "remove_zone": {
       if (!args.id) throw new Error("id is required for remove_zone");
       const socketArgs = { id: args.id, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("remove_zone", socketArgs);
+      return send("remove_zone", socketArgs);
     }
     case "add_room_to_zone": {
       if (!args.room) throw new Error("room is required for add_room_to_zone");
       if (!args.zone) throw new Error("zone is required for add_room_to_zone");
       const socketArgs = { room: args.room, zone: args.zone, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("add_room_to_zone", socketArgs);
+      return send("add_room_to_zone", socketArgs);
     }
     case "remove_room_from_zone": {
       if (!args.room) throw new Error("room is required for remove_room_from_zone");
       if (!args.zone) throw new Error("zone is required for remove_room_from_zone");
       const socketArgs = { room: args.room, zone: args.zone, dry_run: dryRun };
       if (homeID) socketArgs.home_id = homeID;
-      return sendCommand("remove_room_from_zone", socketArgs);
+      return send("remove_room_from_zone", socketArgs);
     }
     default:
       throw new Error(`Unknown manage action: ${action}`);

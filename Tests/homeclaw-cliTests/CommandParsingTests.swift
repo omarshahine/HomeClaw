@@ -381,6 +381,58 @@ struct StructureCommandParsingTests {
         #expect(throws: (any Error).self) { _ = try SetDisplayAs.parse(["Fan", "fan", "--service-index", "0"]) }
     }
 
+    @Test("groups defaults to list and parses every subcommand")
+    func groups() throws {
+        #expect(try GroupsList.parse(["--home", "Lounge", "--json"]).home == "Lounge")
+        let create = try GroupsCreate.parse(["Ceiling", "Downlight 1", "ABC-123", "--allow-mixed", "--dry-run"])
+        #expect(create.name == "Ceiling")
+        #expect(create.members == ["Downlight 1", "ABC-123"])
+        #expect(create.allowMixed == true)
+        #expect(create.options.dryRun == true)
+        #expect(try GroupsAdd.parse(["Ceiling", "Stairs LED"]).members == ["Stairs LED"])
+        #expect(try GroupsRemove.parse(["Ceiling", "Stairs LED"]).group == "Ceiling")
+        #expect(try GroupsRename.parse(["Ceiling", "Lounge"]).newName == "Lounge")
+        #expect(try GroupsDelete.parse(["Lounge", "--home", "Cabin"]).options.home == "Cabin")
+    }
+
+    @Test("groups create/add/remove require at least one member")
+    func groupsNeedMembers() {
+        #expect(throws: (any Error).self) { _ = try GroupsCreate.parse(["Ceiling"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsAdd.parse(["Ceiling"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsRemove.parse(["Ceiling"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsRename.parse(["Ceiling"]) }
+    }
+
+    @Test("--allow-mixed exists only where members are combined (create/add)")
+    func groupsAllowMixedScope() {
+        #expect(throws: (any Error).self) { _ = try GroupsRemove.parse(["Ceiling", "Lamp", "--allow-mixed"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsRename.parse(["Ceiling", "Lounge", "--allow-mixed"]) }
+        #expect(throws: (any Error).self) { _ = try GroupsDelete.parse(["Ceiling", "--allow-mixed"]) }
+    }
+
+    @Test("positionals after -- may start with a dash; flags before it still parse")
+    func groupsDashPositionals() throws {
+        // The OpenClaw tool puts every positional after --, so free-text group names,
+        // new names, and members like "-Lamp" or "--json" are never read as flags.
+        let add = try GroupsAdd.parse(["--dry-run", "--json", "--", "Ceiling", "-Lamp", "--dry-run"])
+        #expect(add.group == "Ceiling")
+        #expect(add.members == ["-Lamp", "--dry-run"])
+        #expect(add.options.dryRun == true)
+        #expect(add.options.json == true)
+
+        let create = try GroupsCreate.parse(["--allow-mixed", "--", "-Ceiling", "Lamp"])
+        #expect(create.name == "-Ceiling")
+        #expect(create.allowMixed == true)
+
+        let rename = try GroupsRename.parse(["--", "Ceiling", "-1"])
+        #expect(rename.newName == "-1")
+
+        let delete = try GroupsDelete.parse(["--dry-run", "--", "--json"])
+        #expect(delete.group == "--json")
+        #expect(delete.options.dryRun == true)
+        #expect(delete.options.json == false)
+    }
+
     @Test("rename-room takes room + new name")
     func renameRoom() throws {
         let cmd = try RenameRoom.parse(["Den", "Office"])
