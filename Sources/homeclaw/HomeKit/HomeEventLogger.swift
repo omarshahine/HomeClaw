@@ -240,7 +240,7 @@ final class HomeEventLogger {
     private func writeEvent(_ event: [String: Any]) {
         guard isEnabled else { return }
 
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: event, options: [.sortedKeys]),
+        guard let jsonData = SafeJSON.data(withJSONObject: event, options: [.sortedKeys]),
               var line = String(data: jsonData, encoding: .utf8)
         else { return }
 
@@ -481,7 +481,7 @@ final class HomeEventLogger {
             return
         }
 
-        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        guard let body = SafeJSON.data(withJSONObject: payload) else { return }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

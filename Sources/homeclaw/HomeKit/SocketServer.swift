@@ -712,7 +712,7 @@ final class SocketServer: @unchecked Sendable {
                     "text": "[HomeClaw] Webhook test event",
                     "mode": "now",
                 ]
-                guard let body = try? JSONSerialization.data(withJSONObject: testPayload) else {
+                guard let body = SafeJSON.data(withJSONObject: testPayload) else {
                     return encodeResponse(success: false, error: "Failed to serialize test payload")
                 }
                 var testRequest = URLRequest(url: testURL)
@@ -1480,7 +1480,7 @@ final class SocketServer: @unchecked Sendable {
         if let data { dict["data"] = data }
         if let error { dict["error"] = error }
 
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+        guard let jsonData = SafeJSON.data(withJSONObject: dict, options: [.sortedKeys]),
               let string = String(data: jsonData, encoding: .utf8)
         else {
             return #"{"success":false,"error":"Encoding failed"}"#
