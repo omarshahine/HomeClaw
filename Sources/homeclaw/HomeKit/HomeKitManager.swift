@@ -1242,7 +1242,7 @@ final class HomeKitManager: NSObject, Observable {
         }
         guard let newType = AccessoryModel.associatedServiceType(forDisplayAs: displayAs, serviceType: service.serviceType) else {
             throw ControlError.invalidArgument(
-                "display_as must be light, fan, or \(own) for '\(service.name)' (a \(own) can show as itself, a light, or a fan)"
+                "display_as must be light, fan, or \(own) for '\(service.name)' (\(own == "outlet" ? "an" : "a") \(own) can show as itself, a light, or a fan)"
             )
         }
 
