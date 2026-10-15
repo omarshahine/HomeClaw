@@ -181,6 +181,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     ) -> Bool {
         guard !AppLaunchPolicy.suppressLiveServices else { return true }
         AppLogger.app.info("HomeClaw starting (unified Catalyst)...")
+        // A write to a socket or pipe whose reader has gone must fail that one
+        // write, never kill the menu bar app (#128). SocketServer also sets
+        // SO_NOSIGPIPE per connection; this covers any other descriptor.
+        signal(SIGPIPE, SIG_IGN)
         #if targetEnvironment(macCatalyst)
         // AppKit system/Apple-event quit need not call UIKit's termination hook.
         // Observe the synchronous final notification without replacing its delegate.

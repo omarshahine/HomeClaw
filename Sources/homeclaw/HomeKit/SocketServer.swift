@@ -409,6 +409,13 @@ final class SocketServer: @unchecked Sendable {
             _ = fcntl(clientFD, F_SETFL, flags & ~O_NONBLOCK)
         }
 
+        // A client that disconnects before reading its response (a timed-out CLI,
+        // a killed poller) turns our send() into SIGPIPE, whose default action
+        // terminates the whole app without a crash report (#128). Make send()
+        // return EPIPE on this socket instead.
+        var noSigPipe: Int32 = 1
+        setsockopt(clientFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
+
         // Dispatch each client to a GCD thread for blocking I/O,
         // with async MainActor processing for HomeKit calls.
         let server = self
@@ -1496,7 +1503,12 @@ final class SocketServer: @unchecked Sendable {
             let sent = data.withUnsafeBufferPointer { buffer in
                 send(fd, buffer.baseAddress! + totalSent, data.count - totalSent, 0)
             }
-            if sent <= 0 { break }
+            if sent < 0, errno == EINTR { continue }
+            if sent <= 0 {
+                let err = errno
+                AppLogger.socket.notice("Client went away before reading its response (errno \(err))")
+                break
+            }
             totalSent += sent
         }
     }

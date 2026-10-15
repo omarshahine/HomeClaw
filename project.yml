@@ -26,6 +26,14 @@ packages:
   swift-nio:
     url: https://github.com/apple/swift-nio.git
     exactVersion: "2.99.0"
+  # Not linked directly: swift-nio depends on it. Declared to set a floor.
+  # swift-collections 1.7.0 built with Swift 6.4 strongly imports
+  # _swift_initBorrow, which only the macOS 27 runtime exports, so 1.0.12
+  # (197) died in dyld on every macOS 26 launch (#149). 1.7.1 fixed it, but a
+  # checkout whose Package.resolved still pinned 1.7.0 kept building with it.
+  swift-collections:
+    url: https://github.com/apple/swift-collections.git
+    from: "1.7.3"
 
 targets:
   # ─── Unified Catalyst App ─────────────────────────────────
