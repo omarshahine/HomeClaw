@@ -1,12 +1,9 @@
-MCP over HTTP: HomeClaw can now serve MCP right from the app, for assistants that can't launch a local command. It's off by default (Settings → Integrations), only answers on this Mac, and only offers read-only tools.
+Fixes a crash at launch on macOS 26. Version 1.0.12 wouldn't open on Macs running macOS 26. This update opens normally again. Thanks to everyone who reported it.
 
-A second home, no fuss: list, get, set, search, scenes and device-map now take --home. A mistyped home name is now an error instead of quietly using your primary home.
+New
+- Accessory groups: see the groups you made in the Home app with "Group with Other Accessories", create new ones, rename them, and add or remove accessories.
+- Each gang of a multi-gang switch can be renamed on its own, and a switch or outlet can be set to display as a light or fan.
 
 Fixes
-- Accessory reads no longer pass off old values as fresh ones. If a live read fails, HomeClaw tells you why.
-- Automation rewiring finds every automation the list shows, including time-based ones.
-- Automations triggered by people arriving or leaving show up as presence triggers, and ones pointing at removed accessories show as orphaned.
-- Accessory details show manufacturer, model, serial number and firmware instead of raw codes.
-- An ambiguous accessory name is now an error instead of picking the first match.
-- Runtime errors are shorter and no longer end with a usage block.
-- The OpenClaw plugin loads its tools again on current OpenClaw releases.
+- HomeClaw no longer quits without warning when a command-line client disconnects before reading its reply.
+- Reading an accessory that reports an unlimited range, such as an Eve Energy outlet, no longer freezes every later request until HomeClaw restarts.
