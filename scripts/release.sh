@@ -635,10 +635,12 @@ verify_archive_contents() {
   # and nothing on a macOS 27 build machine notices. Weak imports are fine.
   # nm output is captured, not piped into grep -q: under pipefail an early
   # grep exit SIGPIPEs nm and the match would read as a miss.
-  local runtime_only=(_swift_initBorrow) bin sym imports bad=()
+  local runtime_only=(_swift_initBorrow) bin sym nm_out imports bad=()
   while IFS= read -r bin; do
     [[ "$(file -b "$bin")" == *Mach-O* ]] || continue
-    imports=$(nm -u -m "$bin" 2>/dev/null | grep -v "weak external" || true)
+    # A binary nm cannot read must stop the release, not pass as clean.
+    nm_out=$(nm -u -m "$bin" 2>&1) || die "nm could not inspect ${bin#"$app/"}: $nm_out"
+    imports=$(grep -v "weak external" <<<"$nm_out" || true)
     for sym in "${runtime_only[@]}"; do
       [[ $'\n'"$imports"$'\n' =~ [[:space:]]"$sym"[[:space:]] ]] && bad+=("${bin#"$app/"}: $sym")
     done
