@@ -7,7 +7,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / "release.sh"
 MOCKS = r'''
 load_credentials() { :; }
 marketing_version() { echo 1.0.5; }
-version_id() { if [[ "${MOCK_EXISTS:-true}" == true ]]; then echo version-id; fi; }
+version_id() { if [[ "${MOCK_EXISTS:-true}" == true && "${MOCK_CREATED_ID_MISSING:-false}" == false ]]; then echo version-id; fi; }
 version_state() { echo "${MOCK_STATE:-PREPARE_FOR_SUBMISSION}"; }
 find_build() { echo "build-id 110 false"; }
 push_metadata() { echo "METADATA" >&2; }
@@ -65,6 +65,14 @@ class AutoReleaseTests(unittest.TestCase):
         self.assertIn("ASC <versions> <create>", result.stderr)
         self.assertIn("<--release-type> <AFTER_APPROVAL>", result.stderr)
         self.assertIn("Release type verified: AFTER_APPROVAL", result.stdout)
+
+    def test_created_version_requires_an_id_before_further_writes(self):
+        result = self.shell("MOCK_EXISTS=false\nMOCK_CREATED_ID_MISSING=true\nmain release --build 110 --skip-screenshots\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("has no ID after creation", result.stderr)
+        self.assertNotIn("METADATA", result.stderr)
+        self.assertNotIn("<update>", result.stderr)
+        self.assertNotIn("ASC <review> <submit>", result.stderr)
 
     def test_dry_run_describes_correction_without_writing(self):
         for command in ["release --skip-screenshots", "submit"]:

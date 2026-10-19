@@ -1141,6 +1141,7 @@ submit_for_review() {
     asc versions create --app "$APP_ID" --version "$version" --platform "$PLATFORM" \
       --release-type "$RELEASE_TYPE" --if-exists skip --output json >/dev/null
     vid=$(version_id "$version")
+    [[ -n "$vid" ]] || die "App Store version $version has no ID after creation."
     info "Created version $version"
   fi
 
