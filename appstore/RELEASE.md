@@ -127,8 +127,10 @@ scripts/release.sh release --notes-only --skip-screenshots   # leave the live li
   is older than the listing.
 - `--skip-screenshots`: leave the live screenshot set alone. By default
   `release` replaces it with `appstore/framed/`.
-- `--auto-release`: release as soon as Apple approves. The default parks the
-  approved version in "Pending Developer Release" until you ship it.
+- `--auto-release`: retained for compatibility. Every release already publishes
+  automatically after Apple approves it (`AFTER_APPROVAL`). Both `release` and
+  `submit` correct and read back the policy for an existing version, even when
+  metadata is skipped. A dry run describes changes without writing them.
 
 ### Versions and build numbers
 

@@ -50,10 +50,8 @@ INSTALLER_CERT="3rd Party Mac Developer Installer"
 INTERNAL_GROUP="Internal Testers"
 EXTERNAL_GROUP="External Testers"
 LOCALE="en-US"
-# automatic_release: false in the old lanes: after approval the version waits
-# in "Pending Developer Release" until you ship it. `release --auto-release`
-# switches a run to AFTER_APPROVAL.
-RELEASE_TYPE="MANUAL"
+# Every App Store version releases automatically after Apple approves it.
+RELEASE_TYPE="AFTER_APPROVAL"
 # App Store screenshot display types by capture size (WIDTHxHEIGHT=TYPE).
 # Every Mac size ASC accepts maps to the one desktop set.
 SCREENSHOT_TYPES="2880x1800=APP_DESKTOP 2560x1600=APP_DESKTOP 1440x900=APP_DESKTOP 1280x800=APP_DESKTOP"
@@ -740,8 +738,8 @@ App Store (Mac App Store listing, platform $PLATFORM)
                            first, like deliver; --live reads the shipped listing)
   release [--version V] [--build N] [--notes-file F | --notes TEXT] [--notes-only]
           [--skip-screenshots] [--auto-release] [--dry-run]
-                           Ensure the version exists (manual release after approval unless
-                           --auto-release), push metadata and screenshots, attach the newest
+                           Ensure the version releases automatically after approval,
+                           push metadata and screenshots, attach the newest
                            VALID build (or N), submit for App Review. --notes-only pushes only
                            "What's New" and leaves the live listing alone.
   submit [--version V] [--build N] [--dry-run]
@@ -1082,6 +1080,30 @@ release_metadata_root() {
   printf '%s\n' "$root"
 }
 
+# Read back the version policy even when submission skips metadata. Existing
+# versions can retain a manual or scheduled policy from an earlier workflow.
+version_release_type() {
+  asc versions list --app "$APP_ID" --platform "$PLATFORM" --paginate --output json \
+    | json_get 'next((v["attributes"].get("releaseType") for v in d["data"] if v["id"] == "'"$1"'"), None)'
+}
+
+ensure_auto_release() {
+  local vid="$1" dry_run="$2" current
+  current=$(version_release_type "$vid") || die "Could not read App Store release type."
+  if [[ "$current" != "AFTER_APPROVAL" ]]; then
+    if $dry_run; then
+      info "Would set release type AFTER_APPROVAL (now ${current:-unset})"
+      return
+    fi
+    asc versions update --version-id "$vid" --release-type AFTER_APPROVAL --output json >/dev/null \
+      || die "Could not set App Store release type to AFTER_APPROVAL."
+    current=$(version_release_type "$vid") || die "Could not verify App Store release type."
+  fi
+  [[ "$current" == "AFTER_APPROVAL" ]] \
+    || die "App Store release type is ${current:-unset}; expected AFTER_APPROVAL."
+  info "Release type verified: AFTER_APPROVAL"
+}
+
 submit_for_review() {
   local version="$1" build="$2" dry_run="$3" push="$4"
   local vid state found build_id build_num answer
@@ -1111,14 +1133,6 @@ submit_for_review() {
         fi
         ;;
     esac
-    if $push; then
-      if $dry_run; then
-        info "Would set release type $RELEASE_TYPE"
-      else
-        asc versions update --version-id "$vid" --release-type "$RELEASE_TYPE" --output json >/dev/null
-        info "Release type $RELEASE_TYPE"
-      fi
-    fi
   elif ! $push; then
     die "App Store version $version does not exist (\`release\` creates it)."
   elif $dry_run; then
@@ -1128,6 +1142,10 @@ submit_for_review() {
       --release-type "$RELEASE_TYPE" --if-exists skip --output json >/dev/null
     vid=$(version_id "$version")
     info "Created version $version"
+  fi
+
+  if [[ -n "$vid" ]]; then
+    ensure_auto_release "$vid" "$dry_run"
   fi
 
   if $push; then
@@ -1163,11 +1181,7 @@ submit_for_review() {
   else
     asc review submit --app "$APP_ID" --version-id "$vid" --build-id "$build_id" --platform "$PLATFORM" --confirm --output json
     echo
-    if [[ "$RELEASE_TYPE" == "MANUAL" ]]; then
-      bold "Submitted $version ($build_num) for App Review; after approval it waits in Pending Developer Release."
-    else
-      bold "Submitted $version ($build_num) for App Review; releases automatically after approval."
-    fi
+    bold "Submitted $version ($build_num) for App Review; releases automatically after approval."
     info "Track at https://appstoreconnect.apple.com/apps/$APP_ID/distribution"
   fi
 }
@@ -1184,7 +1198,7 @@ parse_submit_args() {
       --notes-file) [[ -f "$2" ]] || die "notes file not found: $2"; RELEASE_NOTES="$(<"$2")"; shift ;;
       --notes-only) RELEASE_NOTES_ONLY=true ;;
       --skip-screenshots) RELEASE_SCREENSHOTS=false ;;
-      --auto-release) RELEASE_TYPE="AFTER_APPROVAL" ;;
+      --auto-release) : ;; # Compatibility alias; automatic release is always required.
       *) die "unknown option: $1" ;;
     esac
     shift

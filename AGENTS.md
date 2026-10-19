@@ -298,6 +298,8 @@ Durable memory promoted from `~/.claude/projects/-Users-omarshahine-GitHub-HomeC
 
 ## Release Workflow
 
+Every App Store version must release automatically after approval (`AFTER_APPROVAL`). Both `release` and `submit` correct and verify the existing version policy before submitting, including submissions without metadata. Dry runs never change the policy.
+
 - After every archive + upload, generate a **TestFlight tester update** (see `memory/testflight-updates.md`)
 - Release tag must match the uploaded build number: `v{version}+{build}`. The build number is committed first (`scripts/release.sh bump-build`, commit, tag, push), then `beta` builds exactly that number
 - CLI binary is sandboxed (`com.apple.security.app-sandbox`) — file-based commands can only read from App Group container
@@ -371,7 +373,7 @@ HomeClaw's release pipeline is `scripts/release.sh`, driving `asc`. Fastlane (Fa
 
 **How to apply:**
 - Subcommands: `info | status | bump-build | archive | beta | external | metadata | metadata-pull | release | submit | screenshots | frame | upload-screenshots`
-- `beta` stops at TestFlight Internal Testers; `external` sends to External Testers; `release` submits to App Review (manual release after approval unless `--auto-release`)
+- `beta` stops at TestFlight Internal Testers; `external` sends to External Testers; `release` submits to App Review with automatic release after approval; `submit` enforces the same policy without pushing metadata
 - `prepare` runs `xcodegen generate` + `npm ci` + `npm run build:mcp` (and requires the committed `mcp-server/dist/server.js` to match) before every archive
 - Mac Catalyst archive: destination `generic/platform=macOS,variant=Mac Catalyst`; export is a `.pkg` with manual signing (Apple Distribution + 3rd Party Mac Developer Installer)
 - Marketing version comes from the nearest `v*` git tag with `+build` stripped (Apple rejects 4-component versions)

@@ -1,0 +1,28 @@
+name: Release Policy
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/release.sh
+      - scripts/tests/test_auto_release.py
+      - .github/workflows/release-policy.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/release.sh
+      - scripts/tests/test_auto_release.py
+      - .github/workflows/release-policy.yml
+
+permissions:
+  contents: read
+
+jobs:
+  automatic-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Check release script syntax
+        run: bash -n scripts/release.sh
+      - name: Verify automatic release with mocked App Store Connect
+        run: python3 -m unittest discover -s scripts/tests -p 'test_auto_release.py' -v
