@@ -169,14 +169,19 @@ final class MCPHTTPConnectionTracker: @unchecked Sendable {
     }
 
     /// Stops admitting connections, closes every open one (which cancels their
-    /// request tasks via `channelInactive`), and waits for tracked tasks to end.
+    /// request tasks via `channelInactive`), and waits for tracked tasks to end
+    /// and for every close to complete.
     func shutdown() async {
-        for channel in beginShutdown() { channel.close(promise: nil) }
+        // close() runs on each channel's event loop; keep the futures so we
+        // return only once the channels are actually inactive.
+        let closing = beginShutdown().map { $0.close() }
         // Each task untracks itself in its final `defer`, so once its value is
         // available it is gone; loop to catch tasks that started meanwhile.
         while case let pending = pendingTasks(), !pending.isEmpty {
             for task in pending { task.cancel(); await task.value }
         }
+        // A channel the client already closed fails with alreadyClosed; either way it is down.
+        for future in closing { try? await future.get() }
     }
 
     private func beginShutdown() -> [Channel] {

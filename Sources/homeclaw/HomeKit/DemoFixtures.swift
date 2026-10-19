@@ -796,6 +796,7 @@ enum DemoFixtures {
                 "actions": [],
                 "type": "user_defined",
                 "rooms": rooms,
+                "last_execution_date": NSNull(),
             ]
         }
     }

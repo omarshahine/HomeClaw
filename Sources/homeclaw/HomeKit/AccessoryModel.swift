@@ -238,18 +238,19 @@ enum AccessoryModel {
 
     // MARK: - Automations (Triggers)
 
-    /// Uniform scene (action set) references for a trigger, shared by list and get
-    /// so both surfaces emit the same representation (issue #76): `id` + `name` +
-    /// `action_count`, plus `hidden: true` for trigger-owned action sets that the
-    /// Home app excludes from `home.actionSets` (their names are opaque UUID
-    /// strings, which is why a "name" can look like a UUID).
-    /// ISO-8601 UTC for a HomeKit timestamp, or JSON null when HomeKit has none,
-    /// so callers can tell "never" from a missing field.
+    /// ISO-8601 UTC for a HomeKit timestamp, or JSON null when HomeKit recorded
+    /// none. Null means "none recorded", not "never ran": HomeKit leaves
+    /// `lastExecutionDate` unset for most runs, including hub-run automations (#152).
     static func isoDateOrNull(_ date: Date?) -> Any {
         guard let date else { return NSNull() }
         return ISO8601DateFormatter().string(from: date)
     }
 
+    /// Uniform scene (action set) references for a trigger, shared by list and get
+    /// so both surfaces emit the same representation (issue #76): `id` + `name` +
+    /// `action_count`, plus `hidden: true` for trigger-owned action sets that the
+    /// Home app excludes from `home.actionSets` (their names are opaque UUID
+    /// strings, which is why a "name" can look like a UUID).
     static func triggerActionSetSummaries(_ trigger: HMTrigger, home: HMHome?) -> [[String: Any]] {
         let visibleIDs = home.map { Set($0.actionSets.map(\.uniqueIdentifier)) }
         return trigger.actionSets.map { actionSet in
