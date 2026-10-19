@@ -1,0 +1,6 @@
+/*
+  X-Content-Type-Options: nosniff
+  Access-Control-Allow-Origin: *
+
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

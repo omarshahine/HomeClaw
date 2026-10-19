@@ -1,4 +1,4 @@
-name: Deploy Site to Cloudflare Pages
+name: Deploy Site to Cloudflare Workers
 
 on:
   push:
@@ -25,7 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      deployments: write
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -43,24 +45,15 @@ jobs:
         run: npm install
         working-directory: site
 
-      - name: Build Astro site
-        run: npm run build
+      # astro build -> cf-wrangler build (Build Output) -> cf deploy --prebuilt.
+      # Runs inside site/, which is not a root workspace member: the root
+      # declares the darwin-only openclaw workspace, so npm at the root fails
+      # with EBADPLATFORM on Linux runners.
+      - name: Build and deploy to Workers static assets
+        run: npm run deploy -- --message "${GITHUB_SHA}"
         working-directory: site
 
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@953926a2e2182532811c01a25e53647d93bf07c0  # v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # --branch is explicit because this Pages project has no Git
-          # integration: wrangler would otherwise infer a branch, and only
-          # "main" maps to this project's production deployment.
-          # ⚠️ workingDirectory MUST be `site`, and not for tidiness.
-          # wrangler-action runs `npm i wrangler@4` in this directory. The repo
-          # ROOT declares `workspaces: ["openclaw", "mcp-server"]`, and
-          # openclaw/package.json is `os: ["darwin"]` because it wraps a macOS
-          # binary — so any npm install at the root fails on a Linux runner with
-          # EBADPLATFORM before wrangler is even fetched, let alone authenticated.
-          # `site` is not a workspace member, so installing there is isolated.
-          workingDirectory: site
-          command: pages deploy dist --project-name=homeclaw --branch=main
+      # The omarknows.app zone caches HTML at the edge; drop this host's copy.
+      - name: Purge edge cache
+        run: npx cf cache purge -z omarknows.app --body '{"hosts":["homeclaw.omarknows.app"]}' --force
+        working-directory: site

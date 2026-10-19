@@ -5,7 +5,7 @@ let version = '';
 try {
   version = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { encoding: 'utf-8' }).trim();
 } catch {
-  // Shallow clone (e.g. Cloudflare Pages) — fall back to GitHub API
+  // Shallow clone (e.g. CI checkout) — fall back to GitHub API
   try {
     const res = await fetch('https://api.github.com/repos/omarshahine/HomeClaw/releases/latest');
     if (res.ok) {

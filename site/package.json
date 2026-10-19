@@ -8,11 +8,16 @@
     "start": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "deploy": "astro build && cf-wrangler build && cf deploy --prebuilt"
   },
   "dependencies": {
     "astro": "^7.2.10",
     "tailwindcss": "^4.0.0",
     "@tailwindcss/vite": "^4.0.0"
+  },
+  "devDependencies": {
+    "cf": "1.0.0-beta.18",
+    "wrangler": "^4.0.0"
   }
 }
