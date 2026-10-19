@@ -18,10 +18,12 @@ asc() {
   case "$1 $2" in
     'versions list')
       [[ "${MOCK_READ_FAIL:-false}" == false ]] || return 12
+      if [[ "${MOCK_FAIL_VERIFY:-false}" == true && "${MOCK_DID_UPDATE:-false}" == true ]]; then return 12; fi
       printf '{"data":[{"id":"version-id","attributes":{"releaseType":"%s"}}]}\n' "$MOCK_RELEASE_TYPE" ;;
     'versions update')
       [[ "${ASC_READ_ONLY:-0}" != 1 ]] || return 13
       [[ "${MOCK_UPDATE_FAIL:-false}" == false ]] || return 14
+      MOCK_DID_UPDATE=true
       if [[ "${MOCK_UPDATE_STICKS:-true}" == true ]]; then MOCK_RELEASE_TYPE=AFTER_APPROVAL; fi
       echo '{}' ;;
     'versions create')
@@ -84,6 +86,13 @@ class AutoReleaseTests(unittest.TestCase):
                 self.assertNotIn("<create>", result.stderr)
                 self.assertIn("<--dry-run>", result.stderr)
                 self.assertNotIn("<--confirm>", result.stderr)
+
+    def test_readback_error_after_update_stops_before_review(self):
+        result = self.shell("MOCK_FAIL_VERIFY=true\nmain submit --build 110\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ASC <versions> <update>", result.stderr)
+        self.assertIn("Could not verify App Store release type", result.stderr)
+        self.assertNotIn("ASC <review> <submit>", result.stderr)
 
     def test_failed_or_unconfirmed_update_stops_before_review(self):
         for scenario in ["MOCK_UPDATE_FAIL=true", "MOCK_UPDATE_STICKS=false", "MOCK_READ_FAIL=true"]:
