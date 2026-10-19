@@ -212,6 +212,7 @@ enum AccessoryModel {
             "action_count": actionSet.actions.count,
             "type": actionSetType(actionSet),
             "rooms": Array(rooms).sorted(),
+            "last_execution_date": isoDateOrNull(actionSet.lastExecutionDate),
         ]
     }
 
@@ -242,6 +243,13 @@ enum AccessoryModel {
     /// `action_count`, plus `hidden: true` for trigger-owned action sets that the
     /// Home app excludes from `home.actionSets` (their names are opaque UUID
     /// strings, which is why a "name" can look like a UUID).
+    /// ISO-8601 UTC for a HomeKit timestamp, or JSON null when HomeKit has none,
+    /// so callers can tell "never" from a missing field.
+    static func isoDateOrNull(_ date: Date?) -> Any {
+        guard let date else { return NSNull() }
+        return ISO8601DateFormatter().string(from: date)
+    }
+
     static func triggerActionSetSummaries(_ trigger: HMTrigger, home: HMHome?) -> [[String: Any]] {
         let visibleIDs = home.map { Set($0.actionSets.map(\.uniqueIdentifier)) }
         return trigger.actionSets.map { actionSet in
@@ -249,6 +257,7 @@ enum AccessoryModel {
                 "id": actionSet.uniqueIdentifier.uuidString,
                 "name": actionSet.name,
                 "action_count": actionSet.actions.count,
+                "last_execution_date": isoDateOrNull(actionSet.lastExecutionDate),
             ]
             if let visibleIDs, !visibleIDs.contains(actionSet.uniqueIdentifier) {
                 dict["hidden"] = true

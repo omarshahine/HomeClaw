@@ -45,6 +45,7 @@ struct GetScene: ParsableCommand {
 
         print("\(name) [\(type)]")
         print("Home: \(homeName)")
+        print("Last run: \(lastRunText(result))")
         print("Actions: \(actionCount)\n")
 
         if let actions = result["actions"] as? [[String: String]] {

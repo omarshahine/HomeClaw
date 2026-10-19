@@ -1,3 +1,4 @@
+import Foundation
 import ArgumentParser
 import Testing
 @testable import homeclaw_cli
@@ -48,6 +49,22 @@ struct SceneDisplayTests {
             "id": Self.id, "name": "Main Lights", "type": "user_defined", "action_count": 11,
         ])
         #expect(line == "  Main Lights [user_defined] — 11 action(s)")
+    }
+}
+
+@Suite("Last run rendering")
+struct LastRunTests {
+    // HomeKit leaves lastExecutionDate nil for most runs (#152), so the server
+    // sends JSON null and the CLI must not claim the scene never ran.
+    @Test("a recorded run prints its timestamp")
+    func recorded() {
+        #expect(lastRunText(["last_execution_date": "2026-10-17T20:33:57Z"]) == "2026-10-17T20:33:57Z")
+    }
+
+    @Test("null or missing prints none recorded")
+    func missing() {
+        #expect(lastRunText(["last_execution_date": NSNull()]) == "none recorded")
+        #expect(lastRunText([:]) == "none recorded")
     }
 }
 

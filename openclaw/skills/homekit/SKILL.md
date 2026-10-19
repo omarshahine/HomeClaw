@@ -124,6 +124,11 @@ homeclaw-cli automations delete "<name-or-uuid>" [--dry-run]
 homeclaw-cli automations enable "<name-or-uuid>"
 homeclaw-cli automations disable "<name-or-uuid>"
 
+# Last run: every scene, and every entry in an automation's action_sets, carries
+# last_execution_date (ISO-8601 UTC, or null). HomeKit leaves it null for most
+# runs, including automations a home hub runs, so null means "none recorded",
+# not "never ran". Use `events` for what actually happened.
+
 # Create with inline actions (creates a scene named after the automation)
 # ALWAYS use UUIDs for target accessories to avoid name collisions
 homeclaw-cli automations create --name "Sarah's Room Open" \

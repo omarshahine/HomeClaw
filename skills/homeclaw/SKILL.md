@@ -104,6 +104,8 @@ The main workhorse tool. Supports 4 actions via the `action` parameter:
 | `enable` | `id` | Enable a disabled automation |
 | `disable` | `id` | Disable an automation without deleting |
 
+Each scene, and each entry in an automation's `action_sets`, carries `last_execution_date` (ISO-8601 UTC, or null). HomeKit leaves it null for most runs, including automations a home hub runs, so null means "none recorded", not "never ran". Use events for what actually happened.
+
 **Create parameters:**
 
 | Param | Required | Description |

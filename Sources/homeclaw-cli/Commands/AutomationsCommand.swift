@@ -92,6 +92,13 @@ func sceneLabel(_ scene: [String: Any]) -> String {
     return "\(name) (\(id))"
 }
 
+/// When HomeKit last ran a scene or an automation's action set. HomeKit leaves
+/// `lastExecutionDate` unset for most runs (#152), so a missing date means "none
+/// recorded", not "never ran".
+func lastRunText(_ scene: [String: Any]) -> String {
+    (scene["last_execution_date"] as? String) ?? "none recorded"
+}
+
 /// Human-readable scene label. The Home app gives the hidden, trigger-owned
 /// action sets behind its button automations an empty name, so fall back to the
 /// UUID rather than printing a blank.
@@ -163,6 +170,7 @@ struct GetAutomation: ParsableCommand {
                 let hidden = scene["hidden"] as? Bool ?? false
                 var line = "  \(sceneLabel(scene)) (\(actionCount) action(s))"
                 if hidden { line += " [hidden]" }
+                line += ", last run: \(lastRunText(scene))"
                 print(line)
             }
         }
