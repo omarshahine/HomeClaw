@@ -10,6 +10,24 @@ import MarkdownPage from '../layouts/MarkdownPage.astro';
 
   <hr />
 
+  <h3>Version 1.0.14</h3>
+  <p class="timestamp">October 2026</p>
+  <h4>New</h4>
+  <ul>
+    <li>
+      <strong>Last run</strong>: scenes and automations now report when HomeKit last ran them
+      (<code>last_execution_date</code>), and <code>get</code> and <code>get-scene</code> print it. HomeKit records
+      this for only some runs, so a missing date means none recorded, not that it never ran. Thanks to
+      vanpatrickbevill.
+    </li>
+  </ul>
+  <h4>Fixes</h4>
+  <ul>
+    <li>Turning off the MCP over HTTP server now waits for open connections to close before it reports that it has stopped.</li>
+  </ul>
+
+  <hr />
+
   <h3>Version 1.0.13</h3>
   <p class="timestamp">October 2026</p>
   <h4>Fixes</h4>

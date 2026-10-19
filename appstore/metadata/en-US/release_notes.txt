@@ -1,9 +1,5 @@
-Fixes a crash at launch on macOS 26. Version 1.0.12 wouldn't open on Macs running macOS 26. This update opens normally again. Thanks to everyone who reported it.
-
 New
-- Accessory groups: see the groups you made in the Home app with "Group with Other Accessories", create new ones, rename them, and add or remove accessories.
-- Each gang of a multi-gang switch can be renamed on its own, and a switch or outlet can be set to display as a light or fan.
+- Last run: scenes and automations now show when HomeKit last ran them, in both the JSON output and the get and get-scene commands. HomeKit records this for only some runs, so a missing date means none recorded, not that it never ran.
 
 Fixes
-- HomeClaw no longer quits without warning when a command-line client disconnects before reading its reply.
-- Reading an accessory that reports an unlimited range, such as an Eve Energy outlet, no longer freezes every later request until HomeClaw restarts.
+- Turning off the MCP over HTTP server now waits for open connections to close before it reports that it has stopped.
