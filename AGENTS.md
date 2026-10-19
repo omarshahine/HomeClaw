@@ -81,7 +81,7 @@ npm run build:mcp                      # Build Node.js MCP server only
 ### Xcode version
 
 The Xcode this project builds with is pinned in `.xcode-version` (currently
-**27.0**). `scripts/build.sh` and `scripts/release.sh` resolve that pin to
+**27.1**). `scripts/build.sh` and `scripts/release.sh` resolve that pin to
 an installed `Xcode.app` by its `CFBundleShortVersionString`, so a beta and a
 release build can sit side by side in `/Applications` under any name.
 
