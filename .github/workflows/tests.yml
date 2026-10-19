@@ -57,7 +57,9 @@ jobs:
   catalyst:
     name: Catalyst App
     if: github.event_name == 'pull_request'
-    runs-on: macos-26
+    # macos-26 carries Xcode 26.x only, so the .xcode-version pin below could
+    # never match there; Xcode 27 lives on the xcode-27 image.
+    runs-on: xcode-27
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
