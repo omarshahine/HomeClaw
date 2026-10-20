@@ -252,7 +252,7 @@ export const TOOLS: ToolDef[] = [
 	{
 		name: 'homekit_get_scene',
 		description:
-			'Get full detail for a scene including all actions (accessory, room, characteristic, value).',
+			'Get full detail for a scene including all actions (accessory, room, characteristic, value). On a multi-gang accessory (e.g. a dual relay) each action also carries service_name, service_id, and service_index, so the JSON can be re-imported without collapsing gangs.',
 		parameters: Type.Object({
 			scene: Type.String({ description: 'Scene name or UUID' }),
 		}),
@@ -271,9 +271,12 @@ export const TOOLS: ToolDef[] = [
 		name: 'homekit_import_scene',
 		optional: true,
 		description:
-			'Create a new HomeKit scene from a JSON definition file. Use dry_run to preview without creating.',
+			'Create a new HomeKit scene from a JSON definition file. Use dry_run to preview without creating. Each action row may carry service_name (name or unique UUID of the specific service to write to; this is how you pick one channel of a multi-gang switch), service_id (unique UUID of the specific service to write to; use when two services share a name), or service_index (channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang). Without one, an ambiguous row uses the first service and the result carries a warning naming the candidates.',
 		parameters: Type.Object({
-			file: Type.String({ description: 'Path to JSON file defining the scene' }),
+			file: Type.String({
+				description:
+					'Path to JSON file defining the scene: {"name": "...", "actions": [{"accessory": "...", "property": "...", "value": "...", "service_index": 2}]}',
+			}),
 			dry_run: Type.Optional(
 				Type.Boolean({ description: 'Preview without creating' })
 			),

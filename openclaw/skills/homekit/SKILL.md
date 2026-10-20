@@ -146,8 +146,16 @@ homeclaw-cli automations create --name "Movie Mode" \
 # Press types: single (0), double (1), long (2)
 # --action format: "UUID:property:value" (repeatable, UUID strongly preferred over names)
 # --scene and --action are mutually exclusive
-# Use --service-index for multi-button accessories (e.g., Aqara in fast mode)
+# Use --service-index for multi-button accessories (e.g., Aqara in fast mode); this picks the TRIGGER button
 # Note: inline actions create a visible scene (Apple uses a private API for hidden ones)
+
+# One gang of a multi-gang accessory as an action or condition target: JSON row form
+# (repeatable; keys: accessory, property|characteristic, value, room, service_name, service_id, service_index)
+homeclaw-cli automations create --name "Dining Unoccupied" \
+  --accessory "Dining FP2" --characteristic occupancy_detected --trigger-value false \
+  --action-json '{"accessory":"<uuid>","property":"power","value":"false","service_index":1}' \
+  --action-json '{"accessory":"<uuid>","property":"power","value":"false","service_index":2}' --dry-run
+homeclaw-cli automations add-condition "<automation>" --accessory "<uuid>" --property power --value true --service-index 2
 
 # Replacing an accessory across automations (plan only; never writes without --apply)
 homeclaw-cli automations migrate-actions --replace-accessory "<old-uuid>=<new-uuid>[,<new-uuid>]" --json
@@ -203,6 +211,15 @@ Ambiguous: 'power' exists on multiple services. Pass service_name, service_index
 Passing selectors that match no service is a different error ("No service on '<name>' matches the given selectors") which lists the same candidates, so an over-constrained retry says so instead of claiming the characteristic doesn't exist.
 
 Copy one of those selectors into the retry. `homeclaw-cli get "<uuid>" --json` lists the same `id`, `name`, and `index` per service if you want them before writing.
+
+#### In scenes and automations
+
+Scene actions (`import-scene` / `update-scene` JSON), automation `actions` / `conditions` rows, and `add-condition` take the same three selectors per row. On the CLI use `--action-json` / `--condition-json` (the positional `accessory:property:value` form can't carry a selector).
+
+- With a selector the row lands on exactly that service, or fails listing the candidates.
+- Without one, an ambiguous row still uses the **first** service (for compatibility) and the response has a `warnings` entry naming every candidate. Treat that warning as a bug in your input: re-run with a selector.
+- `get-scene --json` and `automations get --json` emit `service_name`, `service_id`, `service_index` on rows whose accessory has several services with that property, so read, edit, and write back without losing which gang each row targets.
+- Two actions for the same accessory and property are fine when they name different services (both gangs of a dual relay off).
 
 ### Confirming a Write Landed
 

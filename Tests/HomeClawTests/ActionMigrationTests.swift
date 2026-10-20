@@ -154,6 +154,18 @@ final class ActionMigrationTests: XCTestCase {
         XCTAssertFalse(p.issues.contains { $0.kind == .unmapped }, "ambiguity is reported once, not also as unmapped")
     }
 
+    func testAmbiguousCandidatesCarryServiceSelectors() throws {
+        var g1 = service("GANG", "g1", type: switchType, [power]); g1.index = 1
+        var g2 = service("GANG", "g2", type: switchType, [power]); g2.index = 2
+        let p = try XCTUnwrap(plan(set([row(1, serviceType: switchType, power, .bool(true))]), [accessory("GANG", [g1, g2])]))
+        let issue = try XCTUnwrap(p.issues.first { $0.kind == .ambiguousService })
+        let json = M.json(issue)
+        let candidates = try XCTUnwrap(json["candidates"] as? [[String: Any]])
+        XCTAssertEqual(candidates.map { $0["service_index"] as? Int }, [1, 2])
+        XCTAssertEqual(candidates.map { $0["service_id"] as? String }, ["GANG.g1", "GANG.g2"])
+        XCTAssertEqual(candidates.map { $0["service_name"] as? String }, ["GANG g1", "GANG g2"])
+    }
+
     func testSameServiceTypeWinsOverOtherCarriers() throws {
         let combo = accessory("COMBO", [
             service("COMBO", "light", type: lightbulb, [power, brightness]),

@@ -16924,6 +16924,21 @@ var StdioServerTransport = class {
 };
 
 // lib/schemas.js
+var rowServiceSelectors = {
+  service_name: {
+    type: "string",
+    description: "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+  },
+  service_id: {
+    type: "string",
+    description: "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+  },
+  service_index: {
+    type: "number",
+    description: "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
+  }
+};
+var rowServiceSelectorNote = " Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates.";
 var tools = [
   {
     name: "homekit_status",
@@ -17227,12 +17242,13 @@ var tools = [
               property: { type: "string", description: "Characteristic to set (e.g., power, brightness, color_temperature)" },
               characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
               value: { type: "string", description: 'Target value as string (e.g., "true", "50", "344")' },
-              room: { type: "string", description: "Room name for disambiguation (optional)" }
+              room: { type: "string", description: "Room name for disambiguation (optional)" },
+              ...rowServiceSelectors
             },
             required: ["accessory", "value"],
             anyOf: [{ required: ["property"] }, { required: ["characteristic"] }]
           },
-          description: "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
+          description: "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory." + rowServiceSelectorNote
         },
         press_type: {
           type: "number",
@@ -17265,12 +17281,13 @@ var tools = [
               property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
               characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
               value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
-              room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" }
+              room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" },
+              ...rowServiceSelectors
             },
             required: ["accessory", "value"],
             anyOf: [{ required: ["property"] }, { required: ["characteristic"] }]
           },
-          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)"
+          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)" + rowServiceSelectorNote
         },
         time_after: {
           type: "array",
@@ -17295,7 +17312,8 @@ var tools = [
             property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
             characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
             value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
-            room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" }
+            room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" },
+            ...rowServiceSelectors
           },
           required: ["accessory", "value"],
           anyOf: [{ required: ["property"] }, { required: ["characteristic"] }],
@@ -17550,19 +17568,19 @@ async function handleDeviceMap(args) {
   if (args.home_id) socketArgs.home_id = args.home_id;
   return sendCommand("device_map", socketArgs);
 }
-async function handleAutomations(args) {
+async function handleAutomations(args, send = sendCommand) {
   const action = args.action || "list";
   switch (action) {
     case "list": {
       const socketArgs = {};
       if (args.home_id) socketArgs.home_id = args.home_id;
-      return sendCommand("list_automations", socketArgs);
+      return send("list_automations", socketArgs);
     }
     case "get": {
       if (!args.id) throw new Error("id is required for get action");
       const socketArgs = { id: args.id };
       if (args.home_id) socketArgs.home_id = args.home_id;
-      return sendCommand("get_automation", socketArgs);
+      return send("get_automation", socketArgs);
     }
     case "create_time": {
       if (!args.name) throw new Error("name is required for create_time action");
@@ -17599,7 +17617,7 @@ async function handleAutomations(args) {
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("create_time_automation", socketArgs);
+      return send("create_time_automation", socketArgs);
     }
     case "create": {
       if (!args.name) throw new Error("name is required for create action");
@@ -17642,14 +17660,14 @@ async function handleAutomations(args) {
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("create_automation", socketArgs);
+      return send("create_automation", socketArgs);
     }
     case "delete": {
       if (!args.id) throw new Error("id is required for delete action");
       const socketArgs = { id: args.id };
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("delete_automation", socketArgs);
+      return send("delete_automation", socketArgs);
     }
     case "enable":
     case "disable": {
@@ -17659,7 +17677,7 @@ async function handleAutomations(args) {
         enabled: String(action === "enable")
       };
       if (args.home_id) socketArgs.home_id = args.home_id;
-      return sendCommand("enable_automation", socketArgs);
+      return send("enable_automation", socketArgs);
     }
     case "add_condition": {
       if (typeof args.id !== "string" || args.id.trim() === "") {
@@ -17689,9 +17707,12 @@ async function handleAutomations(args) {
         value
       };
       if (room) socketArgs.room = room;
+      for (const key of ["service_name", "service_id", "service_index"]) {
+        if (Object.prototype.hasOwnProperty.call(args.condition, key)) socketArgs[key] = args.condition[key];
+      }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("add_automation_condition", socketArgs);
+      return send("add_automation_condition", socketArgs);
     }
     case "migrate_actions": {
       if (typeof args.old_accessory !== "string" || args.old_accessory.trim() === "") {

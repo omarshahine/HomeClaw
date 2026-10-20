@@ -31,6 +31,8 @@ enum ActionMigration {
         let name: String
         let type: String
         let characteristics: [Characteristic]
+        /// ServiceLabelIndex (the gang or button number), when the accessory has one.
+        var index: Int? = nil
     }
 
     struct Accessory: Equatable, Sendable {
@@ -206,6 +208,7 @@ enum ActionMigration {
         let id: String
         let name: String
         let type: String
+        var index: Int? = nil
     }
 
     struct Issue: Equatable, Sendable {
@@ -372,7 +375,7 @@ enum ActionMigration {
                         candidates: services,
                         detail: "\(accessory.name) has \(services.count) services with \(row.characteristicName) ("
                             + services.map(\.name).joined(separator: ", ")
-                            + "); a service selector is needed to pick one"))
+                            + "); a service selector (service_name, service_id or service_index) is needed to pick one"))
                 }
             }
             if !producedAny && !ambiguous {
@@ -496,7 +499,7 @@ enum ActionMigration {
     }
 
     private static func ref(_ service: Service) -> ServiceRef {
-        ServiceRef(id: service.id, name: service.name, type: service.type)
+        ServiceRef(id: service.id, name: service.name, type: service.type, index: service.index)
     }
 
     // MARK: - Manual Apple Home steps
@@ -666,7 +669,13 @@ enum ActionMigration {
         if let id = issue.newAccessoryID { dict["accessory_id"] = id }
         if let name = issue.newAccessoryName { dict["accessory"] = name }
         if !issue.candidates.isEmpty {
-            dict["candidates"] = issue.candidates.map { ["service_id": $0.id, "service_name": $0.name, "service_type": $0.type] }
+            // Each candidate carries the selector fields action rows accept, so the
+            // user can target one service with update-scene.
+            dict["candidates"] = issue.candidates.map { ref -> [String: Any] in
+                var c: [String: Any] = ["service_id": ref.id, "service_name": ref.name, "service_type": ref.type]
+                if let index = ref.index { c["service_index"] = index }
+                return c
+            }
         }
         return dict
     }

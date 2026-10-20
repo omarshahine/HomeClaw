@@ -50,7 +50,7 @@ struct GetScene: ParsableCommand {
 
         if let actions = result["actions"] as? [[String: String]] {
             for action in actions {
-                let accessory = action["accessory"] ?? "?"
+                let accessory = RowJSON.targetLabel(action)
                 let room = action["room"] ?? "?"
                 let characteristic = action["characteristic"] ?? "?"
                 let value = action["value"] ?? "?"

@@ -87,8 +87,79 @@ final class SocketServer: @unchecked Sendable {
     /// Thrown by `parseAccessoryRowsArg` when an `actions` / `conditions` arg is
     /// present but malformed. Caller maps the `.message` to `encodeResponse(success: false, error:)`.
     /// Absent → returns `nil` (does not throw); empty array → returns `[]`.
-    fileprivate struct AccessoryRowsArgError: Error {
+    struct AccessoryRowsArgError: LocalizedError {
         let message: String
+        var errorDescription: String? { message }
+    }
+
+    /// Normalizes one optional service selector (`service_name`, `service_id`,
+    /// `service_index`) on an action or condition row to the row's string form.
+    /// Returns nil when the key is absent. `service_index` accepts a JSON integer or
+    /// a numeric string (both become e.g. `"2"`); booleans, fractions, non-numeric
+    /// text, and values below 1 are rejected rather than ignored, so a typo can't
+    /// silently fall back to the first service (#87).
+    /// `label` names the field in error messages, e.g. `'actions'[0].service_index`.
+    static func normalizeServiceSelector(_ raw: Any?, key: String, label: String) throws -> String? {
+        guard let raw else { return nil }
+        if let nsNum = raw as? NSNumber, CFGetTypeID(nsNum) == CFBooleanGetTypeID() {
+            throw AccessoryRowsArgError(message: "\(label) is a boolean; expected \(key == "service_index" ? "a whole number of at least 1" : "a non-empty string")")
+        }
+        if key == "service_index" {
+            let text: String
+            if let nsNum = raw as? NSNumber {
+                guard let int = nsNum as? Int else {
+                    throw AccessoryRowsArgError(message: "\(label) must be a whole number of at least 1, got \(nsNum)")
+                }
+                text = String(int)
+            } else if let str = raw as? String {
+                text = str
+            } else {
+                throw AccessoryRowsArgError(message: "\(label) must be a whole number of at least 1")
+            }
+            guard let parsed = HomeKitManager.parseServiceIndex(text) else {
+                throw AccessoryRowsArgError(message: "\(label) must be a whole number of at least 1, got '\(text)'")
+            }
+            return String(parsed)
+        }
+        guard let str = raw as? String else {
+            throw AccessoryRowsArgError(message: "\(label) must be a non-empty string when provided")
+        }
+        let trimmed = str.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            throw AccessoryRowsArgError(message: "\(label) must be a non-empty string when provided")
+        }
+        return trimmed
+    }
+
+    /// Parser for the `actions` arg of `import_scene` / `update_scene`. Scene rows
+    /// carry more keys than automation rows (`accessory_id`, `room`, the
+    /// `characteristic` alias), and the manager reports per-row problems as
+    /// warnings, so this only enforces the wire types: every value must be a
+    /// string, except the service selectors, which go through
+    /// `normalizeServiceSelector` (so `get-scene` JSON and a hand-written
+    /// `"service_index": 2` both work).
+    static func parseSceneActionRowsArg(_ raw: Any?) throws -> [[String: String]]? {
+        guard let raw else { return nil }
+        guard let array = raw as? [Any] else {
+            throw AccessoryRowsArgError(message: "'actions' must be an array of {accessory, property, value} dicts")
+        }
+        return try array.enumerated().map { index, element in
+            guard let dict = element as? [String: Any] else {
+                throw AccessoryRowsArgError(message: "'actions'[\(index)] must be a dict")
+            }
+            var row: [String: String] = [:]
+            for (key, value) in dict {
+                if HomeKitManager.RowServiceSelector.keys.contains(key) {
+                    row[key] = try normalizeServiceSelector(value, key: key, label: "'actions'[\(index)].\(key)")
+                    continue
+                }
+                guard let str = value as? String else {
+                    throw AccessoryRowsArgError(message: "'actions'[\(index)].\(key) must be a string")
+                }
+                row[key] = str
+            }
+            return row
+        }
     }
 
     /// Strict parser for `actions` / `conditions` socket args (both have the same
@@ -106,7 +177,7 @@ final class SocketServer: @unchecked Sendable {
     /// - Throws: `AccessoryRowsArgError` if the arg is present but not an array,
     ///   contains a non-dict element, or contains an element missing/empty/non-string
     ///   `accessory`/`property`/`value` fields, or with non-string field values.
-    fileprivate static func parseAccessoryRowsArg(_ raw: Any?, fieldName: String) throws -> [[String: String]]? {
+    static func parseAccessoryRowsArg(_ raw: Any?, fieldName: String) throws -> [[String: String]]? {
         guard let raw else { return nil }
         guard let array = raw as? [Any] else {
             throw AccessoryRowsArgError(message: "'\(fieldName)' must be an array of {accessory, property, value} dicts")
@@ -119,19 +190,22 @@ final class SocketServer: @unchecked Sendable {
             }
             var row: [String: String] = [:]
             for key in ["accessory", "property", "value"] {
-                guard let raw = dict[key] else {
+                // `characteristic` is the documented alias for `property` (issue #76;
+                // the MCP schema advertises it), so accept it here too.
+                let source = key == "property" && dict["property"] == nil ? "characteristic" : key
+                guard let raw = dict[source] else {
                     throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)] missing required string field '\(key)'")
                 }
                 // Reject NSNumber-bools and NSNumbers: JSON booleans bridge as
                 // __NSCFBoolean and would silently cast in surprising ways.
                 if let nsNum = raw as? NSNumber, CFGetTypeID(nsNum) == CFBooleanGetTypeID() {
-                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(key) is a boolean; expected a non-empty string")
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(source) is a boolean; expected a non-empty string")
                 }
                 guard let strVal = raw as? String else {
-                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(key) must be a string")
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(source) must be a string")
                 }
                 guard !strVal.isEmpty else {
-                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(key) must be a non-empty string")
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].\(source) must be a non-empty string")
                 }
                 row[key] = strVal
             }
@@ -152,6 +226,14 @@ final class SocketServer: @unchecked Sendable {
                     throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].room must be a non-empty string when provided")
                 }
                 row["room"] = trimmed
+            }
+            // Optional service selectors (#87): pick one service when the
+            // characteristic exists on several (the gangs of a dual relay).
+            for key in HomeKitManager.RowServiceSelector.keys {
+                if let value = try Self.normalizeServiceSelector(
+                    dict[key], key: key, label: "'\(fieldName)'[\(index)].\(key)") {
+                    row[key] = value
+                }
             }
             result.append(row)
         }
@@ -1068,8 +1150,14 @@ final class SocketServer: @unchecked Sendable {
                 guard let name = args["name"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'name' argument")
                 }
-                guard let actions = args["actions"] as? [[String: String]] else {
-                    return encodeResponse(success: false, error: "Missing 'actions' array")
+                let actions: [[String: String]]
+                do {
+                    guard let parsed = try Self.parseSceneActionRowsArg(args["actions"]) else {
+                        return encodeResponse(success: false, error: "Missing 'actions' array")
+                    }
+                    actions = parsed
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
                 }
                 result = try await hk.importScene(
                     name: name,
@@ -1082,8 +1170,14 @@ final class SocketServer: @unchecked Sendable {
                 guard let nameOrID = (args["id"] as? String) ?? (args["name"] as? String) else {
                     return encodeResponse(success: false, error: "Missing 'name' or 'id' argument")
                 }
-                guard let actions = args["actions"] as? [[String: String]] else {
-                    return encodeResponse(success: false, error: "Missing 'actions' array")
+                let actions: [[String: String]]
+                do {
+                    guard let parsed = try Self.parseSceneActionRowsArg(args["actions"]) else {
+                        return encodeResponse(success: false, error: "Missing 'actions' array")
+                    }
+                    actions = parsed
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
                 }
                 result = try await hk.updateScene(
                     nameOrID: nameOrID,
@@ -1443,12 +1537,24 @@ final class SocketServer: @unchecked Sendable {
                 } else {
                     conditionRoom = nil
                 }
+                // Optional service selectors (#87), same strict rules as rows.
+                var serviceSelector: [String: String] = [:]
+                do {
+                    for key in HomeKitManager.RowServiceSelector.keys {
+                        if let value = try Self.normalizeServiceSelector(args[key], key: key, label: "'\(key)'") {
+                            serviceSelector[key] = value
+                        }
+                    }
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
                 result = try await hk.addAutomationCondition(
                     id: id,
                     accessoryID: accessory,
                     conditionRoom: conditionRoom,
                     property: property,
                     value: value,
+                    serviceSelector: serviceSelector,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
                 )

@@ -236,6 +236,47 @@ enum AccessoryModel {
         ]
     }
 
+    // MARK: - Service selectors on action and condition rows (#87)
+
+    /// The `service_name` / `service_id` / `service_index` keys for a row that
+    /// targets a characteristic on the given service.
+    ///
+    /// Emitted only when the accessory has more than one service carrying the row's
+    /// characteristic type (`carrierCount > 1`, e.g. the gangs of a dual relay):
+    /// exactly the rows that need a selector to round-trip through `import-scene` /
+    /// `update-scene`. Rows on single-service accessories stay byte-identical to
+    /// before, and don't pin a service UUID that would stop matching if the
+    /// accessory is re-paired. Values are strings because action and condition
+    /// rows are `[String: String]` end to end; the write side parses
+    /// `service_index` back to a number.
+    static func serviceSelectorFields(name: String, id: String, index: Int?, carrierCount: Int) -> [String: String] {
+        guard carrierCount > 1 else { return [:] }
+        var fields = ["service_name": name, "service_id": id]
+        if let index { fields["service_index"] = String(index) }
+        return fields
+    }
+
+    /// `serviceSelectorFields` for a live characteristic, counting the services on
+    /// its accessory that carry the same characteristic type.
+    static func serviceSelectorFields(for characteristic: HMCharacteristic) -> [String: String] {
+        guard let service = characteristic.service else { return [:] }
+        let type = characteristic.characteristicType
+        let carriers = service.accessory?.services.filter { candidate in
+            candidate.characteristics.contains { $0.characteristicType == type }
+        }.count ?? 1
+        return serviceSelectorFields(
+            name: service.name,
+            id: service.uniqueIdentifier.uuidString,
+            index: serviceLabelIndex(of: service),
+            carrierCount: carriers
+        )
+    }
+
+    /// `row` with the service selector keys for `characteristic` merged in.
+    static func addingServiceSelector(to row: [String: String], for characteristic: HMCharacteristic) -> [String: String] {
+        row.merging(serviceSelectorFields(for: characteristic)) { current, _ in current }
+    }
+
     /// Detailed view of a scene including all actions.
     static func sceneDetail(_ actionSet: HMActionSet) -> [String: Any] {
         var detail = sceneSummary(actionSet)
@@ -243,13 +284,13 @@ enum AccessoryModel {
             guard let writeAction = action as? HMCharacteristicWriteAction<NSCopying> else { return nil }
             let characteristic = writeAction.characteristic
             let accessory = characteristic.service?.accessory
-            return [
+            return addingServiceSelector(to: [
                 "accessory": accessory?.name ?? "Unknown",
                 "accessory_id": accessory?.uniqueIdentifier.uuidString ?? "",
                 "room": accessory?.room?.name ?? "Default Room",
                 "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
                 "value": "\(writeAction.targetValue)",
-            ]
+            ], for: characteristic)
         }
         detail["actions"] = actions
         detail["action_count"] = actions.count
@@ -348,12 +389,12 @@ enum AccessoryModel {
                 guard let writeAction = action as? HMCharacteristicWriteAction<NSCopying> else { return nil }
                 let characteristic = writeAction.characteristic
                 let accessory = characteristic.service?.accessory
-                return [
+                return addingServiceSelector(to: [
                     "accessory": accessory?.name ?? "Unknown",
                     "room": accessory?.room?.name ?? "Default Room",
                     "characteristic": CharacteristicMapper.name(for: characteristic.characteristicType),
                     "value": "\(writeAction.targetValue)",
-                ]
+                ], for: characteristic)
             }
             var dict = summary
             dict["actions"] = actions
@@ -814,7 +855,7 @@ enum AccessoryModel {
             guard let char = foundChar, let value = foundValue else { return unknownCondition(sub) }
             let uuid = char.uniqueIdentifier.uuidString.uppercased()
             if let entry = charMap[uuid] {
-                return [
+                var condition: [String: Any] = [
                     "type": "characteristic",
                     "accessory": entry.accessory.name,
                     "accessory_id": entry.accessory.uniqueIdentifier.uuidString,
@@ -822,6 +863,10 @@ enum AccessoryModel {
                     "operator": "==",
                     "value": value,
                 ]
+                for (key, selectorValue) in serviceSelectorFields(for: entry.characteristic) {
+                    condition[key] = selectorValue
+                }
+                return condition
             }
             // Fallback when home lookup is unavailable — surface the raw UUID so callers can resolve.
             return [

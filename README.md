@@ -292,6 +292,11 @@ homeclaw-cli automations create --name "Open Blinds" \
   --accessory "Blinds Button" --scene "Open" \
   --service-index 1 --dry-run
 
+# One gang of a multi-gang accessory: JSON row form (see "Targeting one gang" below)
+homeclaw-cli automations create --name "Table Light Off" \
+  --accessory "Dining Button" --press single \
+  --action-json '{"accessory":"<uuid>","property":"power","value":"false","service_index":2}'
+
 homeclaw-cli automations delete "<name-or-uuid>"             # Delete automation
 homeclaw-cli automations enable "<name-or-uuid>"             # Enable
 homeclaw-cli automations disable "<name-or-uuid>"            # Disable
@@ -348,6 +353,32 @@ OUTPUT_FORMAT=json homeclaw-cli list          # Force JSON via env var
 
 **Button modes:** Some buttons (like Aqara AR009) support fast mode (2 buttons, single press each, instant response) or multi-event mode (1 button, single/double/long press, ~300ms delay). Use `--service-index` to target a specific button in fast mode.
 
+Note that `--service-index` on `automations create` picks the **trigger** button. The service an inline action or condition writes to is picked per row, as below.
+
+#### Targeting one gang of a multi-gang accessory
+
+A dual relay or a 3-gang switch is one accessory with several services that all carry `power`. Any action or condition row can pick one of them with `service_name`, `service_id`, or `service_index` (the same selectors `set` takes). The positional `accessory:property:value` form has no room for a fourth field (it splits on the first two colons so values like `22:30` survive), so use the JSON row flags instead:
+
+```bash
+# Turn off both gangs of one dual relay
+homeclaw-cli automations create --name "Dining Unoccupied" \
+  --accessory "Dining FP2" --characteristic occupancy_detected --trigger-value false \
+  --action-json '{"accessory":"ADA239D3-...","property":"power","value":"false","service_index":1}' \
+  --action-json '{"accessory":"ADA239D3-...","property":"power","value":"false","service_name":"Table Light"}' \
+  --dry-run
+
+# Conditions take the same keys (--condition-json on create / create-time, flags on add-condition)
+homeclaw-cli automations add-condition "Porch Lights" \
+  --accessory "ADA239D3-..." --property power --value true --service-index 2
+```
+
+`--action-json` / `--condition-json` are repeatable, accept `accessory`, `property` (or `characteristic`), `value`, `room`, and the three selectors, and reject unknown keys. Rules for every surface (CLI, MCP, scene JSON):
+
+- **With a selector**, the row resolves to exactly that service, or fails with an error listing the services that carry the property. It never falls back to another gang.
+- **Without a selector** on a property that exists on several services, HomeClaw keeps the old behavior (the first service) so existing scene JSON keeps working, but the response carries a `warnings` entry naming every candidate. Add a selector to silence it.
+- Two actions on the same accessory and property are allowed when they target different services. The same service twice is rejected.
+- `get-scene`, `automations get`, and dry-run previews emit `service_name`, `service_id`, and `service_index` on rows whose accessory has more than one service carrying that property, so their JSON round-trips through `import-scene` / `update-scene` without collapsing gangs. Rows on single-service accessories are unchanged.
+
 ### Replacing an Accessory in Automations
 
 You swapped a bulb, a switch, or a shade. Now every automation that used the old one needs the new one. `automations migrate-actions` plans that move and tells you, per action set, what it can and can't do.
@@ -361,7 +392,7 @@ Each action set an automation runs is one of two kinds:
 
 So hidden sets always come back `"status": "unsupported"` with `"reason": "hidden_action_set_requires_private_spi"`, the exact accessories and values to change, and `manual_steps` you (or your assistant) can follow in the Home app: open the automation, remove the old accessory, add the new one, set each value, tap Done. Rerun the dry run afterwards and the automation drops out of the plan.
 
-For each old action, the plan finds the same characteristic type (power, brightness, color temperature, hue, saturation, position, and anything else) on each replacement. A visible set is `blocked` instead of `supported` when no replacement can take a characteristic (it would be dropped), when a replacement has several services carrying it (pick by UUID once service selectors land), or when the new action would conflict with one already in the scene.
+For each old action, the plan finds the same characteristic type (power, brightness, color temperature, hue, saturation, position, and anything else) on each replacement. A visible set is `blocked` instead of `supported` when no replacement can take a characteristic (it would be dropped), when a replacement has several services carrying it (the issue lists each candidate's `service_name`, `service_id` and `service_index`; migrate-actions doesn't take selectors itself, so edit that scene with `update-scene` rows that carry one), or when the new action would conflict with one already in the scene.
 
 It's a dry run unless you pass `--apply`. With `--apply`, only `supported` visible scenes are written: the rollback snapshot (every current action) is logged and returned first, the new actions are added, the old ones removed, and the scene is re-read and checked to contain exactly the planned actions. Triggers, conditions, enabled state and recurrence are never touched. A failed or unverified write exits non-zero and reports what was written.
 
@@ -550,6 +581,20 @@ The `import-scene` command accepts a JSON file defining a scene and its actions:
 ```
 
 Action objects also accept `characteristic` as an alias for `property` (read commands emit `characteristic`, so their output round-trips as input).
+
+To target one gang of a multi-gang accessory, add `service_name`, `service_id`, or `service_index` to the action (`service_index` may be a JSON number or a string). `get-scene --json` emits these on exactly the rows that need them, so its output can be edited and fed back to `update-scene`:
+
+```json
+{
+  "id": "D47A94C9-BCCA-553A-AA3C-E756E91D22FE",
+  "actions": [
+    {"accessory_id": "ADA239D3-...", "property": "power", "value": "0", "service_name": "Covelight", "service_index": "1"},
+    {"accessory_id": "ADA239D3-...", "property": "power", "value": "0", "service_name": "Table Light", "service_index": "2"}
+  ]
+}
+```
+
+See [Targeting one gang of a multi-gang accessory](#targeting-one-gang-of-a-multi-gang-accessory) for the resolution and warning rules.
 
 The `assign-rooms` command accepts a JSON file mapping accessories to rooms. Use `uuid` for precise matching when multiple accessories share the same name (e.g., fan + light from a ceiling fan). A name that matches several accessories is skipped with status `ambiguous` rather than guessed. Every other command that takes an accessory name (including scene import/update actions and automation conditions) fails on a duplicate before changing anything, and lists each match's room and UUID:
 
