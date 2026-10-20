@@ -320,19 +320,23 @@ final class ActionMigrationTests: XCTestCase {
         XCTAssertTrue(M.verify(expected: e, actual: e.reversed()).verified)
     }
 
+    private func expect(_ id: String, _ value: M.Value) -> M.ExpectedAction {
+        M.ExpectedAction(characteristicID: id, value: value)
+    }
+
     func testVerifyNumericEquivalence() {
-        let v = M.verify(expected: [.init(characteristicID: "A", value: .bool(true)), .init(characteristicID: "B", value: .int(50))],
-                         actual: [.init(characteristicID: "a", value: .int(1)), .init(characteristicID: "B", value: .double(50.0))])
-        XCTAssertTrue(v.verified)
+        let expected: [M.ExpectedAction] = [expect("A", .bool(true)), expect("B", .int(50))]
+        let actual: [M.ExpectedAction] = [expect("a", .int(1)), expect("B", .double(50.0))]
+        XCTAssertTrue(M.verify(expected: expected, actual: actual).verified)
     }
 
     func testVerifyReportsMissingAndUnexpected() {
-        let v = M.verify(expected: [.init(characteristicID: "A", value: .int(50)), .init(characteristicID: "B", value: .int(1))],
-                         actual: [.init(characteristicID: "A", value: .int(40)), .init(characteristicID: "B", value: .int(1)),
-                                  .init(characteristicID: "C", value: .int(1))])
+        let expected: [M.ExpectedAction] = [expect("A", .int(50)), expect("B", .int(1))]
+        let actual: [M.ExpectedAction] = [expect("A", .int(40)), expect("B", .int(1)), expect("C", .int(1))]
+        let v = M.verify(expected: expected, actual: actual)
         XCTAssertFalse(v.verified)
-        XCTAssertEqual(v.missing, [.init(characteristicID: "A", value: .int(50))])
-        XCTAssertEqual(v.unexpected, [.init(characteristicID: "A", value: .int(40)), .init(characteristicID: "C", value: .int(1))])
+        XCTAssertEqual(v.missing, [expect("A", .int(50))])
+        XCTAssertEqual(v.unexpected, [expect("A", .int(40)), expect("C", .int(1))])
     }
 
     func testVerifyIsAMultiset() {

@@ -52,34 +52,59 @@ struct MigrateActionsCommandTests {
         #expect(Automations.configuration.subcommands.contains { $0 == Cmd.self })
     }
 
-    static var dryRun: [String: Any] { [
-        "mode": "dry_run",
-        "old_accessory": ["id": "OLD", "name": "Old Lamp", "present": true],
-        "new_accessories": [["id": "NEW", "name": "New Lamp"]],
-        "automations": [[
-            "id": "AUTO", "name": "Evening", "enabled": true, "trigger_summary": "sunset",
-            "trigger_uses_old_accessory": false,
-            "action_sets": [
-                [
-                    "id": "SCENE", "name": "Evening Scene", "classification": "visible_scene", "status": "supported",
-                    "shared_with": [["id": "AUTO2", "name": "Night"]],
-                    "removals": [["accessory": "Old Lamp", "characteristic": "brightness", "value": 50]],
-                    "additions": [["accessory": "New Lamp", "characteristic": "brightness", "value": 50]],
-                    "issues": [[String: Any]](),
-                ],
-                [
-                    "id": "HIDDEN", "name": "", "classification": "hidden", "status": "unsupported",
-                    "reason": "hidden_action_set_requires_private_spi",
-                    "removals": [["accessory": "Old Lamp", "characteristic": "power", "value": true]],
-                    "additions": [["accessory": "New Lamp", "characteristic": "power", "value": true]],
-                    "issues": [["kind": "missing_characteristic", "blocking": false, "detail": "New Lamp has no hue characteristic"]],
-                    "manual_steps": [["step": 1, "text": "In the Home app, open Automations and select 'Evening' (sunset)."]],
-                ],
-            ],
-        ]],
-        "summary": ["automations": 1, "action_sets": 2, "supported": 1, "unsupported": 1, "blocked": 0],
-        "warnings": ["Some visible scenes are shared with other automations."],
-    ] }
+    // Built from small, explicitly typed pieces: one large heterogeneous literal
+    // times out the type checker on older toolchains (CI's macos-26 runner).
+    static var dryRun: [String: Any] {
+        let oldRow: [String: Any] = ["accessory": "Old Lamp", "characteristic": "brightness", "value": 50]
+        let newRow: [String: Any] = ["accessory": "New Lamp", "characteristic": "brightness", "value": 50]
+        let shared: [String: Any] = ["id": "AUTO2", "name": "Night"]
+        var scene: [String: Any] = [:]
+        scene["id"] = "SCENE"
+        scene["name"] = "Evening Scene"
+        scene["classification"] = "visible_scene"
+        scene["status"] = "supported"
+        scene["shared_with"] = [shared]
+        scene["removals"] = [oldRow]
+        scene["additions"] = [newRow]
+        scene["issues"] = [[String: Any]]()
+
+        let oldPower: [String: Any] = ["accessory": "Old Lamp", "characteristic": "power", "value": true]
+        let newPower: [String: Any] = ["accessory": "New Lamp", "characteristic": "power", "value": true]
+        let issue: [String: Any] = [
+            "kind": "missing_characteristic", "blocking": false, "detail": "New Lamp has no hue characteristic",
+        ]
+        let step: [String: Any] = ["step": 1, "text": "In the Home app, open Automations and select 'Evening' (sunset)."]
+        var hidden: [String: Any] = [:]
+        hidden["id"] = "HIDDEN"
+        hidden["name"] = ""
+        hidden["classification"] = "hidden"
+        hidden["status"] = "unsupported"
+        hidden["reason"] = "hidden_action_set_requires_private_spi"
+        hidden["removals"] = [oldPower]
+        hidden["additions"] = [newPower]
+        hidden["issues"] = [issue]
+        hidden["manual_steps"] = [step]
+
+        var automation: [String: Any] = [:]
+        automation["id"] = "AUTO"
+        automation["name"] = "Evening"
+        automation["enabled"] = true
+        automation["trigger_summary"] = "sunset"
+        automation["trigger_uses_old_accessory"] = false
+        automation["action_sets"] = [scene, hidden]
+
+        let old: [String: Any] = ["id": "OLD", "name": "Old Lamp", "present": true]
+        let new: [String: Any] = ["id": "NEW", "name": "New Lamp"]
+        let summary: [String: Any] = ["automations": 1, "action_sets": 2, "supported": 1, "unsupported": 1, "blocked": 0]
+        var result: [String: Any] = [:]
+        result["mode"] = "dry_run"
+        result["old_accessory"] = old
+        result["new_accessories"] = [new]
+        result["automations"] = [automation]
+        result["summary"] = summary
+        result["warnings"] = ["Some visible scenes are shared with other automations."]
+        return result
+    }
 
     @Test("dry run rendering shows classification, status, rows and manual steps")
     func rendersDryRun() {
@@ -99,20 +124,31 @@ struct MigrateActionsCommandTests {
 
     @Test("empty plan says so")
     func emptyPlan() {
-        let lines = Cmd.formatResult(["mode": "dry_run", "old_accessory": ["id": "X", "present": false], "automations": [[String: Any]]()])
+        let old: [String: Any] = ["id": "X", "present": false]
+        var result: [String: Any] = [:]
+        result["mode"] = "dry_run"
+        result["old_accessory"] = old
+        result["automations"] = [[String: Any]]()
+        let lines = Cmd.formatResult(result)
         #expect(lines.contains("  Replace: X (not in home)"))
         #expect(lines.contains("No automation action sets write to the old accessory."))
     }
 
     static func applied(verified: Bool, failed: Int = 0) -> [String: Any] {
-        [
-            "mode": "apply",
-            "automations": [["action_sets": [[
-                "id": "SCENE", "classification": "visible_scene", "status": "supported",
-                "apply": ["status": "applied", "verification": ["verified": verified]],
-            ]]]],
-            "summary": ["failed": failed, "applied": 1, "verified": verified ? 1 : 0],
-        ]
+        let verification: [String: Any] = ["verified": verified]
+        let apply: [String: Any] = ["status": "applied", "verification": verification]
+        var set: [String: Any] = [:]
+        set["id"] = "SCENE"
+        set["classification"] = "visible_scene"
+        set["status"] = "supported"
+        set["apply"] = apply
+        let automation: [String: Any] = ["action_sets": [set]]
+        let summary: [String: Any] = ["failed": failed, "applied": 1, "verified": verified ? 1 : 0]
+        var result: [String: Any] = [:]
+        result["mode"] = "apply"
+        result["automations"] = [automation]
+        result["summary"] = summary
+        return result
     }
 
     @Test("apply exit-code contract: verified succeeds, unverified or failed throws")
