@@ -46,6 +46,7 @@ jobs:
       - name: Verify native MCP schema parity
         run: |
           node --test scripts/check-mcp-schema-parity.test.mjs
+          node --test scripts/check-openclaw-failure.test.mjs
           node scripts/check-mcp-schema-parity.mjs
 
       - name: Build MCP server

@@ -365,6 +365,8 @@ For each old action, the plan finds the same characteristic type (power, brightn
 
 It's a dry run unless you pass `--apply`. With `--apply`, only `supported` visible scenes are written: the rollback snapshot (every current action) is logged and returned first, the new actions are added, the old ones removed, and the scene is re-read and checked to contain exactly the planned actions. Triggers, conditions, enabled state and recurrence are never touched. A failed or unverified write exits non-zero and reports what was written.
 
+Automations that are only *triggered* by the old accessory (a motion sensor that turns on a light) are listed too, with `"trigger_only": true` and no action sets: there's nothing to move, but that trigger stops firing once the old accessory is gone, and this command never rewrites triggers. Recreate those in the Home app.
+
 Migrate before you remove the old accessory from HomeKit. HomeKit usually drops a removed accessory's scene actions, and then there's nothing left to move. An old accessory that's already gone can still be named by UUID.
 
 ### Interactive TUI

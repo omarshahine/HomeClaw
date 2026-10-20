@@ -363,6 +363,74 @@ final class ActionMigrationTests: XCTestCase {
         XCTAssertFalse(M.Value.string("1").matches(.int(1)))
     }
 
+    // MARK: - Old accessory resolution (review: restricted accessories)
+
+    func testRestrictedHitIsRejectedEvenForAUUIDQuery() {
+        let hit = M.LookupHit(id: oldID, name: "Hidden Lamp", room: nil, allowed: false)
+        XCTAssertEqual(M.resolveOld(query: oldID, hit: hit), .restricted,
+                       "a filtered accessory must not fall back to 'already removed'")
+    }
+
+    func testAllowedHitResolvesAsPresent() {
+        let hit = M.LookupHit(id: oldID, name: "Old Lamp", room: "Kitchen", allowed: true)
+        XCTAssertEqual(M.resolveOld(query: "Old Lamp", hit: hit),
+                       .resolved(M.OldAccessory(id: oldID, name: "Old Lamp", room: "Kitchen", present: true)))
+    }
+
+    func testUUIDFallbackOnlyOnLookupMiss() {
+        let gone = "8a1d0000-0000-0000-0000-000000000009"
+        XCTAssertEqual(M.resolveOld(query: " \(gone) ", hit: nil),
+                       .resolved(M.OldAccessory(id: gone.uppercased(), name: nil, room: nil, present: false)))
+        XCTAssertEqual(M.resolveOld(query: "Old Lamp", hit: nil), .notFound)
+    }
+
+    func testOnlyOldAccessoryRowsAreRemovedAndOnlyReplacementsReceiveAdditions() throws {
+        let restricted = row(7, accessory: "RESTRICTED", service: "light", power, .bool(true))
+        let p = try XCTUnwrap(plan(set([row(1, power, .bool(true)), restricted]), [colorBulb]))
+        XCTAssertFalse(p.removals.contains { $0.accessoryID == "RESTRICTED" })
+        XCTAssertTrue(p.additions.allSatisfy { $0.accessoryID == "NEW-BULB" })
+        XCTAssertTrue(p.expected.contains(M.ExpectedAction(characteristicID: restricted.characteristicID, value: .bool(true))))
+    }
+
+    // MARK: - Trigger-only dependencies (review)
+
+    private func triggerOnly(_ watches: Bool) -> M.AutomationSnapshot {
+        let lights = set([row(1, accessory: "LIGHT", power, .bool(true))], id: "SET-LIGHT",
+                         usedBy: [M.TriggerRef(id: "MOTION", name: "Motion Lights")])
+        return M.AutomationSnapshot(id: "MOTION", name: "Motion Lights", enabled: true, triggerType: "characteristic",
+                                    triggerSummary: "Old Sensor motion_detected = true",
+                                    triggerUsesOldAccessory: watches, actionSets: [lights])
+    }
+
+    func testTriggerOnlyAutomationIsKeptAndWarned() throws {
+        let plans = M.plan(automations: [triggerOnly(true)], old: old, replacements: [colorBulb])
+        let plan = try XCTUnwrap(plans.first)
+        XCTAssertTrue(plan.triggerOnly)
+        XCTAssertTrue(plan.sets.isEmpty)
+        XCTAssertTrue(M.setsToApply(plans).isEmpty)
+        XCTAssertTrue(M.warnings(old: old, plans: plans).contains { $0.contains("triggered by the old accessory") })
+
+        let report = M.report(home: "Home", old: old, replacements: [colorBulb], automationFilter: nil, plans: plans,
+                              unattachedScenes: [], applyResults: nil, warnings: [])
+        let auto = try XCTUnwrap((report["automations"] as? [[String: Any]])?.first)
+        XCTAssertEqual(auto["trigger_only"] as? Bool, true)
+        XCTAssertEqual(auto["trigger_uses_old_accessory"] as? Bool, true)
+        XCTAssertEqual((auto["action_sets"] as? [[String: Any]])?.count, 0)
+        let summary = try XCTUnwrap(report["summary"] as? [String: Any])
+        XCTAssertEqual(summary["trigger_only"] as? Int, 1)
+        XCTAssertEqual(summary["action_sets"] as? Int, 0)
+    }
+
+    func testUnrelatedAutomationIsStillLeftOut() {
+        XCTAssertTrue(M.plan(automations: [triggerOnly(false)], old: old, replacements: [colorBulb]).isEmpty)
+    }
+
+    func testAutomationWithSetsIsNotTriggerOnly() throws {
+        let plan = try XCTUnwrap(M.plan(automations: [automation([set([row(1, power, .bool(true))])])],
+                                        old: old, replacements: [colorBulb]).first)
+        XCTAssertFalse(plan.triggerOnly)
+    }
+
     // MARK: - Warnings and report
 
     func testWarnings() throws {

@@ -161,6 +161,9 @@ struct MigrateAutomationActions: ParsableCommand {
             lines.append("\(auto["name"] as? String ?? "?") (\(auto["id"] as? String ?? "?")) [\(enabled ? "enabled" : "disabled")]")
             lines.append("  Trigger: \(auto["trigger_summary"] as? String ?? "?")"
                 + ((auto["trigger_uses_old_accessory"] as? Bool ?? false) ? " (watches the old accessory; not changed)" : ""))
+            if auto["trigger_only"] as? Bool ?? false {
+                lines.append("  (trigger only: no actions on the old accessory to migrate; this trigger stops firing once it is removed)")
+            }
             for set in auto["action_sets"] as? [[String: Any]] ?? [] {
                 lines.append(contentsOf: formatSet(set))
             }

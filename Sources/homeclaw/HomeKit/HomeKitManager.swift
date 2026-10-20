@@ -3168,14 +3168,17 @@ final class HomeKitManager: NSObject, Observable {
         // Old accessory: the resolver throws on ambiguity (#136). After a physical
         // swap it may already be gone, so a UUID that no longer resolves is still
         // accepted and matched against action rows by UUID.
+        // A filtered (restricted) accessory is reported as not found, exactly like
+        // every other command; the UUID fallback is only for a lookup miss.
+        let hit = try findAccessory(id: oldQuery, homeID: home.uniqueIdentifier.uuidString).map {
+            ActionMigration.LookupHit(
+                id: $0.uniqueIdentifier.uuidString, name: $0.name, room: $0.room?.name,
+                allowed: isAccessoryAllowed($0))
+        }
         let old: ActionMigration.OldAccessory
-        if let found = try findAccessory(id: oldQuery, homeID: home.uniqueIdentifier.uuidString),
-           isAccessoryAllowed(found) {
-            old = .init(id: found.uniqueIdentifier.uuidString, name: found.name, room: found.room?.name, present: true)
-        } else if let uuid = UUID(uuidString: oldQuery.trimmingCharacters(in: .whitespaces)) {
-            old = .init(id: uuid.uuidString, name: nil, room: nil, present: false)
-        } else {
-            throw ControlError.accessoryNotFound(oldQuery)
+        switch ActionMigration.resolveOld(query: oldQuery, hit: hit) {
+        case .resolved(let resolved): old = resolved
+        case .restricted, .notFound: throw ControlError.accessoryNotFound(oldQuery)
         }
 
         var replacements: [HMAccessory] = []

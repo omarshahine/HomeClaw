@@ -664,13 +664,13 @@ enum DemoFixtures {
         guard !newQueries.isEmpty else {
             throw HomeKitManager.ControlError.invalidArgument("Provide at least one replacement accessory")
         }
+        let hit = try find(oldQuery).map {
+            ActionMigration.LookupHit(id: $0.id, name: $0.name, room: roomName(for: $0.roomID), allowed: true)
+        }
         let old: ActionMigration.OldAccessory
-        if let acc = try find(oldQuery) {
-            old = .init(id: acc.id, name: acc.name, room: roomName(for: acc.roomID), present: true)
-        } else if let uuid = UUID(uuidString: oldQuery) {
-            old = .init(id: uuid.uuidString, name: nil, room: nil, present: false)
-        } else {
-            throw HomeKitManager.ControlError.accessoryNotFound(oldQuery)
+        switch ActionMigration.resolveOld(query: oldQuery, hit: hit) {
+        case .resolved(let resolved): old = resolved
+        case .restricted, .notFound: throw HomeKitManager.ControlError.accessoryNotFound(oldQuery)
         }
         var replacements: [DemoAccessory] = []
         for query in newQueries {
@@ -695,7 +695,7 @@ enum DemoFixtures {
             indices = Array(automations.indices)
         }
         let plans = ActionMigration.plan(
-            automations: indices.map(migrationSnapshot), old: old, replacements: models)
+            automations: indices.map { migrationSnapshot($0, oldName: old.name) }, old: old, replacements: models)
         let warnings = ActionMigration.warnings(old: old, plans: plans)
         guard apply else {
             return ActionMigration.report(
@@ -753,7 +753,7 @@ enum DemoFixtures {
     }
 
     @MainActor
-    private static func migrationSnapshot(_ idx: Int) -> ActionMigration.AutomationSnapshot {
+    private static func migrationSnapshot(_ idx: Int, oldName: String? = nil) -> ActionMigration.AutomationSnapshot {
         let auto = automations[idx]
         var sets: [ActionMigration.ActionSetSnapshot] = []
         if auto.inlineActions {
@@ -778,7 +778,9 @@ enum DemoFixtures {
         return .init(
             id: auto.id, name: auto.name, enabled: auto.enabled, triggerType: auto.triggerType,
             triggerSummary: summary["event_summary"] as? String ?? auto.triggerType,
-            triggerUsesOldAccessory: false, actionSets: sets)
+            // Demo automations record their trigger accessory by name.
+            triggerUsesOldAccessory: oldName.map { auto.accessoryName?.localizedCaseInsensitiveCompare($0) == .orderedSame } ?? false,
+            actionSets: sets)
     }
 
     /// Append a characteristic condition to an automation's predicate. Mirrors

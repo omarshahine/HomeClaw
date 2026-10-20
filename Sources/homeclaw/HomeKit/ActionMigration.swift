@@ -271,6 +271,41 @@ enum ActionMigration {
     struct AutomationPlan: Equatable, Sendable {
         let automation: AutomationSnapshot
         let sets: [SetPlan]
+        /// The automation's trigger watches the old accessory but none of its
+        /// action sets write to it. Nothing to migrate; listed so the user sees
+        /// which triggers will stop firing once the old accessory is removed.
+        var triggerOnly: Bool { sets.isEmpty }
+    }
+
+    // MARK: - Old accessory resolution
+
+    /// What the accessory lookup found for the `old` side of a replacement.
+    struct LookupHit: Equatable, Sendable {
+        let id: String
+        let name: String
+        let room: String?
+        /// Visible under the accessory filter.
+        let allowed: Bool
+    }
+
+    enum OldResolution: Equatable, Sendable {
+        case resolved(OldAccessory)
+        /// The lookup found an accessory the filter hides. Treated exactly like
+        /// not found, as every other command does, and never as "already removed".
+        case restricted
+        case notFound
+    }
+
+    /// Resolve the accessory being replaced. A filtered accessory is rejected; the
+    /// raw-UUID "no longer in the home" fallback applies only when the lookup
+    /// found nothing at all.
+    static func resolveOld(query: String, hit: LookupHit?) -> OldResolution {
+        if let hit {
+            guard hit.allowed else { return .restricted }
+            return .resolved(OldAccessory(id: hit.id, name: hit.name, room: hit.room, present: true))
+        }
+        guard let uuid = UUID(uuidString: query.trimmingCharacters(in: .whitespaces)) else { return .notFound }
+        return .resolved(OldAccessory(id: uuid.uuidString, name: nil, room: nil, present: false))
     }
 
     // MARK: - Planning
@@ -288,7 +323,10 @@ enum ActionMigration {
             let sets = automation.actionSets.compactMap {
                 plan(set: $0, automation: automation, old: old, replacements: replacements)
             }
-            return sets.isEmpty ? nil : AutomationPlan(automation: automation, sets: sets)
+            // Keep trigger-only dependencies (a motion sensor that fires a light
+            // automation) so the report shows which triggers will break.
+            guard !sets.isEmpty || automation.triggerUsesOldAccessory else { return nil }
+            return AutomationPlan(automation: automation, sets: sets)
         }
     }
 
@@ -522,7 +560,8 @@ enum ActionMigration {
         }
         if plans.contains(where: \.automation.triggerUsesOldAccessory) {
             warnings.append("Some automations are triggered by the old accessory. This command never changes triggers; "
-                + "recreate those automations in the Home app.")
+                + "recreate those automations in the Home app (see trigger_uses_old_accessory; trigger_only ones have "
+                + "no actions to migrate).")
         }
         if plans.contains(where: { $0.sets.contains { $0.classification == .visibleScene && !$0.sharedWith.isEmpty } }) {
             warnings.append("Some visible scenes are shared with other automations. Editing one changes every automation "
@@ -737,6 +776,7 @@ enum ActionMigration {
 
         var summary: [String: Any] = [
             "automations": plans.count,
+            "trigger_only": plans.filter(\.triggerOnly).count,
             "action_sets": seen.count,
             "supported": counts[.supported] ?? 0,
             "unsupported": counts[.unsupported] ?? 0,
@@ -766,6 +806,7 @@ enum ActionMigration {
                     "trigger_type": plan.automation.triggerType,
                     "trigger_summary": plan.automation.triggerSummary,
                     "trigger_uses_old_accessory": plan.automation.triggerUsesOldAccessory,
+                    "trigger_only": plan.triggerOnly,
                     "action_sets": plan.sets.map { json($0, automation: plan.automation, apply: applyResults?[$0.actionSetID]) },
                 ]
             },

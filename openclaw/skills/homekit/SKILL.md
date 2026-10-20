@@ -161,6 +161,8 @@ homeclaw-cli automations migrate-actions --replace-accessory "<old-uuid>=<new-uu
 #                                  action sets. Do NOT work around it (no import-scene +
 #                                  rewire substitute). Render manual_steps as Home app
 #                                  instructions instead, then rerun the dry run to confirm.
+#   trigger_only: true          -> the old accessory is this automation's trigger;
+#                                  nothing to migrate, but tell the user it will break
 # Never claim a hidden set was migrated. See docs/PRIVATE_API.md for the boundary.
 
 # Export to file (any format)

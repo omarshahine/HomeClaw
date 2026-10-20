@@ -134,6 +134,26 @@ struct MigrateActionsCommandTests {
         #expect(lines.contains("No automation action sets write to the old accessory."))
     }
 
+    @Test("trigger-only automations say why they are listed")
+    func triggerOnly() {
+        var automation: [String: Any] = [:]
+        automation["id"] = "MOTION"
+        automation["name"] = "Motion Lights"
+        automation["enabled"] = true
+        automation["trigger_summary"] = "Old Sensor motion_detected = true"
+        automation["trigger_uses_old_accessory"] = true
+        automation["trigger_only"] = true
+        automation["action_sets"] = [[String: Any]]()
+        let old: [String: Any] = ["id": "OLD", "name": "Old Sensor", "present": true]
+        var result: [String: Any] = [:]
+        result["mode"] = "dry_run"
+        result["old_accessory"] = old
+        result["automations"] = [automation]
+        let lines = Cmd.formatResult(result)
+        #expect(lines.contains("  Trigger: Old Sensor motion_detected = true (watches the old accessory; not changed)"))
+        #expect(lines.contains { $0.hasPrefix("  (trigger only:") })
+    }
+
     static func applied(verified: Bool, failed: Int = 0) -> [String: Any] {
         let verification: [String: Any] = ["verified": verified]
         let apply: [String: Any] = ["status": "applied", "verification": verification]
