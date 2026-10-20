@@ -296,6 +296,11 @@ homeclaw-cli automations delete "<name-or-uuid>"             # Delete automation
 homeclaw-cli automations enable "<name-or-uuid>"             # Enable
 homeclaw-cli automations disable "<name-or-uuid>"            # Disable
 
+# Replacing an accessory: plan which automation actions move (writes nothing)
+homeclaw-cli automations migrate-actions --replace-accessory "<old-uuid>=<new-uuid>[,<new-uuid>]"
+homeclaw-cli automations migrate-actions --replace-accessory "<old>=<new>" --automation "<name-or-uuid>" --json
+homeclaw-cli automations migrate-actions --replace-accessory "<old>=<new>" --apply  # Writes visible scenes only
+
 # LLM-optimized device map
 homeclaw-cli device-map
 homeclaw-cli device-map --home "Cabin"
@@ -342,6 +347,25 @@ OUTPUT_FORMAT=json homeclaw-cli list          # Force JSON via env var
 **Inline vs scene:** Use `--action` for simple button-to-device mappings. This creates a scene named after the automation. Use `--scene` to trigger an existing scene instead. Note: Apple's Home app uses a private API for hidden automation-only action sets; inline actions created via HomeClaw will appear as visible scenes in the Home app.
 
 **Button modes:** Some buttons (like Aqara AR009) support fast mode (2 buttons, single press each, instant response) or multi-event mode (1 button, single/double/long press, ~300ms delay). Use `--service-index` to target a specific button in fast mode.
+
+### Replacing an Accessory in Automations
+
+You swapped a bulb, a switch, or a shade. Now every automation that used the old one needs the new one. `automations migrate-actions` plans that move and tells you, per action set, what it can and can't do.
+
+Each action set an automation runs is one of two kinds:
+
+| Kind | What it is | Can HomeClaw edit it? |
+|------|------------|-----------------------|
+| `visible_scene` | A scene in the Home app's Scenes list that an automation points at | Yes, in place (the scene keeps its UUID). But it's **shared**: editing it changes every other automation that uses it, and the scene tile itself. The plan lists those in `shared_with`. |
+| `hidden` | The action set the Home app creates inside one automation (most button and sensor automations made in the Home app) | **No.** Apple's HomeKit daemon only lets apps with Apple's private `com.apple.homekit.private-spi-access` entitlement write these. No third-party app can get it. See [docs/PRIVATE_API.md](docs/PRIVATE_API.md). |
+
+So hidden sets always come back `"status": "unsupported"` with `"reason": "hidden_action_set_requires_private_spi"`, the exact accessories and values to change, and `manual_steps` you (or your assistant) can follow in the Home app: open the automation, remove the old accessory, add the new one, set each value, tap Done. Rerun the dry run afterwards and the automation drops out of the plan.
+
+For each old action, the plan finds the same characteristic type (power, brightness, color temperature, hue, saturation, position, and anything else) on each replacement. A visible set is `blocked` instead of `supported` when no replacement can take a characteristic (it would be dropped), when a replacement has several services carrying it (pick by UUID once service selectors land), or when the new action would conflict with one already in the scene.
+
+It's a dry run unless you pass `--apply`. With `--apply`, only `supported` visible scenes are written: the rollback snapshot (every current action) is logged and returned first, the new actions are added, the old ones removed, and the scene is re-read and checked to contain exactly the planned actions. Triggers, conditions, enabled state and recurrence are never touched. A failed or unverified write exits non-zero and reports what was written.
+
+Migrate before you remove the old accessory from HomeKit. HomeKit usually drops a removed accessory's scene actions, and then there's nothing left to move. An old accessory that's already gone can still be named by UUID.
 
 ### Interactive TUI
 
@@ -476,9 +500,9 @@ openclaw gateway restart
 
 ### Enabling Control Tools
 
-The plugin registers 19 agent tools. The read-only ones (`homekit_status`, `homekit_device_map`, `homekit_list`, `homekit_get`, `homekit_search`, `homekit_scenes`, `homekit_get_scene`, `homekit_events`, `homekit_groups`, `homekit_automations_list`, `homekit_automations_get`) are on by default, including under the `coding` and `messaging` tool profiles.
+The plugin registers 20 agent tools. The read-only ones (`homekit_status`, `homekit_device_map`, `homekit_list`, `homekit_get`, `homekit_search`, `homekit_scenes`, `homekit_get_scene`, `homekit_events`, `homekit_groups`, `homekit_automations_list`, `homekit_automations_get`) are on by default, including under the `coding` and `messaging` tool profiles.
 
-The eight tools that change your home (`homekit_set`, `homekit_trigger`, `homekit_import_scene`, `homekit_delete_scene`, `homekit_rename`, `homekit_set_display_as`, `homekit_manage_group`, `homekit_automations_create`) are **optional**: OpenClaw hides them until you opt in. To allow all HomeClaw tools, add the plugin id to `tools.alsoAllow` in your OpenClaw config:
+The nine tools that can change your home (`homekit_set`, `homekit_trigger`, `homekit_import_scene`, `homekit_delete_scene`, `homekit_rename`, `homekit_set_display_as`, `homekit_manage_group`, `homekit_automations_create`, `homekit_automations_migrate_actions`) are **optional**: OpenClaw hides them until you opt in. To allow all HomeClaw tools, add the plugin id to `tools.alsoAllow` in your OpenClaw config:
 
 ```json
 {

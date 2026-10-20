@@ -41,7 +41,8 @@
       "homekit_manage_group",
       "homekit_automations_list",
       "homekit_automations_get",
-      "homekit_automations_create"
+      "homekit_automations_create",
+      "homekit_automations_migrate_actions"
     ]
   },
   "toolMetadata": {
@@ -162,6 +163,10 @@
       "replaySafe": true
     },
     "homekit_automations_create": {
+      "optional": true,
+      "sideEffecting": true
+    },
+    "homekit_automations_migrate_actions": {
       "optional": true,
       "sideEffecting": true
     }

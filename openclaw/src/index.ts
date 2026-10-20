@@ -553,6 +553,51 @@ const TOOLS: ToolDef[] = [
 			return args;
 		},
 	},
+	{
+		name: 'homekit_automations_migrate_actions',
+		optional: true,
+		description:
+			'Plan replacing an accessory in the action sets automations run. Plan-only unless apply is true. ' +
+			'Each action set is visible_scene (editable in place, but shared with other automations and the scene tile) ' +
+			'or hidden (automation-owned; Apple only lets its own Home app write these, so status is "unsupported" ' +
+			'with manual_steps to render as Apple Home instructions). Status per set: supported, unsupported, blocked. ' +
+			'apply writes supported visible scenes only and verifies them with a re-read. Triggers are never changed.',
+		parameters: Type.Object({
+			old_accessory: Type.String({
+				description: 'Accessory being replaced (UUID preferred; a UUID may name an accessory already removed)',
+			}),
+			new_accessories: Type.Array(Type.String(), {
+				minItems: 1,
+				description: 'Replacement accessory UUIDs (preferred) or names',
+			}),
+			automation: Type.Optional(
+				Type.String({ description: 'Limit to one automation (name or UUID)' })
+			),
+			apply: Type.Optional(
+				Type.Boolean({ description: 'Write supported visible scenes (default: plan only)' })
+			),
+		}),
+		buildArgs: (params) => {
+			const old = String(params.old_accessory);
+			const replacements = Array.isArray(params.new_accessories) ? params.new_accessories.map(String) : [];
+			if (replacements.length === 0) throw new Error('new_accessories is required');
+			for (const ref of [old, ...replacements]) {
+				if (ref.includes('=') || ref.includes(',')) {
+					throw new Error(`Accessory '${ref}' contains '=' or ','; pass its UUID instead`);
+				}
+			}
+			const args = [
+				'automations',
+				'migrate-actions',
+				'--replace-accessory',
+				`${old}=${replacements.join(',')}`,
+			];
+			optionalFlag(args, '--automation', params.automation);
+			optionalFlag(args, '--apply', params.apply);
+			args.push('--json');
+			return args;
+		},
+	},
 ];
 
 // ---------------------------------------------------------------------------

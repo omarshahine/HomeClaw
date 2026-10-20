@@ -3137,6 +3137,294 @@ final class HomeKitManager: NSObject, Observable {
         ] as [String: Any]
     }
 
+    // MARK: - Accessory replacement across automations (issue #120)
+
+    /// Plan, and with `apply` perform, moving the write actions an accessory
+    /// carries in automation action sets onto one or more replacements.
+    ///
+    /// Only visible scenes (present in `home.actionSets`) can be written.
+    /// Automation-owned hidden sets are always reported `unsupported` with manual
+    /// Apple Home steps: the HomeKit daemon refuses third-party writes to them
+    /// without Apple's private SPI entitlement (docs/PRIVATE_API.md). Triggers,
+    /// conditions, enabled state and recurrence are never touched; visible sets
+    /// are edited in place, so their UUIDs survive.
+    func migrateAutomationActions(
+        oldAccessory oldQuery: String,
+        newAccessories newQueries: [String],
+        automationID: String?,
+        homeID: String?,
+        apply: Bool
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        if Self.isDemoMode {
+            return try DemoFixtures.migrateActions(
+                oldAccessory: oldQuery, newAccessories: newQueries, automationID: automationID, apply: apply)
+        }
+        let home = try resolveHome(homeID: homeID)
+        guard !newQueries.isEmpty else {
+            throw ControlError.invalidArgument("Provide at least one replacement accessory")
+        }
+
+        // Old accessory: the resolver throws on ambiguity (#136). After a physical
+        // swap it may already be gone, so a UUID that no longer resolves is still
+        // accepted and matched against action rows by UUID.
+        let old: ActionMigration.OldAccessory
+        if let found = try findAccessory(id: oldQuery, homeID: home.uniqueIdentifier.uuidString),
+           isAccessoryAllowed(found) {
+            old = .init(id: found.uniqueIdentifier.uuidString, name: found.name, room: found.room?.name, present: true)
+        } else if let uuid = UUID(uuidString: oldQuery.trimmingCharacters(in: .whitespaces)) {
+            old = .init(id: uuid.uuidString, name: nil, room: nil, present: false)
+        } else {
+            throw ControlError.accessoryNotFound(oldQuery)
+        }
+
+        var replacements: [HMAccessory] = []
+        for query in newQueries {
+            guard let accessory = try findAccessory(id: query, homeID: home.uniqueIdentifier.uuidString),
+                  isAccessoryAllowed(accessory) else {
+                throw ControlError.accessoryNotFound(query)
+            }
+            guard accessory.uniqueIdentifier.uuidString.caseInsensitiveCompare(old.id) != .orderedSame else {
+                throw ControlError.invalidArgument("'\(query)' is the accessory being replaced")
+            }
+            guard !replacements.contains(where: { $0.uniqueIdentifier == accessory.uniqueIdentifier }) else {
+                throw ControlError.invalidArgument("Replacement '\(accessory.name)' is listed more than once")
+            }
+            replacements.append(accessory)
+        }
+        let newModels = replacements.map(Self.migrationAccessory)
+
+        let triggers: [HMTrigger]
+        if let automationID {
+            triggers = [try resolveTrigger(id: automationID, in: home)]
+        } else {
+            triggers = home.triggers
+        }
+
+        let visibleIDs = Set(home.actionSets.map(\.uniqueIdentifier))
+        var usedBy: [UUID: [ActionMigration.TriggerRef]] = [:]
+        for trigger in home.triggers {
+            for set in trigger.actionSets {
+                usedBy[set.uniqueIdentifier, default: []].append(
+                    .init(id: trigger.uniqueIdentifier.uuidString, name: trigger.name))
+            }
+        }
+
+        var liveSets: [String: HMActionSet] = [:]
+        var liveActions: [String: HMAction] = [:]
+        var automations: [ActionMigration.AutomationSnapshot] = []
+        for trigger in triggers {
+            var sets: [ActionMigration.ActionSetSnapshot] = []
+            for set in trigger.actionSets {
+                liveSets[set.uniqueIdentifier.uuidString] = set
+                for action in set.actions { liveActions[action.uniqueIdentifier.uuidString] = action }
+                let (rows, other) = Self.migrationRows(set)
+                sets.append(.init(
+                    id: set.uniqueIdentifier.uuidString, name: set.name,
+                    visible: visibleIDs.contains(set.uniqueIdentifier), rows: rows,
+                    nonWriteActionCount: other, usedBy: usedBy[set.uniqueIdentifier] ?? []))
+            }
+            let summary = AccessoryModel.triggerSummary(trigger, homeName: home.name, home: home)
+            let type = summary["trigger_type"] as? String ?? "unknown"
+            automations.append(.init(
+                id: trigger.uniqueIdentifier.uuidString,
+                name: trigger.name,
+                enabled: trigger.isEnabled,
+                triggerType: type,
+                triggerSummary: summary["event_summary"] as? String ?? type,
+                triggerUsesOldAccessory: Self.triggerWatches(trigger, accessoryID: old.id),
+                actionSets: sets))
+        }
+        let plans = ActionMigration.plan(automations: automations, old: old, replacements: newModels)
+
+        // Visible scenes that use the old accessory but no automation: reported so
+        // nothing is silently missed; `update-scene` covers them.
+        var unattached: [(id: String, name: String, actionCount: Int)] = []
+        if automationID == nil {
+            for set in home.actionSets where usedBy[set.uniqueIdentifier] == nil {
+                let count = Self.migrationRows(set).rows.filter { ActionMigration.isOld($0, old.id) }.count
+                if count > 0 { unattached.append((set.uniqueIdentifier.uuidString, set.name, count)) }
+            }
+        }
+
+        let warnings = ActionMigration.warnings(old: old, plans: plans)
+
+        guard apply else {
+            return ActionMigration.report(
+                home: home.name, old: old, replacements: newModels, automationFilter: automationID,
+                plans: plans, unattachedScenes: unattached, applyResults: nil, warnings: warnings)
+        }
+
+        // Rollback metadata goes out before any write: in the log here, and in
+        // every set's `rollback` block of the result.
+        let toApply = ActionMigration.setsToApply(plans)
+        for plan in toApply {
+            let rollback = plan.rollback.map(ActionMigration.json)
+            if let data = try? JSONSerialization.data(withJSONObject: rollback, options: [.sortedKeys]),
+               let text = String(data: data, encoding: .utf8) {
+                AppLogger.homekit.info(
+                    "[\(home.name)] migrate-actions rollback for '\(plan.name)' (\(plan.actionSetID)): \(text, privacy: .public)")
+            }
+        }
+
+        var results: [String: ActionMigration.ApplyResult] = [:]
+        var failed = false
+        for plan in toApply {
+            if failed {
+                results[plan.actionSetID] = .init(
+                    status: .skipped, addedActions: [], removedActionIDs: [], verification: nil, error: nil,
+                    note: "Skipped after an earlier set failed")
+                continue
+            }
+            let result = await applyMigration(
+                plan, in: home, liveSets: liveSets, liveActions: liveActions, replacements: replacements)
+            if result.status != .applied || result.verification?.verified != true || result.error != nil { failed = true }
+            results[plan.actionSetID] = result
+        }
+
+        AppLogger.homekit.info(
+            "[\(home.name)] migrate-actions applied \(results.values.filter { $0.status == .applied }.count) of \(toApply.count) visible set(s)")
+        return ActionMigration.report(
+            home: home.name, old: old, replacements: newModels, automationFilter: automationID,
+            plans: plans, unattachedScenes: unattached, applyResults: results, warnings: warnings)
+    }
+
+    /// Mutate one visible set in place: add the new actions, then remove the old
+    /// ones, then re-read the set and verify it holds exactly the planned actions.
+    /// A failure stops here and reports what was already written.
+    private func applyMigration(
+        _ plan: ActionMigration.SetPlan,
+        in home: HMHome,
+        liveSets: [String: HMActionSet],
+        liveActions: [String: HMAction],
+        replacements: [HMAccessory]
+    ) async -> ActionMigration.ApplyResult {
+        var added: [String] = []
+        var removed: [String] = []
+        func failure(_ message: String) -> ActionMigration.ApplyResult {
+            .init(status: .failed, addedActions: added, removedActionIDs: removed, verification: nil, error: message,
+                  note: added.isEmpty && removed.isEmpty ? "Nothing was written" : "Partially written; see rollback")
+        }
+        guard let set = liveSets[plan.actionSetID],
+              home.actionSets.contains(where: { $0.uniqueIdentifier == set.uniqueIdentifier }) else {
+            return failure("Action set is no longer a visible scene")
+        }
+        let triggersBefore = Set(home.triggers.filter { $0.actionSets.contains(set) }.map(\.uniqueIdentifier))
+
+        do {
+            for addition in plan.additions {
+                guard let source = liveActions[addition.sourceActionID] as? HMCharacteristicWriteAction<NSCopying>,
+                      let characteristic = replacements
+                        .first(where: { $0.uniqueIdentifier.uuidString == addition.accessoryID })?
+                        .services.first(where: { $0.uniqueIdentifier.uuidString == addition.serviceID })?
+                        .characteristics.first(where: { $0.uniqueIdentifier.uuidString == addition.characteristicID })
+                else {
+                    return failure("Lost track of \(addition.accessoryName) \(addition.characteristicName)")
+                }
+                // Copy the old action's exact target value object rather than
+                // re-parsing its display form.
+                guard let target = source.targetValue as? (NSCopying & NSObjectProtocol) else {
+                    return failure("Target value for \(addition.characteristicName) is not copyable")
+                }
+                let action = HMCharacteristicWriteAction(characteristic: characteristic, targetValue: target)
+                try await homeKitAsync { set.addAction(action, completionHandler: $0) }
+                added.append(action.uniqueIdentifier.uuidString)
+            }
+            for row in plan.removals {
+                guard let action = liveActions[row.actionID] else {
+                    return failure("Lost track of old action \(row.actionID)")
+                }
+                try await homeKitAsync { set.removeAction(action, completionHandler: $0) }
+                removed.append(row.actionID)
+            }
+        } catch {
+            return failure(error.localizedDescription)
+        }
+
+        // Re-read the set from home.actionSets after the completion handlers.
+        guard let reread = home.actionSets.first(where: { $0.uniqueIdentifier == set.uniqueIdentifier }) else {
+            return failure("Action set disappeared from home.actionSets after the write")
+        }
+        let (rows, other) = Self.migrationRows(reread)
+        let verification = ActionMigration.verify(
+            expected: plan.expected,
+            actual: rows.map { .init(characteristicID: $0.characteristicID, value: $0.value) })
+        var problems: [String] = []
+        if !verification.verified { problems.append("The scene does not contain exactly the planned actions") }
+        if other != plan.nonWriteActionCount {
+            problems.append("Non-write action count changed from \(plan.nonWriteActionCount) to \(other)")
+        }
+        let triggersAfter = Set(home.triggers.filter { $0.actionSets.contains(reread) }.map(\.uniqueIdentifier))
+        if triggersAfter != triggersBefore {
+            problems.append("The automations using this scene changed during the write")
+        }
+        return .init(
+            status: .applied, addedActions: added, removedActionIDs: removed, verification: verification,
+            error: problems.isEmpty ? nil : problems.joined(separator: "; "), note: nil)
+    }
+
+    private static func migrationAccessory(_ accessory: HMAccessory) -> ActionMigration.Accessory {
+        .init(
+            id: accessory.uniqueIdentifier.uuidString,
+            name: accessory.name,
+            room: accessory.room?.name,
+            services: accessory.services.map { service in
+                .init(
+                    id: service.uniqueIdentifier.uuidString,
+                    name: service.name,
+                    type: service.serviceType,
+                    characteristics: service.characteristics.map { c in
+                        .init(
+                            id: c.uniqueIdentifier.uuidString,
+                            type: c.characteristicType,
+                            name: CharacteristicMapper.name(for: c.characteristicType),
+                            writable: c.properties.contains(HMCharacteristicPropertyWritable))
+                    })
+            })
+    }
+
+    /// Plain rows for a set's characteristic write actions, plus the count of
+    /// any other kind of action.
+    private static func migrationRows(_ set: HMActionSet) -> (rows: [ActionMigration.ActionRow], other: Int) {
+        var rows: [ActionMigration.ActionRow] = []
+        var other = 0
+        for action in set.actions {
+            guard let write = action as? HMCharacteristicWriteAction<NSCopying> else {
+                other += 1
+                continue
+            }
+            let characteristic = write.characteristic
+            let service = characteristic.service
+            let accessory = service?.accessory
+            rows.append(.init(
+                actionID: action.uniqueIdentifier.uuidString,
+                accessoryID: accessory?.uniqueIdentifier.uuidString ?? "",
+                accessoryName: accessory?.name ?? "Unknown",
+                room: accessory?.room?.name,
+                serviceID: service?.uniqueIdentifier.uuidString,
+                serviceName: service?.name,
+                serviceType: service?.serviceType,
+                characteristicID: characteristic.uniqueIdentifier.uuidString,
+                characteristicType: characteristic.characteristicType,
+                characteristicName: CharacteristicMapper.name(for: characteristic.characteristicType),
+                value: ActionMigration.Value(any: write.targetValue)))
+        }
+        return (rows, other)
+    }
+
+    /// Whether an automation's trigger events watch the given accessory.
+    private static func triggerWatches(_ trigger: HMTrigger, accessoryID: String) -> Bool {
+        guard let event = trigger as? HMEventTrigger else { return false }
+        return event.events.contains { e in
+            let characteristic: HMCharacteristic?
+            if let c = e as? HMCharacteristicEvent<NSCopying> { characteristic = c.characteristic }
+            else if let t = e as? HMCharacteristicThresholdRangeEvent { characteristic = t.characteristic }
+            else { characteristic = nil }
+            return characteristic?.service?.accessory?.uniqueIdentifier.uuidString
+                .caseInsensitiveCompare(accessoryID) == .orderedSame
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Outcome of matching a user-supplied automation identifier against a

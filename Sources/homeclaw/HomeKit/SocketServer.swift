@@ -1340,6 +1340,34 @@ final class SocketServer: @unchecked Sendable {
                     dryRun: parseBool(args, key: "dry_run")
                 )
 
+            case "migrate_automation_actions":
+                // Plan-only unless `apply` is the JSON boolean true (or "true"):
+                // parseBool's unrecognized-input default is false, so a typo'd
+                // opt-in stays a dry run. Hidden sets are never written either way.
+                guard let oldRaw = args["old_accessory"] as? String,
+                      !oldRaw.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    return encodeResponse(success: false, error: "Missing 'old_accessory' argument")
+                }
+                guard let newRaw = args["new_accessories"] as? [Any], !newRaw.isEmpty else {
+                    return encodeResponse(success: false, error: "'new_accessories' must be a non-empty array of accessory names or UUIDs")
+                }
+                var newAccessories: [String] = []
+                for (index, element) in newRaw.enumerated() {
+                    guard let value = element as? String,
+                          !value.trimmingCharacters(in: .whitespaces).isEmpty else {
+                        return encodeResponse(success: false, error: "'new_accessories'[\(index)] must be a non-empty string")
+                    }
+                    newAccessories.append(value.trimmingCharacters(in: .whitespaces))
+                }
+                let automationID = (args["automation_id"] as? String)?.trimmingCharacters(in: .whitespaces)
+                result = try await hk.migrateAutomationActions(
+                    oldAccessory: oldRaw.trimmingCharacters(in: .whitespaces),
+                    newAccessories: newAccessories,
+                    automationID: (automationID?.isEmpty ?? true) ? nil : automationID,
+                    homeID: args["home_id"] as? String,
+                    apply: parseBool(args, key: "apply")
+                )
+
             case "enable_automation":
                 guard let id = args["id"] as? String else {
                     return encodeResponse(success: false, error: "Missing 'id' argument")

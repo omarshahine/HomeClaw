@@ -89,6 +89,16 @@ HomeClaw cannot create them from scratch. The CLI's `automations create
 --action ...` will continue to create a regular visible scene attached to the
 trigger.
 
+## Replacing an accessory in automations
+
+`homeclaw-cli automations migrate-actions` (issue #120) applies this boundary.
+It plans moving an accessory's actions onto a replacement across every
+automation, writes only visible scenes (and only with `--apply`), and reports
+each trigger-owned set as `"status": "unsupported"` with
+`"reason": "hidden_action_set_requires_private_spi"` plus machine-readable
+`manual_steps` for the Home app. It never creates a visible scene as a
+stand-in for a hidden one.
+
 ## Why this document exists
 
 This investigation has been done twice now (2026-05-17 by Omar + Claude). The

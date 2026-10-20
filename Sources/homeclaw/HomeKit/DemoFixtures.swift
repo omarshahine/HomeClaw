@@ -642,6 +642,145 @@ enum DemoFixtures {
         return result
     }
 
+    /// Plan (and with `apply`, perform) an accessory replacement across demo
+    /// automations. Mirrors `migrateAutomationActions` by feeding demo state into
+    /// the same `ActionMigration` planner. Demo inline-action automations are the
+    /// only demo action sets that carry per-accessory actions; they are modeled as
+    /// visible scenes (that is what `create` makes on real HomeKit). Named demo
+    /// scenes carry no actions, so they never appear in a plan.
+    @MainActor
+    static func migrateActions(
+        oldAccessory oldQuery: String, newAccessories newQueries: [String], automationID: String?, apply: Bool
+    ) throws -> [String: Any] {
+        func find(_ query: String) throws -> DemoAccessory? {
+            switch HomeKitManager.matchIdentifier(query, in: accessories, id: \.id, name: \.name) {
+            case .found(let acc): return acc
+            case .ambiguous(let matches):
+                throw HomeKitManager.ControlError.ambiguousAccessory(
+                    query, HomeKitManager.formatCandidates(matches.map { ($0.name, $0.id) }))
+            case .notFound: return nil
+            }
+        }
+        guard !newQueries.isEmpty else {
+            throw HomeKitManager.ControlError.invalidArgument("Provide at least one replacement accessory")
+        }
+        let old: ActionMigration.OldAccessory
+        if let acc = try find(oldQuery) {
+            old = .init(id: acc.id, name: acc.name, room: roomName(for: acc.roomID), present: true)
+        } else if let uuid = UUID(uuidString: oldQuery) {
+            old = .init(id: uuid.uuidString, name: nil, room: nil, present: false)
+        } else {
+            throw HomeKitManager.ControlError.accessoryNotFound(oldQuery)
+        }
+        var replacements: [DemoAccessory] = []
+        for query in newQueries {
+            guard let acc = try find(query) else { throw HomeKitManager.ControlError.accessoryNotFound(query) }
+            guard acc.id.caseInsensitiveCompare(old.id) != .orderedSame else {
+                throw HomeKitManager.ControlError.invalidArgument("'\(query)' is the accessory being replaced")
+            }
+            guard !replacements.contains(where: { $0.id == acc.id }) else {
+                throw HomeKitManager.ControlError.invalidArgument("Replacement '\(acc.name)' is listed more than once")
+            }
+            replacements.append(acc)
+        }
+        let models = replacements.map(migrationModel)
+
+        let indices: [Int]
+        if let automationID {
+            guard let idx = try automationIndex(for: automationID) else {
+                throw HomeKitManager.ControlError.triggerNotFound(automationID)
+            }
+            indices = [idx]
+        } else {
+            indices = Array(automations.indices)
+        }
+        let plans = ActionMigration.plan(
+            automations: indices.map(migrationSnapshot), old: old, replacements: models)
+        let warnings = ActionMigration.warnings(old: old, plans: plans)
+        guard apply else {
+            return ActionMigration.report(
+                home: homeName, old: old, replacements: models, automationFilter: automationID, plans: plans,
+                unattachedScenes: [], applyResults: nil, warnings: warnings)
+        }
+
+        var results: [String: ActionMigration.ApplyResult] = [:]
+        for plan in ActionMigration.setsToApply(plans) {
+            guard let idx = automations.firstIndex(where: { $0.id == plan.actionSetID }) else { continue }
+            let removedIDs = Set(plan.removals.map(\.actionID))
+            var kept: [[String: String]] = []
+            for (offset, action) in automations[idx].actions.enumerated()
+                where !removedIDs.contains("\(automations[idx].id).action.\(offset)") {
+                kept.append(action)
+            }
+            let added = plan.additions.map {
+                ["accessory": $0.accessoryName, "characteristic": $0.characteristicName, "value": $0.value.display]
+            }
+            automations[idx].actions = kept + added
+            let reread = migrationSnapshot(idx).actionSets.first?.rows ?? []
+            let verification = ActionMigration.verify(
+                expected: plan.expected,
+                actual: reread.map { .init(characteristicID: $0.characteristicID, value: $0.value) })
+            results[plan.actionSetID] = .init(
+                status: .applied, addedActions: added.indices.map { "\(automations[idx].id).action.\(kept.count + $0)" },
+                removedActionIDs: plan.removals.map(\.actionID), verification: verification,
+                error: verification.verified ? nil : "The scene does not contain exactly the planned actions", note: nil)
+        }
+        return ActionMigration.report(
+            home: homeName, old: old, replacements: models, automationFilter: automationID, plans: plans,
+            unattachedScenes: [], applyResults: results, warnings: warnings)
+    }
+
+    /// Demo characteristic names. Demo state uses `power_state`; action rows use `power`.
+    private static func demoCharacteristicName(_ stateKey: String) -> String {
+        stateKey == "power_state" ? "power" : stateKey
+    }
+
+    private static let demoReadOnly: Set<String> = [
+        "motion_detected", "current_temperature", "current_position", "lock_current_state",
+        "current_heating_cooling_state",
+    ]
+
+    @MainActor
+    private static func migrationModel(_ acc: DemoAccessory) -> ActionMigration.Accessory {
+        let names = state(for: acc.id).keys.map(demoCharacteristicName).sorted()
+        return .init(
+            id: acc.id, name: acc.name, room: roomName(for: acc.roomID),
+            services: [.init(
+                id: "\(acc.id).demo-service", name: acc.name, type: acc.category,
+                characteristics: names.map {
+                    .init(id: "\(acc.id).\($0)", type: $0, name: $0, writable: !demoReadOnly.contains($0))
+                })])
+    }
+
+    @MainActor
+    private static func migrationSnapshot(_ idx: Int) -> ActionMigration.AutomationSnapshot {
+        let auto = automations[idx]
+        var sets: [ActionMigration.ActionSetSnapshot] = []
+        if auto.inlineActions {
+            let rows: [ActionMigration.ActionRow] = auto.actions.enumerated().compactMap { offset, action in
+                guard let query = action["accessory"],
+                      let acc = accessories.first(where: {
+                          $0.id.caseInsensitiveCompare(query) == .orderedSame
+                              || $0.name.localizedCaseInsensitiveCompare(query) == .orderedSame }),
+                      let name = action["characteristic"] ?? action["property"],
+                      let value = action["value"] else { return nil }
+                return .init(
+                    actionID: "\(auto.id).action.\(offset)", accessoryID: acc.id, accessoryName: acc.name,
+                    room: roomName(for: acc.roomID), serviceID: "\(acc.id).demo-service", serviceName: acc.name,
+                    serviceType: acc.category, characteristicID: "\(acc.id).\(name)", characteristicType: name,
+                    characteristicName: name, value: ActionMigration.Value(parsing: value))
+            }
+            sets.append(.init(
+                id: auto.id, name: auto.name, visible: true, rows: rows, nonWriteActionCount: 0,
+                usedBy: [.init(id: auto.id, name: auto.name)]))
+        }
+        let summary = auto.summaryDict()
+        return .init(
+            id: auto.id, name: auto.name, enabled: auto.enabled, triggerType: auto.triggerType,
+            triggerSummary: summary["event_summary"] as? String ?? auto.triggerType,
+            triggerUsesOldAccessory: false, actionSets: sets)
+    }
+
     /// Append a characteristic condition to an automation's predicate. Mirrors
     /// `addAutomationCondition`. Resolves the condition accessory by id/name.
     @MainActor
