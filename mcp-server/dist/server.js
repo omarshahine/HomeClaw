@@ -17185,13 +17185,13 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). Use action=add_condition to append a characteristic condition (ANDed) to an existing automation in place \u2014 the trigger UUID is preserved, so button bindings and Siri references survive. List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "presence" | "timer" | "orphaned" | "unknown"; "orphaned" means the trigger has no event left, usually because the device it watched was removed, so it never fires) and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype. Note: the predicate-composition features (conditions, time_after/time_before, add_condition) are built on standard HMEventTrigger predicate composition \u2014 supported by Apple\'s HomeKit framework APIs but not yet surfaced in the Home app\'s Automations tab. They mirror the rule-editor capabilities exposed by third-party HomeKit apps like Controller for HomeKit. Rules created or modified this way execute correctly via HomeKit; use list/get to inspect them since they may not be editable from the Home app.',
+    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). Use action=migrate_actions with old_accessory and new_accessories to plan replacing an accessory in the action sets automations run (optionally scoped by id): each action set is classified visible_scene (editable in place, but shared with other automations and the scene tile) or hidden (automation-owned; third-party apps cannot write these, so status is unsupported with manual_steps), with status supported/unsupported/blocked, rollback snapshots, removals, additions and issues. It is plan-only unless apply=true, which writes supported visible scenes and verifies them with a re-read. Use action=add_condition to append a characteristic condition (ANDed) to an existing automation in place \u2014 the trigger UUID is preserved, so button bindings and Siri references survive. List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "presence" | "timer" | "orphaned" | "unknown"; "orphaned" means the trigger has no event left, usually because the device it watched was removed, so it never fires) and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype. Note: the predicate-composition features (conditions, time_after/time_before, add_condition) are built on standard HMEventTrigger predicate composition \u2014 supported by Apple\'s HomeKit framework APIs but not yet surfaced in the Home app\'s Automations tab. They mirror the rule-editor capabilities exposed by third-party HomeKit apps like Controller for HomeKit. Rules created or modified this way execute correctly via HomeKit; use list/get to inspect them since they may not be editable from the Home app.',
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable", "add_condition"],
+          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable", "add_condition", "migrate_actions"],
           description: "Action to perform. Default: list"
         },
         home_id: {
@@ -17200,7 +17200,7 @@ var tools = [
         },
         id: {
           type: "string",
-          description: "Automation UUID or name (get/delete/enable/disable actions)"
+          description: "Automation UUID or name (get/delete/enable/disable actions; optional filter for migrate_actions)"
         },
         name: {
           type: "string",
@@ -17304,6 +17304,20 @@ var tools = [
         dry_run: {
           type: "boolean",
           description: "Preview changes without applying (create/create_time/delete/add_condition actions)"
+        },
+        old_accessory: {
+          type: "string",
+          description: "Accessory being replaced, by UUID (preferred) or name (migrate_actions action, required). A UUID is accepted even when the accessory is already gone from the home."
+        },
+        new_accessories: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          description: "Replacement accessory UUIDs (preferred) or names (migrate_actions action, required). Each old action is mapped onto every replacement that has the same characteristic type."
+        },
+        apply: {
+          type: "boolean",
+          description: 'migrate_actions only: write the plan to supported visible scenes. Default false (plan only). Hidden automation-owned action sets are never written: Apple requires a private entitlement for that, so they come back status "unsupported" with manual_steps for the Home app.'
         }
       },
       required: ["action"]
@@ -17678,6 +17692,22 @@ async function handleAutomations(args) {
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
       return sendCommand("add_automation_condition", socketArgs);
+    }
+    case "migrate_actions": {
+      if (typeof args.old_accessory !== "string" || args.old_accessory.trim() === "") {
+        throw new Error("old_accessory is required for migrate_actions (must be a non-empty string)");
+      }
+      if (!Array.isArray(args.new_accessories) || args.new_accessories.length === 0 || args.new_accessories.some((a) => typeof a !== "string" || a.trim() === "")) {
+        throw new Error("new_accessories is required for migrate_actions (non-empty array of non-empty strings)");
+      }
+      const socketArgs = {
+        old_accessory: args.old_accessory.trim(),
+        new_accessories: args.new_accessories.map((a) => a.trim())
+      };
+      if (args.id) socketArgs.automation_id = args.id;
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.apply === true || args.apply === "true") socketArgs.apply = "true";
+      return sendCommand("migrate_automation_actions", socketArgs);
     }
     default:
       throw new Error(`Unknown automations action: ${action}`);
