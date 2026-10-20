@@ -1991,7 +1991,10 @@ final class HomeKitManager: NSObject, Observable {
 
         // Resolve & validate condition predicates up-front so we fail before mutating HomeKit.
         // Shared with `createTimeAutomation` via `resolveConditions(_:in:)`.
-        let resolvedConditions = try resolveConditions(conditions, in: home)
+        let (resolvedConditions, conditionWarnings) = try resolveConditions(conditions, in: home)
+        // Ambiguous-service warnings from condition and action rows (#87), echoed on
+        // both the dry-run and the success response.
+        var rowWarnings = conditionWarnings
 
         // iOS 15+ marks time-conditional automations without weekday gating as "unreliable".
         // Auto-fill all 7 days when --time-after / --time-before is set but --days is not,
@@ -2008,12 +2011,12 @@ final class HomeKitManager: NSObject, Observable {
         // Echo conditions / time conditions back to the caller in a stable, structured shape.
         // Always set when input was provided so dry-run and success responses agree.
         let conditionsEcho: [[String: String]] = resolvedConditions.map {
-            [
+            AccessoryModel.addingServiceSelector(to: [
                 "accessory": $0.accessory.name,
                 "accessory_id": $0.accessory.uniqueIdentifier.uuidString,
                 "property": $0.property,
                 "value": $0.rawValue,
-            ]
+            ], for: $0.characteristic)
         }
         let (timeAfterEcho, timeBeforeEcho) = Self.timeEchoes(timeConditions)
         // Closure used by both dry-run and success paths to attach predicate-related fields.
@@ -2025,6 +2028,7 @@ final class HomeKitManager: NSObject, Observable {
             if !conditionsEcho.isEmpty { r["conditions"] = conditionsEcho }
             if !timeAfterEcho.isEmpty { r["time_after"] = timeAfterEcho }
             if !timeBeforeEcho.isEmpty { r["time_before"] = timeBeforeEcho }
+            if !rowWarnings.isEmpty { r["warnings"] = rowWarnings }
             return r
         }
 
@@ -2062,7 +2066,8 @@ final class HomeKitManager: NSObject, Observable {
 
         if let actions, !actions.isEmpty {
             // Create an inline action set (like the Home app does for non-scene automations)
-            let resolvedActions = try resolveActions(actions, in: home)
+            let (resolvedActions, actionWarnings) = try resolveActions(actions, in: home)
+            rowWarnings += actionWarnings
 
             if dryRun {
                 var result: [String: Any] = [
@@ -2074,11 +2079,11 @@ final class HomeKitManager: NSObject, Observable {
                     "trigger_type": isButtonTrigger ? "button" : "characteristic",
                     "action_count": resolvedActions.count,
                     "actions": resolvedActions.map { action in
-                        [
+                        AccessoryModel.addingServiceSelector(to: [
                             "accessory": action.accessory.name,
                             "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
                             "value": "\(action.value)",
-                        ] as [String: String]
+                        ], for: action.characteristic)
                     },
                 ]
                 if isButtonTrigger {
@@ -2338,7 +2343,9 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         // Resolve conditions up-front (shared with createAutomation).
-        let resolvedConditions = try resolveConditions(conditions, in: home)
+        let (resolvedConditions, conditionWarnings) = try resolveConditions(conditions, in: home)
+        // Ambiguous-service warnings from condition and action rows (#87).
+        var rowWarnings = conditionWarnings
 
         // iOS 15+ marks time-conditional automations without weekday gating as
         // "unreliable", and that warning applies just as strongly when the
@@ -2350,12 +2357,12 @@ final class HomeKitManager: NSObject, Observable {
 
         // Echo conditions / time conditions back to the caller, identical shape to createAutomation.
         let conditionsEcho: [[String: String]] = resolvedConditions.map {
-            [
+            AccessoryModel.addingServiceSelector(to: [
                 "accessory": $0.accessory.name,
                 "accessory_id": $0.accessory.uniqueIdentifier.uuidString,
                 "property": $0.property,
                 "value": $0.rawValue,
-            ]
+            ], for: $0.characteristic)
         }
         let (timeAfterEcho, timeBeforeEcho) = Self.timeEchoes(timeConditions)
 
@@ -2374,6 +2381,7 @@ final class HomeKitManager: NSObject, Observable {
             if !conditionsEcho.isEmpty { r["conditions"] = conditionsEcho }
             if !timeAfterEcho.isEmpty { r["time_after"] = timeAfterEcho }
             if !timeBeforeEcho.isEmpty { r["time_before"] = timeBeforeEcho }
+            if !rowWarnings.isEmpty { r["warnings"] = rowWarnings }
             return r
         }
 
@@ -2382,7 +2390,8 @@ final class HomeKitManager: NSObject, Observable {
         let isInlineActionSet: Bool
 
         if let actions, !actions.isEmpty {
-            let resolvedActions = try resolveActions(actions, in: home)
+            let (resolvedActions, actionWarnings) = try resolveActions(actions, in: home)
+            rowWarnings += actionWarnings
 
             if dryRun {
                 var result: [String: Any] = [
@@ -2394,11 +2403,11 @@ final class HomeKitManager: NSObject, Observable {
                     "time": timeSpec.canonicalString,
                     "action_count": resolvedActions.count,
                     "actions": resolvedActions.map { action in
-                        [
+                        AccessoryModel.addingServiceSelector(to: [
                             "accessory": action.accessory.name,
                             "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
                             "value": "\(action.value)",
-                        ] as [String: String]
+                        ], for: action.characteristic)
                     },
                 ]
                 if let durationSeconds { result["duration_seconds"] = durationSeconds }
@@ -2579,9 +2588,12 @@ final class HomeKitManager: NSObject, Observable {
     /// Fails before any HomeKit mutation if any condition is malformed, references an
     /// unknown accessory/characteristic, or has an unparseable value. Shared by
     /// `createAutomation` and `createTimeAutomation`.
-    fileprivate func resolveConditions(_ conditions: [[String: String]], in home: HMHome) throws -> [ResolvedCondition] {
+    fileprivate func resolveConditions(
+        _ conditions: [[String: String]], in home: HMHome
+    ) throws -> (conditions: [ResolvedCondition], warnings: [String]) {
         var resolved: [ResolvedCondition] = []
-        for cond in conditions {
+        var warnings: [String] = []
+        for (offset, cond) in conditions.enumerated() {
             // Trim and reject whitespace-only values for the same reasons
             // `addAutomationCondition` does — a `"   "` accessory string would
             // pass the bare `.isEmpty` check but fail accessory lookup with a
@@ -2619,9 +2631,12 @@ final class HomeKitManager: NSObject, Observable {
             } else {
                 throw ControlError.accessoryNotFound(condAccessoryID)
             }
-            guard let condChar = findCharacteristicByDescription(on: condAccessory, property: condProperty) else {
+            guard let (condChar, warning) = try resolveRowCharacteristic(
+                property: condProperty, on: condAccessory, row: cond, rowLabel: "Condition \(offset + 1)"
+            ) else {
                 throw ControlError.invalidArgument("Characteristic '\(condProperty)' not found on '\(condAccessory.name)' for --condition")
             }
+            if let warning { warnings.append(warning) }
             guard let parsed = parseActionValue(condValueStr, property: condProperty) else {
                 throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
             }
@@ -2633,7 +2648,7 @@ final class HomeKitManager: NSObject, Observable {
                 rawValue: condValueStr
             ))
         }
-        return resolved
+        return (resolved, warnings)
     }
 
     /// Convert an explicit weekday restriction to HomeKit recurrences. An empty
@@ -2729,10 +2744,11 @@ final class HomeKitManager: NSObject, Observable {
     private func resolveActions(
         _ actions: [[String: String]],
         in home: HMHome
-    ) throws -> [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] {
+    ) throws -> (actions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)], warnings: [String]) {
         var resolved: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
+        var warnings: [String] = []
 
-        for action in actions {
+        for (offset, action) in actions.enumerated() {
             // 'property' is canonical; 'characteristic' is a documented alias
             // (read paths emit "characteristic", so accept it on write too — issue #76).
             guard let property = action["property"] ?? action["characteristic"],
@@ -2753,9 +2769,12 @@ final class HomeKitManager: NSObject, Observable {
                 throw ControlError.writeFailed("Action missing accessory reference (need accessory_id or accessory): \(action)")
             }
 
-            guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
+            guard let (characteristic, warning) = try resolveRowCharacteristic(
+                property: property, on: accessory, row: action, rowLabel: "Action \(offset + 1)"
+            ) else {
                 throw ControlError.writeFailed("Characteristic '\(property)' not found on \(accessory.name)")
             }
+            if let warning { warnings.append(warning) }
 
             guard let parsedValue = parseActionValue(valueStr, property: property) else {
                 throw ControlError.writeFailed("Cannot parse value '\(valueStr)' for \(property) on \(accessory.name)")
@@ -2764,7 +2783,8 @@ final class HomeKitManager: NSObject, Observable {
             resolved.append((accessory, characteristic, parsedValue))
         }
 
-        return resolved
+        try Self.rejectDuplicateTargets(resolved, context: "The automation's inline actions")
+        return (resolved, warnings)
     }
 
     func deleteAutomation(
@@ -2968,12 +2988,16 @@ final class HomeKitManager: NSObject, Observable {
         conditionRoom: String? = nil,
         property: String,
         value: String,
+        serviceSelector: [String: String] = [:],
         homeID: String? = nil,
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
-            switch try DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: value, dryRun: dryRun) {
+            // Validate the selector the same way the live path does, so a malformed
+            // service_index fails identically in demo mode.
+            _ = try Self.rowServiceSelector(from: serviceSelector, label: "Condition")
+            switch try DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: value, serviceSelector: serviceSelector, dryRun: dryRun) {
             case .ok(let result): return result
             case .automationNotFound: throw ControlError.triggerNotFound(id)
             case .accessoryNotFound: throw ControlError.accessoryNotFound(accessoryID)
@@ -3025,7 +3049,9 @@ final class HomeKitManager: NSObject, Observable {
         } else {
             throw ControlError.accessoryNotFound(trimmedAccessoryID)
         }
-        guard let condChar = findCharacteristicByDescription(on: condAccessory, property: trimmedProperty) else {
+        guard let (condChar, selectorWarning) = try resolveRowCharacteristic(
+            property: trimmedProperty, on: condAccessory, row: serviceSelector, rowLabel: "Condition"
+        ) else {
             throw ControlError.invalidArgument("Characteristic '\(trimmedProperty)' not found on '\(condAccessory.name)'")
         }
         guard let parsedValue = parseActionValue(trimmedValue, property: trimmedProperty) else {
@@ -3088,6 +3114,10 @@ final class HomeKitManager: NSObject, Observable {
             "value": trimmedValue,
             "condition_count_after": projectedConditionCount,
         ]
+        for (key, selectorValue) in AccessoryModel.serviceSelectorFields(for: condChar) {
+            result[key] = selectorValue
+        }
+        if let selectorWarning { result["warnings"] = [selectorWarning] }
         // Echo back the room disambiguator only when it actually scoped the
         // accessory lookup (the name-based path was taken AND the caller passed
         // a room). Echoing it back on the UUID path would suggest the room
@@ -3342,7 +3372,7 @@ final class HomeKitManager: NSObject, Observable {
         var resolvedActions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
         var warnings: [String] = []
 
-        for action in actions {
+        for (offset, action) in actions.enumerated() {
             guard let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
@@ -3367,10 +3397,16 @@ final class HomeKitManager: NSObject, Observable {
                 continue
             }
 
-            guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
+            // A bad or unmatched service selector throws instead of skipping: an
+            // import would silently lose the action, and an update would remove the
+            // existing action on that service.
+            guard let (characteristic, selectorWarning) = try resolveRowCharacteristic(
+                property: property, on: accessory, row: action, rowLabel: "Action \(offset + 1)"
+            ) else {
                 warnings.append("Characteristic '\(property)' not found on \(accessory.name)")
                 continue
             }
+            if let selectorWarning { warnings.append(selectorWarning) }
 
             guard let parsedValue = parseActionValue(valueStr, property: property) else {
                 warnings.append("Cannot parse value '\(valueStr)' for \(property) on \(accessory.name)")
@@ -3380,6 +3416,8 @@ final class HomeKitManager: NSObject, Observable {
             resolvedActions.append((accessory, characteristic, parsedValue))
         }
 
+        try Self.rejectDuplicateTargets(resolvedActions, context: "Scene '\(name)'")
+
         if dryRun {
             return [
                 "dry_run": true,
@@ -3388,13 +3426,13 @@ final class HomeKitManager: NSObject, Observable {
                 "resolved_actions": resolvedActions.count,
                 "warnings": warnings,
                 "actions": resolvedActions.map { action in
-                    [
+                    AccessoryModel.addingServiceSelector(to: [
                         "accessory": action.accessory.name,
                         "accessory_id": action.accessory.uniqueIdentifier.uuidString,
                         "room": action.accessory.room?.name ?? "Default Room",
                         "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
                         "value": "\(action.value)",
-                    ] as [String: String]
+                    ], for: action.characteristic)
                 },
             ] as [String: Any]
         }
@@ -3489,7 +3527,7 @@ final class HomeKitManager: NSObject, Observable {
         var resolvedActions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
         var warnings: [String] = []
 
-        for action in actions {
+        for (offset, action) in actions.enumerated() {
             guard let property = action["property"] ?? action["characteristic"],
                   let valueStr = action["value"]
             else {
@@ -3514,10 +3552,16 @@ final class HomeKitManager: NSObject, Observable {
                 continue
             }
 
-            guard let characteristic = findCharacteristicByDescription(on: accessory, property: property) else {
+            // A bad or unmatched service selector throws instead of skipping: an
+            // import would silently lose the action, and an update would remove the
+            // existing action on that service.
+            guard let (characteristic, selectorWarning) = try resolveRowCharacteristic(
+                property: property, on: accessory, row: action, rowLabel: "Action \(offset + 1)"
+            ) else {
                 warnings.append("Characteristic '\(property)' not found on \(accessory.name)")
                 continue
             }
+            if let selectorWarning { warnings.append(selectorWarning) }
 
             guard let parsedValue = parseActionValue(valueStr, property: property) else {
                 warnings.append("Cannot parse value '\(valueStr)' for \(property) on \(accessory.name)")
@@ -3526,6 +3570,11 @@ final class HomeKitManager: NSObject, Observable {
 
             resolvedActions.append((accessory, characteristic, parsedValue))
         }
+
+        // Keyed by accessory + service + characteristic type, so the two gangs of a
+        // dual relay are distinct targets (#87). Checked before the dry run returns,
+        // so a preview fails the same way the real update would.
+        try Self.rejectDuplicateTargets(resolvedActions, context: "Scene '\(actionSet.name)'")
 
         if dryRun {
             return [
@@ -3537,13 +3586,13 @@ final class HomeKitManager: NSObject, Observable {
                 "resolved_actions": resolvedActions.count,
                 "warnings": warnings,
                 "actions": resolvedActions.map { action in
-                    [
+                    AccessoryModel.addingServiceSelector(to: [
                         "accessory": action.accessory.name,
                         "accessory_id": action.accessory.uniqueIdentifier.uuidString,
                         "room": action.accessory.room?.name ?? "Default Room",
                         "characteristic": CharacteristicMapper.name(for: action.characteristic.characteristicType),
                         "value": "\(action.value)",
-                    ] as [String: String]
+                    ], for: action.characteristic)
                 },
             ] as [String: Any]
         }
@@ -3560,17 +3609,6 @@ final class HomeKitManager: NSObject, Observable {
             $0 as? HMCharacteristicWriteAction<NSCopying>
         }
         let desiredCharacteristicIDs = Set(resolvedActions.map { $0.characteristic.uniqueIdentifier })
-
-        var seenCharacteristicIDs = Set<UUID>()
-        for resolved in resolvedActions {
-            guard seenCharacteristicIDs.insert(resolved.characteristic.uniqueIdentifier).inserted else {
-                throw ControlError.invalidArgument(
-                    "Scene '\(actionSet.name)' contains more than one requested action for "
-                        + "\(resolved.accessory.name)'s "
-                        + "\(CharacteristicMapper.name(for: resolved.characteristic.characteristicType)) characteristic."
-                )
-            }
-        }
 
         var additions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)] = []
         var targetUpdates: [(
@@ -3744,19 +3782,6 @@ final class HomeKitManager: NSObject, Observable {
             return accessory.room?.name.localizedCaseInsensitiveCompare(roomName) == .orderedSame
         }
         return try uniqueAccessory(named: name, among: matches)
-    }
-
-    /// Find a characteristic on an accessory by its manufacturer description (human-readable name).
-    private func findCharacteristicByDescription(on accessory: HMAccessory, property: String) -> HMCharacteristic? {
-        for service in accessory.services {
-            for characteristic in service.characteristics {
-                let humanName = CharacteristicMapper.name(for: characteristic.characteristicType)
-                if humanName.localizedCaseInsensitiveCompare(property) == .orderedSame {
-                    return characteristic
-                }
-            }
-        }
-        return nil
     }
 
     /// Parse a human-readable action value back to an NSCopying-conforming type.
@@ -4481,7 +4506,7 @@ final class HomeKitManager: NSObject, Observable {
     /// Identifying details for a single service, used to disambiguate characteristics
     /// that appear on several services of the same accessory (multi-gang switches,
     /// multi-button remotes) and to describe the service a write landed on.
-    struct ServiceDescriptor {
+    struct ServiceDescriptor: Equatable, Sendable {
         let name: String
         let type: String
         let id: String
@@ -4492,6 +4517,14 @@ final class HomeKitManager: NSObject, Observable {
             type = service.serviceType
             id = service.uniqueIdentifier.uuidString
             index = Self.labelIndex(of: service)
+        }
+
+        /// Plain-value initializer, for tests (`HMService` has no public initializer).
+        init(name: String, type: String, id: String, index: Int?) {
+            self.name = name
+            self.type = type
+            self.id = id
+            self.index = index
         }
 
         /// The ServiceLabelIndex value, i.e. which physical channel/button this is.
@@ -4525,6 +4558,195 @@ final class HomeKitManager: NSObject, Observable {
         /// excluded every service carrying it. Carries the services that do have it,
         /// so the error can say what the caller could have asked for.
         case noServiceMatched([ServiceDescriptor])
+    }
+
+    // MARK: - Service selectors on action and condition rows (#87)
+
+    /// The optional `service_name` / `service_id` / `service_index` keys of one
+    /// scene or automation action row, or one condition row. Rows travel as
+    /// `[String: String]`, so `service_index` arrives as text and is parsed here.
+    struct RowServiceSelector: Equatable, Sendable {
+        var name: String?
+        var id: String?
+        var index: Int?
+
+        var isEmpty: Bool { name == nil && id == nil && index == nil }
+
+        static let keys = ["service_name", "service_id", "service_index"]
+    }
+
+    /// Parses a 1-based channel number given as text. Rejects anything that isn't
+    /// a whole number of at least 1 (`"two"`, `"1.5"`, `"0"`, `""`), so a typo can't
+    /// fall through to "no service matched" or silently drop the selector.
+    nonisolated static func parseServiceIndex(_ raw: String) -> Int? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard let value = Int(trimmed), value >= 1 else { return nil }
+        return value
+    }
+
+    /// Reads the service selector keys from a row. `label` names the row in errors
+    /// (e.g. `Action 2`). An absent key is "no selector"; a present but empty or
+    /// malformed one is an error rather than being ignored.
+    nonisolated static func rowServiceSelector(
+        from row: [String: String], label: String
+    ) throws -> RowServiceSelector {
+        func text(_ key: String) throws -> String? {
+            guard let raw = row[key] else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                throw ControlError.invalidArgument("\(label): '\(key)' must be non-empty when provided")
+            }
+            return trimmed
+        }
+        var selector = RowServiceSelector()
+        selector.name = try text("service_name")
+        selector.id = try text("service_id")
+        if let raw = try text("service_index") {
+            guard let index = parseServiceIndex(raw) else {
+                throw ControlError.invalidArgument(
+                    "\(label): 'service_index' must be a whole number of at least 1, got '\(raw)'")
+            }
+            selector.index = index
+        }
+        return selector
+    }
+
+    /// What to do when a row's characteristic exists on several services.
+    enum RowAmbiguityOutcome: Equatable {
+        /// No selector was given: keep the historical first-match result so existing
+        /// scene JSON keeps working, but say so (never silently).
+        case useFirst(ServiceDescriptor, warning: String)
+        /// A selector was given and still matched several services.
+        case fail(String)
+    }
+
+    /// Decides an ambiguous row lookup. `candidates` are the services carrying the
+    /// characteristic, in HomeKit's order (the first is what the pre-#87 resolver
+    /// picked). Plain values so the policy is unit-testable.
+    nonisolated static func resolveRowAmbiguity(
+        _ candidates: [ServiceDescriptor],
+        hasSelector: Bool,
+        rowLabel: String,
+        accessoryName: String,
+        property: String
+    ) -> RowAmbiguityOutcome {
+        let hints = candidates.map(\.selectorHint).joined(separator: "\n")
+        guard !hasSelector, let first = candidates.first else {
+            return .fail(
+                """
+                \(rowLabel): the service selectors match \(candidates.count) services on \
+                '\(accessoryName)' that carry '\(property)'. Add service_id to pick exactly one:
+                \(hints)
+                """
+            )
+        }
+        return .useFirst(
+            first,
+            warning: """
+                \(rowLabel): '\(property)' on '\(accessoryName)' exists on \(candidates.count) services; \
+                used the first ("\(first.name)"). Pass service_name, service_index, or service_id to pick one:
+                \(hints)
+                """
+        )
+    }
+
+    /// Error text for a row whose selectors exclude every service carrying the
+    /// characteristic.
+    nonisolated static func rowSelectorMismatchMessage(
+        rowLabel: String, accessoryName: String, property: String, carriers: [ServiceDescriptor]
+    ) -> String {
+        """
+        \(rowLabel): no service on '\(accessoryName)' matches the given selectors. \
+        '\(property)' is on:
+        \(carriers.map(\.selectorHint).joined(separator: "\n"))
+        """
+    }
+
+    /// Identity of the thing an action writes: one characteristic type on one
+    /// service of one accessory. Two gangs of a dual relay share the accessory and
+    /// the property but not the service, so both of their actions survive (#87).
+    struct ActionTargetKey: Hashable, Sendable {
+        let accessoryID: String
+        let serviceID: String
+        let characteristicType: String
+    }
+
+    /// Offset of the first key that repeats an earlier one, or nil when all differ.
+    nonisolated static func firstDuplicateTarget(_ keys: [ActionTargetKey]) -> Int? {
+        var seen = Set<ActionTargetKey>()
+        for (offset, key) in keys.enumerated() where !seen.insert(key).inserted {
+            return offset
+        }
+        return nil
+    }
+
+    /// The target key of a resolved characteristic.
+    private static func actionTargetKey(accessory: HMAccessory, characteristic: HMCharacteristic) -> ActionTargetKey {
+        ActionTargetKey(
+            accessoryID: accessory.uniqueIdentifier.uuidString,
+            serviceID: characteristic.service?.uniqueIdentifier.uuidString ?? "",
+            characteristicType: characteristic.characteristicType
+        )
+    }
+
+    /// Rejects a list of resolved actions that writes the same characteristic of the
+    /// same service twice. HomeKit can't hold two write actions for one
+    /// characteristic in a scene, and which value wins would be arbitrary.
+    private static func rejectDuplicateTargets(
+        _ actions: [(accessory: HMAccessory, characteristic: HMCharacteristic, value: Any)],
+        context: String
+    ) throws {
+        let keys = actions.map { actionTargetKey(accessory: $0.accessory, characteristic: $0.characteristic) }
+        guard let offset = firstDuplicateTarget(keys) else { return }
+        let dup = actions[offset]
+        let serviceName = dup.characteristic.service?.name ?? "?"
+        throw ControlError.invalidArgument(
+            "\(context) contains more than one requested action for \(dup.accessory.name)'s "
+                + "\(CharacteristicMapper.name(for: dup.characteristic.characteristicType)) characteristic "
+                + "on service \"\(serviceName)\". Use service_name, service_index, or service_id to "
+                + "target a different service of the same accessory."
+        )
+    }
+
+    /// Resolves the characteristic an action or condition row targets, honoring the
+    /// row's service selectors through `findCharacteristic`.
+    ///
+    /// - Returns: nil when the accessory has no such characteristic at all (each
+    ///   caller keeps its own not-found handling). Otherwise the characteristic and
+    ///   an optional warning, set when the row had no selector and the characteristic
+    ///   is on several services (first match kept for compatibility).
+    /// - Throws: when a selector is malformed, matches nothing, or still matches
+    ///   several services.
+    private func resolveRowCharacteristic(
+        property: String, on accessory: HMAccessory, row: [String: String], rowLabel: String
+    ) throws -> (characteristic: HMCharacteristic, warning: String?)? {
+        let selector = try Self.rowServiceSelector(from: row, label: rowLabel)
+        switch findCharacteristic(
+            named: property, on: accessory,
+            serviceName: selector.name, serviceID: selector.id, serviceIndex: selector.index
+        ) {
+        case .found(let characteristic, _, _):
+            return (characteristic, nil)
+        case .notFound:
+            return nil
+        case .noServiceMatched(let carriers):
+            throw ControlError.serviceNotFound(Self.rowSelectorMismatchMessage(
+                rowLabel: rowLabel, accessoryName: accessory.name, property: property, carriers: carriers))
+        case .ambiguous(let candidates):
+            switch Self.resolveRowAmbiguity(
+                candidates, hasSelector: !selector.isEmpty,
+                rowLabel: rowLabel, accessoryName: accessory.name, property: property
+            ) {
+            case .fail(let message):
+                throw ControlError.ambiguousService(message)
+            case .useFirst(let first, let warning):
+                guard case .found(let characteristic, _, _) = findCharacteristic(
+                    named: property, on: accessory, serviceID: first.id
+                ) else { return nil }
+                AppLogger.homekit.notice("\(warning, privacy: .public)")
+                return (characteristic, warning)
+            }
+        }
     }
 
     /// True when `characteristic` is addressed by `name`, given either as its

@@ -215,8 +215,11 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, help: "Scene name or UUID to trigger (alternative to --action)")
     var scene: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use the MCP actions array instead.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use --action-json instead.")
     var action: [String] = []
+
+    @Option(name: .customLong("action-json"), parsing: .singleValue, help: "Inline action as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"false\",\"service_index\":2}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    var actionJSON: [String] = []
 
     @Option(name: .long, help: "Press type: single, double, or long (default: single). For button triggers only; mutually exclusive with --characteristic.")
     var press: String = "single"
@@ -233,8 +236,11 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, help: "Comma-separated weekdays the automation may fire on: mon,tue,wed,thu,fri,sat,sun (or numeric 1-7 where 1=Sun). When omitted, the automation fires every day.")
     var days: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:contact_state:0'. Note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:contact_state:0'. Note: accessory names containing colons are not supported via --condition; use --condition-json instead.")
     var condition: [String] = []
+
+    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Condition as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"true\",\"service_name\":\"Table Light\"}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    var conditionJSON: [String] = []
 
     @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires after the given time. Format: 'HH:MM' (zero-padded, e.g. '07:00') or '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunset-30'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
     var timeAfter: [String] = []
@@ -255,8 +261,8 @@ struct CreateAutomation: ParsableCommand {
     var json = false
 
     func run() throws {
-        guard scene != nil || !action.isEmpty else {
-            throw ValidationError("Either --scene or --action is required")
+        guard scene != nil || !action.isEmpty || !actionJSON.isEmpty else {
+            throw ValidationError("Either --scene, --action, or --action-json is required")
         }
 
         var args: [String: Any] = [
@@ -293,7 +299,7 @@ struct CreateAutomation: ParsableCommand {
             // Parse inline actions from "accessory:property:value" format.
             // Shared with create-time via `parseActionRow` so whitespace handling
             // matches `--condition` (trim per part, reject empty).
-            args["actions"] = try action.map { try Self.parseActionRow($0) }
+            args["actions"] = try Self.rows(positional: action, json: actionJSON, flag: "--action-json", parse: Self.parseActionRow)
         }
 
         if let serviceIndex { args["service_index"] = serviceIndex }
@@ -302,8 +308,8 @@ struct CreateAutomation: ParsableCommand {
             args["weekdays"] = try Self.parseWeekdays(days)
         }
 
-        if !condition.isEmpty {
-            args["conditions"] = try condition.map { try Self.parseConditionRow($0) }
+        if !condition.isEmpty || !conditionJSON.isEmpty {
+            args["conditions"] = try Self.rows(positional: condition, json: conditionJSON, flag: "--condition-json", parse: Self.parseConditionRow)
         }
 
         if !timeAfter.isEmpty {
@@ -363,7 +369,7 @@ struct CreateAutomation: ParsableCommand {
             if isInline, let actions = result["actions"] as? [[String: String]] {
                 print("  Actions:")
                 for a in actions {
-                    let acc = a["accessory"] ?? "?"
+                    let acc = RowJSON.targetLabel(a)
                     let char = a["characteristic"] ?? "?"
                     let val = a["value"] ?? "?"
                     print("    \(acc): \(char) = \(val)")
@@ -389,6 +395,7 @@ struct CreateAutomation: ParsableCommand {
                 print("  Auto-off: \(Self.formatDuration(durationSeconds))")
             }
         }
+        RowJSON.printWarnings(result)
     }
 
     /// Format an array of HomeKit weekday numbers (1=Sun ... 7=Sat) as a comma-separated label.
@@ -493,6 +500,15 @@ struct CreateAutomation: ParsableCommand {
         return Array(Swift.Set(weekdays)).sorted()
     }
 
+    /// Positional rows first, then JSON rows, in the order given. Shared by `create`
+    /// and `create-time` for both actions and conditions.
+    static func rows(
+        positional: [String], json: [String], flag: String,
+        parse: (String) throws -> [String: String]
+    ) throws -> [[String: String]] {
+        try positional.map(parse) + json.map { try RowJSON.parseFlagRow($0, flag: flag) }
+    }
+
     /// Parse a `--condition` row string in `accessory:property:value` shape into the
     /// dict format the socket layer expects. Throws CLI-shaped ValidationErrors so
     /// malformed input fails before hitting HomeKit. Shared by `create` and `create-time`.
@@ -556,7 +572,7 @@ struct CreateAutomation: ParsableCommand {
         if let conditions = result["conditions"] as? [[String: String]], !conditions.isEmpty {
             print("  Conditions:")
             for c in conditions {
-                let acc = c["accessory"] ?? "?"
+                let acc = RowJSON.targetLabel(c)
                 let prop = c["property"] ?? "?"
                 let val = c["value"] ?? "?"
                 print("    \(acc): \(prop) = \(val)")
@@ -648,14 +664,20 @@ struct CreateTimeAutomation: ParsableCommand {
     @Option(name: .long, help: "Scene name or UUID to trigger (alternative to --action)")
     var scene: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use the MCP actions array instead.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use --action-json instead.")
     var action: [String] = []
+
+    @Option(name: .customLong("action-json"), parsing: .singleValue, help: "Inline action as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"false\",\"service_index\":2}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    var actionJSON: [String] = []
 
     @Option(name: .long, help: "Comma-separated weekdays the automation may fire on: mon,tue,wed,thu,fri,sat,sun (or numeric 1-7 where 1=Sun). When omitted, all 7 days are auto-filled — iOS 15+ requires weekday gating on time-conditional automations.")
     var days: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:occupancy_detected:true'. Note: accessory names containing colons are not supported via --condition; use the MCP conditions array instead.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:occupancy_detected:true'. Note: accessory names containing colons are not supported via --condition; use --condition-json instead.")
     var condition: [String] = []
+
+    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Condition as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"true\",\"service_name\":\"Table Light\"}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    var conditionJSON: [String] = []
 
     @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires after the given time. Format: 'HH:MM' or '<sunrise|sunset>[±N]' where N is minutes. Composes with --time (e.g. --time 06:30 --time-after sunrise means '06:30, but only after sunrise').")
     var timeAfter: [String] = []
@@ -676,8 +698,8 @@ struct CreateTimeAutomation: ParsableCommand {
     var json = false
 
     func run() throws {
-        guard scene != nil || !action.isEmpty else {
-            throw ValidationError("Either --scene or --action is required")
+        guard scene != nil || !action.isEmpty || !actionJSON.isEmpty else {
+            throw ValidationError("Either --scene, --action, or --action-json is required")
         }
 
         let canonicalTime = try CreateAutomation.validateTimeOfDaySpec(time)
@@ -691,15 +713,15 @@ struct CreateTimeAutomation: ParsableCommand {
         if let scene {
             args["scene_id"] = scene
         } else {
-            args["actions"] = try action.map { try CreateAutomation.parseActionRow($0) }
+            args["actions"] = try CreateAutomation.rows(positional: action, json: actionJSON, flag: "--action-json", parse: CreateAutomation.parseActionRow)
         }
 
         if let days {
             args["weekdays"] = try CreateAutomation.parseWeekdays(days)
         }
 
-        if !condition.isEmpty {
-            args["conditions"] = try condition.map { try CreateAutomation.parseConditionRow($0) }
+        if !condition.isEmpty || !conditionJSON.isEmpty {
+            args["conditions"] = try CreateAutomation.rows(positional: condition, json: conditionJSON, flag: "--condition-json", parse: CreateAutomation.parseConditionRow)
         }
 
         if !timeAfter.isEmpty {
@@ -748,7 +770,7 @@ struct CreateTimeAutomation: ParsableCommand {
             if isInline, let actions = result["actions"] as? [[String: String]] {
                 print("  Actions:")
                 for a in actions {
-                    let acc = a["accessory"] ?? "?"
+                    let acc = RowJSON.targetLabel(a)
                     let char = a["characteristic"] ?? "?"
                     let val = a["value"] ?? "?"
                     print("    \(acc): \(char) = \(val)")
@@ -774,6 +796,7 @@ struct CreateTimeAutomation: ParsableCommand {
                 print("  Auto-off: \(CreateAutomation.formatDuration(durationSeconds))")
             }
         }
+        RowJSON.printWarnings(result)
     }
 }
 
@@ -1025,6 +1048,15 @@ struct AddAutomationCondition: ParsableCommand {
     @Option(name: .long, help: "Room name for accessory disambiguation when multiple accessories share a name (optional)")
     var room: String?
 
+    @Option(name: .long, help: "Name or unique UUID of the service carrying the property, to pick one gang of a multi-gang accessory (optional)")
+    var serviceName: String?
+
+    @Option(name: .customLong("service-id"), help: "Unique UUID of the service carrying the property (optional; use when two services share a name)")
+    var serviceID: String?
+
+    @Option(name: .long, help: "Channel number (ServiceLabelIndex) of the service carrying the property, e.g. 2 for the second gang (optional)")
+    var serviceIndex: Int?
+
     @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
     var home: String?
 
@@ -1054,6 +1086,15 @@ struct AddAutomationCondition: ParsableCommand {
         if let room, room.trimmingCharacters(in: .whitespaces).isEmpty {
             throw ValidationError("--room must be non-empty when provided")
         }
+        if let serviceName, serviceName.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--service-name must be non-empty when provided")
+        }
+        if let serviceID, serviceID.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--service-id must be non-empty when provided")
+        }
+        if let serviceIndex, serviceIndex < 1 {
+            throw ValidationError("--service-index is 1-based; got \(serviceIndex)")
+        }
     }
 
     func run() throws {
@@ -1065,6 +1106,9 @@ struct AddAutomationCondition: ParsableCommand {
             "dry_run": dryRun,
         ]
         if let room { args["room"] = room }
+        if let serviceName { args["service_name"] = serviceName }
+        if let serviceID { args["service_id"] = serviceID }
+        if let serviceIndex { args["service_index"] = serviceIndex }
         if let home { args["home_id"] = home }
 
         let response = try SocketClient.sendAny(command: "add_automation_condition", args: args)
@@ -1099,13 +1143,15 @@ struct AddAutomationCondition: ParsableCommand {
             roomSuffix = ""
         }
 
+        let serviceSuffix = (result["service_name"] as? String).map { " [\($0)]" } ?? ""
         if isDryRun {
-            print("DRY RUN — would add condition to '\(autoName)': \(accessoryName)\(roomSuffix).\(propertyName) = \(valueStr)")
+            print("DRY RUN — would add condition to '\(autoName)': \(accessoryName)\(serviceSuffix)\(roomSuffix).\(propertyName) = \(valueStr)")
         } else {
-            print("Added condition to '\(autoName)': \(accessoryName)\(roomSuffix).\(propertyName) = \(valueStr)")
+            print("Added condition to '\(autoName)': \(accessoryName)\(serviceSuffix)\(roomSuffix).\(propertyName) = \(valueStr)")
         }
         if let count {
             print("  Trigger now has \(count) condition(s)")
         }
+        RowJSON.printWarnings(result)
     }
 }

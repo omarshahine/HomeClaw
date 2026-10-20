@@ -651,6 +651,7 @@ enum DemoFixtures {
         room: String?,
         property: String,
         value: String,
+        serviceSelector: [String: String] = [:],
         dryRun: Bool
     ) throws -> AutomationConditionResult {
         guard let aIdx = try automationIndex(for: id) else { return .automationNotFound }
@@ -672,8 +673,12 @@ enum DemoFixtures {
         // Echo the room only when a name-based room hint was supplied (mirrors the
         // real method, which omits it on UUID lookups).
         if let room { result["room"] = room }
+        // Demo accessories have one service each, so a selector is echoed and
+        // stored as given rather than resolved (#87).
+        for (key, selectorValue) in serviceSelector { result[key] = selectorValue }
         if !dryRun {
-            automations[aIdx].conditions.append(["accessory": acc.name, "property": property, "value": value])
+            automations[aIdx].conditions.append(
+                ["accessory": acc.name, "property": property, "value": value].merging(serviceSelector) { current, _ in current })
         }
         return .ok(result)
     }

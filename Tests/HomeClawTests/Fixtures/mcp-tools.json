@@ -363,6 +363,18 @@
               "room": {
                 "type": "string",
                 "description": "Room name for disambiguation (optional)"
+              },
+              "service_name": {
+                "type": "string",
+                "description": "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+              },
+              "service_id": {
+                "type": "string",
+                "description": "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+              },
+              "service_index": {
+                "type": "number",
+                "description": "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
               }
             },
             "required": [
@@ -382,7 +394,7 @@
               }
             ]
           },
-          "description": "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
+          "description": "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory. Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates."
         },
         "press_type": {
           "type": "number",
@@ -445,6 +457,18 @@
               "room": {
                 "type": "string",
                 "description": "Room name for accessory disambiguation when multiple accessories share a name (optional)"
+              },
+              "service_name": {
+                "type": "string",
+                "description": "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+              },
+              "service_id": {
+                "type": "string",
+                "description": "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+              },
+              "service_index": {
+                "type": "number",
+                "description": "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
               }
             },
             "required": [
@@ -464,7 +488,7 @@
               }
             ]
           },
-          "description": "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)"
+          "description": "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions) Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates."
         },
         "time_after": {
           "type": "array",
@@ -508,6 +532,18 @@
             "room": {
               "type": "string",
               "description": "Room name for accessory disambiguation when multiple accessories share a name (optional)"
+            },
+            "service_name": {
+              "type": "string",
+              "description": "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+            },
+            "service_id": {
+              "type": "string",
+              "description": "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+            },
+            "service_index": {
+              "type": "number",
+              "description": "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
             }
           },
           "required": [

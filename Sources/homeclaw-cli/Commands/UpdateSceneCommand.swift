@@ -23,13 +23,14 @@ struct UpdateScene: ParsableCommand {
     func run() throws {
         let data = try readCommandInputData(file)
         guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let actions = parsed["actions"] as? [[String: String]]
+              let actions = try RowJSON.sceneActionRows(parsed["actions"])
         else {
             throw ValidationError(
                 "JSON input must contain 'actions' array of "
                     + "{\"accessory\": \"...\", \"accessory_id\": \"optional UUID\", "
                     + "\"property\": \"...\", \"value\": \"...\"} objects "
-                    + "('characteristic' is accepted as an alias for 'property'), "
+                    + "('characteristic' is accepted as an alias for 'property'; optional "
+                    + "'service_name', 'service_id', or 'service_index' picks one service), "
                     + "plus either 'id' (preferred) or 'name' to identify the scene"
             )
         }
@@ -80,7 +81,7 @@ struct UpdateScene: ParsableCommand {
 
             if let actions = result["actions"] as? [[String: String]] {
                 for action in actions {
-                    let accessory = action["accessory"] ?? "?"
+                    let accessory = RowJSON.targetLabel(action)
                     let room = action["room"] ?? "?"
                     let characteristic = action["characteristic"] ?? "?"
                     let value = action["value"] ?? "?"

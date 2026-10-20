@@ -376,6 +376,18 @@ enum ToolHandlers {
                   "room": {
                     "type": "string",
                     "description": "Room name for disambiguation (optional)"
+                  },
+                  "service_name": {
+                    "type": "string",
+                    "description": "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+                  },
+                  "service_id": {
+                    "type": "string",
+                    "description": "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+                  },
+                  "service_index": {
+                    "type": "number",
+                    "description": "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
                   }
                 },
                 "required": [
@@ -395,7 +407,7 @@ enum ToolHandlers {
                   }
                 ]
               },
-              "description": "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory."
+              "description": "Inline actions for the automation (create / create_time actions). Alternative to scene_id. Creates a scene named after the automation. Each action sets one characteristic on one accessory. Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates."
             },
             "press_type": {
               "type": "number",
@@ -458,6 +470,18 @@ enum ToolHandlers {
                   "room": {
                     "type": "string",
                     "description": "Room name for accessory disambiguation when multiple accessories share a name (optional)"
+                  },
+                  "service_name": {
+                    "type": "string",
+                    "description": "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+                  },
+                  "service_id": {
+                    "type": "string",
+                    "description": "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+                  },
+                  "service_index": {
+                    "type": "number",
+                    "description": "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
                   }
                 },
                 "required": [
@@ -477,7 +501,7 @@ enum ToolHandlers {
                   }
                 ]
               },
-              "description": "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)"
+              "description": "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions) Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates."
             },
             "time_after": {
               "type": "array",
@@ -521,6 +545,18 @@ enum ToolHandlers {
                 "room": {
                   "type": "string",
                   "description": "Room name for accessory disambiguation when multiple accessories share a name (optional)"
+                },
+                "service_name": {
+                  "type": "string",
+                  "description": "Name or unique UUID of the specific service to write to. This is how you pick one channel of a multi-gang switch. Both values are listed in the ambiguity error and in the get action output."
+                },
+                "service_id": {
+                  "type": "string",
+                  "description": "Unique UUID of the specific service to write to. Listed as `service_id` in the ambiguity error and as `id` per service in the get action output. Use this when two services share a name."
+                },
+                "service_index": {
+                  "type": "number",
+                  "description": "Channel number (ServiceLabelIndex) of the specific service to write to, e.g. 1 for the first gang. Listed as `index` in the get action output when the accessory reports one."
                 }
               },
               "required": [
@@ -755,10 +791,17 @@ enum ToolHandlers {
         case "enable", "disable": guard let id = string(args, "id") else { throw HomeKitManager.ControlError.invalidArgument("id is required") }; return try await hk.enableAutomation(id: id, enabled: action == "enable", homeID: home)
         case "add_condition":
             guard let id = string(args, "id"), let condition = args["condition"] as? [String: Any], let accessory = condition["accessory"] as? String, let value = condition["value"] as? String, let property = (condition["property"] as? String) ?? (condition["characteristic"] as? String) else { throw HomeKitManager.ControlError.invalidArgument("id and condition accessory/property/value are required") }
-            return try await hk.addAutomationCondition(id: id, accessoryID: accessory, conditionRoom: condition["room"] as? String, property: property, value: value, homeID: home, dryRun: dry)
+            var serviceSelector: [String: String] = [:]
+            for key in HomeKitManager.RowServiceSelector.keys {
+                if let selectorValue = try SocketServer.normalizeServiceSelector(condition[key], key: key, label: "condition.\(key)") { serviceSelector[key] = selectorValue }
+            }
+            return try await hk.addAutomationCondition(id: id, accessoryID: accessory, conditionRoom: condition["room"] as? String, property: property, value: value, serviceSelector: serviceSelector, homeID: home, dryRun: dry)
         case "create", "create_time":
             guard let name = string(args, "name") else { throw HomeKitManager.ControlError.invalidArgument("name is required") }
-            let actions = args["actions"] as? [[String: String]], conditions = args["conditions"] as? [[String: String]] ?? []
+            // Same strict row parser as the socket, so service selectors (#87) and a
+            // JSON-integer service_index survive instead of failing a [String: String] cast.
+            let actions = try SocketServer.parseAccessoryRowsArg(args["actions"], fieldName: "actions")
+            let conditions = try SocketServer.parseAccessoryRowsArg(args["conditions"], fieldName: "conditions") ?? []
             let weekdays = (args["weekdays"] as? [Int]) ?? [], timeConditions = try parseTimeConditions(args)
             if action == "create_time" {
                 guard let time = string(args, "time") else { throw HomeKitManager.ControlError.invalidArgument("time is required") }
