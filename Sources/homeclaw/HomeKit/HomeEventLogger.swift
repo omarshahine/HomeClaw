@@ -44,9 +44,64 @@ final class HomeEventLogger {
         case homesUpdated = "homes_updated"
         case sceneTriggered = "scene_triggered"
         case accessoryControlled = "accessory_controlled"
+        case reachabilityChange = "reachability_change"
     }
 
     // MARK: - Logging
+
+    /// Builds a `reachability_change` event. Separate from logging so the shape
+    /// can be tested without a HomeKit accessory.
+    static func reachabilityEvent(
+        accessoryID: String,
+        accessoryName: String,
+        room: String?,
+        reachable: Bool,
+        matterNodeID: String? = nil,
+        homeName: String? = nil,
+        homeID: String? = nil,
+        timestamp: Date = Date()
+    ) -> [String: Any] {
+        var accessory: [String: Any] = [
+            "id": accessoryID,
+            "name": accessoryName,
+            "room": room as Any,
+        ]
+        if let matterNodeID { accessory["matter_node_id"] = matterNodeID }
+        var event: [String: Any] = [
+            "timestamp": isoFormatter.string(from: timestamp),
+            "type": EventType.reachabilityChange.rawValue,
+            "accessory": accessory,
+            "reachable": reachable,
+        ]
+        if let homeName {
+            var homeDict: [String: Any] = ["name": homeName]
+            if let homeID { homeDict["id"] = homeID }
+            event["home"] = homeDict
+        }
+        return event
+    }
+
+    /// Logs an accessory reachability change from the HMAccessoryDelegate callback.
+    /// The caller is responsible for dropping callbacks that did not change the value.
+    func logReachabilityChange(
+        accessoryID: String,
+        accessoryName: String,
+        room: String?,
+        reachable: Bool,
+        matterNodeID: String? = nil,
+        homeName: String? = nil,
+        homeID: String? = nil
+    ) {
+        writeEvent(Self.reachabilityEvent(
+            accessoryID: accessoryID,
+            accessoryName: accessoryName,
+            room: room,
+            reachable: reachable,
+            matterNodeID: matterNodeID,
+            homeName: homeName,
+            homeID: homeID
+        ))
+    }
 
     /// Logs a characteristic change event from the HMAccessoryDelegate callback.
     func logCharacteristicChange(
@@ -321,9 +376,20 @@ final class HomeEventLogger {
         let eventType = event["type"] as? String ?? ""
         let accessory = event["accessory"] as? [String: Any]
         let accessoryID = accessory?["id"] as? String
-        let characteristic = event["characteristic"] as? String
-        let value = event["value"] as? String
-        let previousValue = event["previous_value"] as? String
+        var characteristic = event["characteristic"] as? String
+        var value = event["value"] as? String
+        var previousValue = event["previous_value"] as? String
+
+        // Reachability events match triggers as the pseudo-characteristic
+        // `reachable` with value "true"/"false", so a trigger can opt in with
+        // characteristic "reachable" (and optionally value "false").
+        if eventType == EventType.reachabilityChange.rawValue,
+           let reachable = event["reachable"] as? Bool
+        {
+            characteristic = Self.reachabilityCharacteristic
+            value = reachable ? "true" : "false"
+            previousValue = reachable ? "false" : "true"
+        }
 
         // Skip battery-related characteristics — they are not actionable state changes.
         // Silently drop these without logging; they fire too frequently and flood webhooks.jsonl.
@@ -344,7 +410,7 @@ final class HomeEventLogger {
 
         var matched = false
         for trigger in triggers where trigger.enabled {
-            guard matchesTrigger(
+            guard Self.matchesTrigger(
                 trigger,
                 eventType: eventType,
                 accessoryID: accessoryID,
@@ -380,8 +446,10 @@ final class HomeEventLogger {
         "lightbulb", "outlet", "switch", "fan",
     ]
 
+    /// Trigger characteristic name that opts a trigger in to `reachability_change` events.
+    static let reachabilityCharacteristic = "reachable"
 
-    private func matchesTrigger(
+    static func matchesTrigger(
         _ trigger: HomeClawConfig.WebhookTrigger,
         eventType: String,
         accessoryID: String?,
@@ -400,8 +468,15 @@ final class HomeEventLogger {
                 && sceneName?.localizedCaseInsensitiveCompare(triggerSceneName) == .orderedSame
         }
 
-        // Accessory-based triggers (characteristic_change or accessory_controlled)
-        guard eventType == "characteristic_change" || eventType == "accessory_controlled" else {
+        // Reachability is opt-in: only triggers that name the `reachable`
+        // pseudo-characteristic fire on it. An accessory-only trigger keeps its
+        // existing behavior and is not woken by a flapping Thread node.
+        if eventType == EventType.reachabilityChange.rawValue {
+            guard trigger.characteristic?.localizedCaseInsensitiveCompare(reachabilityCharacteristic)
+                == .orderedSame
+            else { return false }
+        } else if eventType != "characteristic_change" && eventType != "accessory_controlled" {
+            // Accessory-based triggers (characteristic_change or accessory_controlled)
             return false
         }
 
@@ -571,6 +646,13 @@ final class HomeEventLogger {
             let char = event["characteristic"] as? String ?? ""
             let value = event["value"] as? String ?? ""
             return "\(homePrefix)HomeKit: \(name) \(char) set to \(value)"
+        case EventType.reachabilityChange.rawValue:
+            let accessory = event["accessory"] as? [String: Any]
+            let name = accessory?["name"] as? String ?? "Unknown"
+            let room = accessory?["room"] as? String
+            let location = room.map { " in \($0)" } ?? ""
+            let state = (event["reachable"] as? Bool ?? false) ? "is reachable again" : "became unreachable"
+            return "\(homePrefix)HomeKit: \(name)\(location) \(state)"
         case "homes_updated":
             let homes = event["homes"] as? Int ?? 0
             let accessories = event["accessories"] as? Int ?? 0

@@ -209,7 +209,7 @@ Use `--no-verify` for accessories whose readback is unreliable. Verification alr
 
 ## Event Log
 
-HomeClaw logs all HomeKit events (characteristic changes, scene triggers, control actions) to disk. Query the event log to understand what happened recently:
+HomeClaw logs all HomeKit events (characteristic changes, reachability changes, scene triggers, control actions) to disk. Query the event log to understand what happened recently:
 
 ```bash
 # Recent events (default: last 50)
@@ -221,11 +221,24 @@ homeclaw-cli events --since 1h --json
 # Only characteristic changes (e.g. lights turning on/off)
 homeclaw-cli events --type characteristic_change --json
 
+# Accessories that dropped off or came back in the last day
+homeclaw-cli events --type reachability_change --since 1d --json
+
 # Last 200 events
 homeclaw-cli events --limit 200 --json
 ```
 
-Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated`
+Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated`, `reachability_change`
+
+A `reachability_change` event has `accessory` (`id`, `name`, `room`, and `matter_node_id` for Matter accessories), `reachable` (true or false), `timestamp`, and `home` when known. It is logged only when the value actually changes.
+
+### Diagnosing Unresponsive Matter Accessories
+
+`get`, `list`, `search` and `device-map --json` include `matter_node_id` for Matter accessories: 16 uppercase hex digits, the node id on Apple Home's Matter fabric. Non-Matter accessories omit it.
+
+1. Find when it dropped, and whether others dropped with it: `homeclaw-cli events --type reachability_change --since 1d --json`. Several accessories going unreachable within seconds of each other points at a shared cause (border router, hub, Wi-Fi), not the device.
+2. Get the node id: `homeclaw-cli get "<name>" --json` and read `matter_node_id`.
+3. Run `dns-sd -B _matter._tcp` on the Mac. Operational instance names are `<compressed fabric id>-<node id>`, so match the suffix to `matter_node_id`. If the node is missing, the device is off the network (for Thread, off the mesh). If it is still advertised but HomeKit says unreachable, look at the controller side instead.
 
 Use events to answer questions like "what changed recently?", "when was the front door last unlocked?", or "what scenes were triggered today?".
 
@@ -475,6 +488,7 @@ The agent builds a daily summary from all events in its session. No special trig
 | `accessory_id` | string | — | UUID of the accessory to watch |
 | `characteristic` | string | — | Specific characteristic to filter (omit for all) |
 | `value` | string | — | Only fire when characteristic equals this value |
+| `characteristic: reachable` | string | |  Opts the trigger in to `reachability_change` events (value `true` or `false`). Other accessory triggers ignore reachability |
 | `scene_name` | string | — | Scene name to watch (alternative to accessory triggers) |
 | `critical` | bool | `false` | Bypasses circuit breaker when `true` |
 
@@ -523,7 +537,7 @@ OUTPUT_FORMAT=json homeclaw-cli status
 
 - Temperature values come back formatted: `"71F"`. Set with plain numbers.
 - `--json` on read commands gives parseable output. Always use it when processing results.
-- Unreachable devices have `"unreachable": true` in the compact map.
+- Unreachable devices have `"unreachable": true` in the compact map. The full `device-map --json` also carries `matter_node_id` for Matter devices.
 - If CLI fails with "HomeClaw is not running", the app needs to be launched first.
 - On-disk event log: `~/Library/Containers/com.shahine.homeclaw/Data/Library/Application Support/HomeClaw/events.jsonl`
 - HomeClaw subscribes to HomeKit push notifications for all interesting characteristics on reachable accessories. Both Home app toggles and physical/external changes fire `characteristic_change` events.

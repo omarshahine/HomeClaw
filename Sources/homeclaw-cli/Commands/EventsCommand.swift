@@ -12,7 +12,7 @@ struct Events: ParsableCommand {
     @Option(name: .long, help: "Max events to return (default: 50)")
     var limit: Int = 50
 
-    @Option(name: .long, help: "Filter by event type: characteristic_change, homes_updated, scene_triggered, accessory_controlled")
+    @Option(name: .long, help: "Filter by event type: characteristic_change, homes_updated, scene_triggered, accessory_controlled, reachability_change")
     var type: String?
 
     @Option(name: .long, help: "Show events since this ISO 8601 timestamp or duration (e.g. 1h, 30m, 2d)")
@@ -49,7 +49,7 @@ struct Events: ParsableCommand {
         for event in events {
             let timestamp = event["timestamp"] as? String ?? ""
             let type = event["type"] as? String ?? "unknown"
-            let display = formatEvent(type: type, event: event)
+            let display = Self.formatEvent(type: type, event: event)
             print("  \(formatTimestamp(timestamp))  \(display)")
         }
 
@@ -64,7 +64,7 @@ struct Events: ParsableCommand {
         return df.string(from: date)
     }
 
-    private func formatEvent(type: String, event: [String: Any]) -> String {
+    static func formatEvent(type: String, event: [String: Any]) -> String {
         switch type {
         case "characteristic_change":
             let accessory = event["accessory"] as? [String: Any]
@@ -88,6 +88,15 @@ struct Events: ParsableCommand {
             let char = event["characteristic"] as? String ?? ""
             let value = event["value"] as? String ?? ""
             return "Control: \(name) \(char) → \(value)"
+
+        case "reachability_change":
+            let accessory = event["accessory"] as? [String: Any]
+            let name = accessory?["name"] as? String ?? "?"
+            let room = accessory?["room"] as? String
+            let location = room.map { " (\($0))" } ?? ""
+            let state = (event["reachable"] as? Bool ?? false) ? "became reachable" : "became unreachable"
+            let node = (accessory?["matter_node_id"] as? String).map { " [matter node \($0)]" } ?? ""
+            return "\(name)\(location): \(state)\(node)"
 
         case "homes_updated":
             let homes = event["homes"] as? Int ?? 0

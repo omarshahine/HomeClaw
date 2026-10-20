@@ -102,6 +102,9 @@ struct Get: ParsableCommand {
         print("  Category:  \(category)")
         print("  Room:      \(room)")
         print("  Reachable: \(reachable)")
+        if let matterNodeID = detail["matter_node_id"] as? String {
+            print("  Matter:    node \(matterNodeID)")
+        }
         if let bridge = bridgeDisplayName(in: detail) {
             print("  Bridge:    \(bridge)")
         }

@@ -274,7 +274,7 @@ const TOOLS: ToolDef[] = [
 	{
 		name: 'homekit_events',
 		description:
-			'Query the HomeKit event log. Returns recent characteristic changes, scene triggers, and control actions.',
+			'Query the HomeKit event log. Returns recent characteristic changes, reachability changes, scene triggers, and control actions.',
 		parameters: Type.Object({
 			since: Type.Optional(
 				Type.String({
@@ -289,6 +289,7 @@ const TOOLS: ToolDef[] = [
 						Type.Literal('scene_triggered'),
 						Type.Literal('accessory_controlled'),
 						Type.Literal('homes_updated'),
+						Type.Literal('reachability_change'),
 					],
 					{ description: 'Filter by event type' }
 				)

@@ -584,7 +584,7 @@ enum ToolHandlers {
       },
       {
         "name": "homekit_events",
-        "description": "Get recent HomeKit events — characteristic changes, scene triggers, and accessory control actions. Use to understand what happened recently in the home.",
+        "description": "Get recent HomeKit events — characteristic changes, accessory reachability changes, scene triggers, and accessory control actions. Use to understand what happened recently in the home, including when an accessory became unreachable.",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -602,7 +602,8 @@ enum ToolHandlers {
                 "characteristic_change",
                 "homes_updated",
                 "scene_triggered",
-                "accessory_controlled"
+                "accessory_controlled",
+                "reachability_change"
               ],
               "description": "Filter by event type"
             }

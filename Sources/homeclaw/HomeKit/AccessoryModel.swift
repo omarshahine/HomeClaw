@@ -13,6 +13,24 @@ private extension NSExpression {
 
 /// Converts HomeKit objects into serializable dictionaries for MCP tool responses and CLI output.
 enum AccessoryModel {
+    /// Formats `HMAccessory.matterNodeID` the way Matter's operational mDNS
+    /// instance name does (`<compressed fabric id>-<node id>`): uppercase,
+    /// zero-padded to 16 hex digits. It is a string so 64-bit values survive
+    /// JSON consumers that parse numbers as doubles. Returns nil for
+    /// non-Matter accessories (nil) and for node id 0, so callers omit the key.
+    static func matterNodeIDString(_ nodeID: UInt64?) -> String? {
+        guard let nodeID, nodeID != 0 else { return nil }
+        let hex = String(nodeID, radix: 16, uppercase: true)
+        return String(repeating: "0", count: max(0, 16 - hex.count)) + hex
+    }
+
+    /// Adds `matter_node_id` to an accessory dictionary when the accessory has one.
+    static func addMatterNodeID(to dict: inout [String: Any], accessory: HMAccessory) {
+        if let nodeID = matterNodeIDString(accessory.matterNodeID) {
+            dict["matter_node_id"] = nodeID
+        }
+    }
+
     /// Summary of a home.
     static func homeSummary(_ home: HMHome) -> [String: Any] {
         [
@@ -70,6 +88,7 @@ enum AccessoryModel {
         if let displayName, displayName != accessory.name { dict["display_name"] = displayName }
         if let semanticType { dict["semantic_type"] = semanticType }
         if let manufacturer = accessory.manufacturer { dict["manufacturer"] = manufacturer }
+        addMatterNodeID(to: &dict, accessory: accessory)
         addBridgeMetadata(to: &dict, bridge: bridge, bridgedAccessoryIDs: bridgedAccessoryIDs)
 
         // Use cached state if provided, otherwise read from characteristic objects
@@ -118,6 +137,7 @@ enum AccessoryModel {
         if let manufacturer = accessory.manufacturer { dict["manufacturer"] = manufacturer }
         if let model = accessory.model { dict["model"] = model }
         if let firmware = accessory.firmwareVersion { dict["firmware"] = firmware }
+        addMatterNodeID(to: &dict, accessory: accessory)
         addBridgeMetadata(
             to: &dict,
             bridge: bridge,

@@ -192,7 +192,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
 | `homekit_manage` | Manage home structure: rename accessories, individual services, and rooms; set a switch/outlet's Display As; list and manage accessory groups; create/remove rooms and zones, manage zone membership |
 | `homekit_automations` | Manage automations: list, create button-press triggers (single/double/long), link to scenes, enable/disable |
-| `homekit_events` | Query recent HomeKit events (characteristic changes, scene triggers, control actions) |
+| `homekit_events` | Query recent HomeKit events (characteristic changes, reachability changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
 | `homekit_config` | View or update configuration (set active home, filtering) |
 
@@ -311,6 +311,7 @@ homeclaw-cli events                         # Recent events (last 50)
 homeclaw-cli events --since 1h              # Events from the last hour
 homeclaw-cli events --since 2d --json       # Last 2 days, JSON output
 homeclaw-cli events --type scene_triggered  # Filter by event type
+homeclaw-cli events --type reachability_change --since 1d  # When accessories dropped off or came back
 
 # Webhook configuration
 homeclaw-cli config --webhook-url "http://127.0.0.1:18789"
@@ -323,6 +324,7 @@ homeclaw-cli config --webhook-reset          # Reset circuit breaker without tog
 homeclaw-cli triggers                        # List all triggers
 homeclaw-cli triggers add --label "Front Door" --accessory-id "<uuid>"
 homeclaw-cli triggers add --label "Mailbox Open" --accessory-id "<uuid>" --characteristic contact_state
+homeclaw-cli triggers add --label "Accessory offline" --characteristic reachable --value false
 homeclaw-cli triggers update "<trigger-id>" --wake-mode now
 homeclaw-cli triggers remove "<trigger-id>"
 
@@ -587,7 +589,7 @@ Install and manage connections to AI assistants. The app detects existing config
 
 ## Event Log
 
-HomeClaw records all HomeKit events to a JSONL file in `~/Library/Application Support/HomeClaw/events.jsonl`. Events include characteristic changes (a light turned on), scene triggers, and control actions from the CLI or MCP.
+HomeClaw records all HomeKit events to a JSONL file in `~/Library/Application Support/HomeClaw/events.jsonl`. Events include characteristic changes (a light turned on), reachability changes (an accessory became unreachable or came back), scene triggers, and control actions from the CLI or MCP.
 
 ### Configuration
 
@@ -608,13 +610,40 @@ homeclaw-cli events --type characteristic_change  # Filter by type
 homeclaw-cli events --limit 200 --json      # JSON output
 ```
 
-Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated`
+Event types: `characteristic_change`, `scene_triggered`, `accessory_controlled`, `homes_updated`, `reachability_change`
+
+A `reachability_change` event is logged when HomeKit reports that an accessory became reachable or unreachable. Repeated reports with no change are dropped.
+
+```json
+{
+  "type": "reachability_change",
+  "timestamp": "2026-09-28T04:20:09Z",
+  "accessory": { "id": "…", "name": "B1", "room": "Kids", "matter_node_id": "000000000000002A" },
+  "reachable": false,
+  "home": { "id": "…", "name": "Home" }
+}
+```
+
+`accessory.matter_node_id` appears only for Matter accessories, and `home` only when the accessory's home is known.
+
+### Matter node ids
+
+`list`, `search`, `get` and `device-map` include `matter_node_id` for Matter accessories. It is the node id Apple Home assigned on its Matter fabric, written as 16 uppercase hex digits (a string, so the 64-bit value is not rounded by JSON parsers). Non-Matter accessories omit the key.
+
+A Matter device advertises itself over mDNS as `<compressed fabric id>-<node id>`, so the node id joins a HomeKit accessory to its network entry:
+
+```bash
+homeclaw-cli get "B1" --json | jq -r .matter_node_id   # e.g. 000000000000002A
+dns-sd -B _matter._tcp                                  # instance names end in -<node id>
+```
+
+An unreachable accessory whose node id is missing from `dns-sd` output has dropped off the network (for Thread, the mesh). One that is still advertised points at the controller side instead.
 
 The `--since` flag accepts ISO 8601 timestamps or duration shorthand: `1h`, `30m`, `2d`.
 
 ## Webhook
 
-HomeClaw pushes HomeKit events to [OpenClaw](https://openclaw.ai) via **mapped webhooks**. Only accessories and scenes with configured triggers fire webhooks -- untriggered events are logged to disk but not pushed. A dedicated HomeClaw agent receives all events, classifies them by severity, and escalates noteworthy ones to the main agent.
+HomeClaw pushes HomeKit events to [OpenClaw](https://openclaw.ai) via **mapped webhooks**. Only accessories and scenes with configured triggers fire webhooks -- untriggered events are logged to disk but not pushed. Reachability changes are opt-in: they fire only triggers whose characteristic is `reachable` (optionally with value `false` for drops only, and an accessory id for one device). Accessory triggers without that characteristic are not fired by reachability changes, so a flapping accessory does not flood them. A dedicated HomeClaw agent receives all events, classifies them by severity, and escalates noteworthy ones to the main agent.
 
 > **Note:** OpenClaw 2026.3.x has a known bug where `/hooks/wake` silently drops events ([#33271](https://github.com/openclaw/openclaw/issues/33271)). HomeClaw uses **mapped webhooks** (`/hooks/homeclaw`) which route through `hooks.mappings` and are **not affected**.
 

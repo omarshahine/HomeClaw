@@ -214,12 +214,16 @@ enum DemoFixtures {
             return [
                 "room": room.name,
                 "accessories": accs.map { acc -> [String: Any] in
-                    [
+                    var device: [String: Any] = [
                         "id": acc.id,
                         "name": acc.name,
                         "category": acc.category,
                         "manufacturer": acc.manufacturer,
                     ]
+                    if let nodeID = AccessoryModel.matterNodeIDString(acc.matterNodeID) {
+                        device["matter_node_id"] = nodeID
+                    }
+                    return device
                 },
             ]
         }
@@ -720,6 +724,8 @@ enum DemoFixtures {
         let category: String  // matches CharacteristicMapper.inferredCategoryName
         var roomID: String
         let manufacturer: String
+        /// Matter node id for demo accessories that model a Matter device.
+        var matterNodeID: UInt64? = nil
 
         func summaryDict(roomName: String, state: [String: String]) -> [String: Any] {
             var dict: [String: Any] = [
@@ -730,6 +736,9 @@ enum DemoFixtures {
                 "room": roomName,
                 "manufacturer": manufacturer,
             ]
+            if let nodeID = AccessoryModel.matterNodeIDString(matterNodeID) {
+                dict["matter_node_id"] = nodeID
+            }
             if !state.isEmpty { dict["state"] = state }
             return dict
         }
@@ -955,7 +964,7 @@ enum DemoFixtures {
 
     private static let seedAccessories: [DemoAccessory] = [
         // Living Room
-        DemoAccessory(id: "00000000-0000-4000-8000-000000000100", name: "Floor Lamp", category: "lightbulb", roomID: livingRoomID, manufacturer: "Eve"),
+        DemoAccessory(id: "00000000-0000-4000-8000-000000000100", name: "Floor Lamp", category: "lightbulb", roomID: livingRoomID, manufacturer: "Eve", matterNodeID: 0x2A),
         DemoAccessory(id: "00000000-0000-4000-8000-000000000101", name: "TV Light Strip", category: "lightbulb", roomID: livingRoomID, manufacturer: "Hue"),
         DemoAccessory(id: "00000000-0000-4000-8000-000000000102", name: "Thermostat", category: "thermostat", roomID: livingRoomID, manufacturer: "Ecobee"),
         DemoAccessory(id: "00000000-0000-4000-8000-000000000103", name: "Window Blinds", category: "window_covering", roomID: livingRoomID, manufacturer: "Lutron"),

@@ -351,6 +351,7 @@ enum DeviceMap {
                         if let manufacturer = accessory.manufacturer {
                             device["manufacturer"] = manufacturer
                         }
+                        AccessoryModel.addMatterNodeID(to: &device, accessory: accessory)
                         if let bridge = bridgeMetadata.bridgeSummary(for: accessory) {
                             device["bridge"] = bridge
                         }

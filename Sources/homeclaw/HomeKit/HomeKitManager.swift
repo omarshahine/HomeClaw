@@ -295,6 +295,8 @@ final class HomeKitManager: NSObject, Observable {
 
     private let cache = CharacteristicCache.shared
     private var isWarmingCache = false
+    /// Last-known reachability per accessory, used to drop no-op delegate callbacks.
+    private var reachability = ReachabilityTracker()
     private var menuPushTask: Task<Void, Never>?
     private var hydrationRetryTask: Task<Void, Never>?
 
@@ -4648,12 +4650,19 @@ extension HomeKitManager: HMHomeManagerDelegate {
                 "HomeKit updated: \(manager.homes.count) home(s) [\(homeNames.joined(separator: ", "))], \(self.totalAccessoryCount) accessory(ies)"
             )
 
-            // Register as delegate for every accessory so we receive real-time value changes
+            // Register as delegate for every accessory so we receive real-time value changes.
+            // Seed last-known reachability so later delegate callbacks that do not
+            // change the value are not logged as reachability_change events.
+            var currentAccessoryIDs: Set<String> = []
             for home in manager.homes {
                 for accessory in home.accessories {
                     accessory.delegate = self
+                    let accessoryID = accessory.uniqueIdentifier.uuidString
+                    currentAccessoryIDs.insert(accessoryID)
+                    reachability.seed(accessoryID: accessoryID, reachable: accessory.isReachable)
                 }
             }
+            reachability.retain(accessoryIDs: currentAccessoryIDs)
 
             if !homesReady {
                 homesReady = true
@@ -4772,6 +4781,37 @@ extension HomeKitManager: HMAccessoryDelegate {
 
             AppLogger.homekit.debug(
                 "[\(home?.name ?? "?")] Live update: \(accessory.name).\(name) = \(value)"
+            )
+            scheduleMenuDataPush()
+        }
+    }
+
+    /// Called when an accessory becomes reachable or unreachable (e.g. a Thread
+    /// node drops off the mesh). Logged as a `reachability_change` event so
+    /// "when did it drop, and did others drop with it?" can be answered later.
+    nonisolated func accessoryDidUpdateReachability(_ accessory: HMAccessory) {
+        // Capture the value HomeKit is reporting now, before hopping actors.
+        let reachable = accessory.isReachable
+        Task { @MainActor in
+            let accessoryID = accessory.uniqueIdentifier.uuidString
+            // HomeKit can repeat the callback without the value changing.
+            guard reachability.update(accessoryID: accessoryID, reachable: reachable) else {
+                AppLogger.homekit.debug("Skipped unchanged reachability: \(accessory.name) = \(reachable)")
+                return
+            }
+
+            let home = findHome(for: accessory)
+            HomeEventLogger.shared.logReachabilityChange(
+                accessoryID: accessoryID,
+                accessoryName: accessory.name,
+                room: accessory.room?.name,
+                reachable: reachable,
+                matterNodeID: AccessoryModel.matterNodeIDString(accessory.matterNodeID),
+                homeName: home?.name,
+                homeID: home?.uniqueIdentifier.uuidString
+            )
+            AppLogger.homekit.info(
+                "[\(home?.name ?? "?")] Reachability: \(accessory.name) \(reachable ? "reachable" : "unreachable")"
             )
             scheduleMenuDataPush()
         }
