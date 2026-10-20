@@ -1,5 +1,5 @@
 New
-- Last run: scenes and automations now show when HomeKit last ran them, in both the JSON output and the get and get-scene commands. HomeKit records this for only some runs, so a missing date means none recorded, not that it never ran.
-
-Fixes
-- Turning off the MCP over HTTP server now waits for open connections to close before it reports that it has stopped.
+- Pick a button or switch: scenes and automations can now target one service on accessories that have several of the same kind, such as a dual relay or a multi-gang switch. Add service_name, service_id or service_index to an action or condition. Scenes read back with the service they use, so you can export and re-import them without losing it. When a row could match more than one service, HomeClaw now tells you instead of quietly picking the first.
+- Replace an accessory: the new automations migrate-actions command plans moving an old accessory's actions in your automations onto its replacement. It shows each change before anything is written. Scenes in your Scenes list can be updated with --apply. Actions built into an automation can only be edited by Apple's Home app, so for those you get step-by-step Home app instructions.
+- Matter details: Matter accessories now show their Matter node ID in list, get, search and device-map, so you can match them to what your network sees.
+- Reachability events: HomeClaw now records when an accessory stops responding and when it comes back. Webhook triggers can opt in to these.

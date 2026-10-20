@@ -10,6 +10,37 @@ import MarkdownPage from '../layouts/MarkdownPage.astro';
 
   <hr />
 
+  <h3>Version 1.0.15</h3>
+  <p class="timestamp">October 2026</p>
+  <h4>New</h4>
+  <ul>
+    <li>
+      <strong>Pick a button or switch</strong>: scene and automation actions and conditions accept
+      <code>service_name</code>, <code>service_id</code> or <code>service_index</code> to target one service on
+      accessories with several of the same kind, such as a dual relay. <code>get-scene</code> reads the service back,
+      so a round trip keeps it, and a row that could match more than one service now warns instead of silently using
+      the first. <code>automations create</code> also takes <code>--action-json</code> and <code>--condition-json</code>.
+    </li>
+    <li>
+      <strong>Replace an accessory</strong>: <code>automations migrate-actions</code> plans moving an old accessory's
+      automation actions onto its replacement and writes nothing unless you pass <code>--apply</code>. Scenes in the
+      Scenes list are edited in place and checked afterwards. Actions owned by an automation can only be edited by
+      Apple's Home app, so those come back as unsupported with step-by-step Home app instructions. Thanks to bobster16.
+    </li>
+    <li>
+      <strong>Matter node IDs</strong>: <code>list</code>, <code>get</code>, <code>search</code> and
+      <code>device-map</code> show <code>matter_node_id</code>, which matches the node in
+      <code>dns-sd -B _matter._tcp</code>. Thanks to jasonkuhrt.
+    </li>
+    <li>
+      <strong>Reachability events</strong>: <code>events</code> records a <code>reachability_change</code> when an
+      accessory stops responding or comes back. Webhook triggers opt in with the characteristic
+      <code>reachable</code>.
+    </li>
+  </ul>
+
+  <hr />
+
   <h3>Version 1.0.14</h3>
   <p class="timestamp">October 2026</p>
   <h4>New</h4>
