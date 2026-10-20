@@ -4662,6 +4662,18 @@ final class HomeKitManager: NSObject, Observable {
         """
     }
 
+    /// Error text when a row's characteristic is on none of the accessory's
+    /// services. Nil for a row without a selector, whose caller decides (scene
+    /// import/update skip it with a warning). A row with a selector named a specific
+    /// service to write, so it fails instead of being dropped (#87).
+    nonisolated static func rowNotFoundError(
+        hasSelector: Bool, rowLabel: String, accessoryName: String, property: String
+    ) -> String? {
+        guard hasSelector else { return nil }
+        return "\(rowLabel): '\(property)' is not on any service of '\(accessoryName)', "
+            + "so the service selectors can't match. Nothing was changed."
+    }
+
     /// Identity of the thing an action writes: one characteristic type on one
     /// service of one accessory. Two gangs of a dual relay share the accessory and
     /// the property but not the service, so both of their actions survive (#87).
@@ -4711,12 +4723,15 @@ final class HomeKitManager: NSObject, Observable {
     /// Resolves the characteristic an action or condition row targets, honoring the
     /// row's service selectors through `findCharacteristic`.
     ///
-    /// - Returns: nil when the accessory has no such characteristic at all (each
-    ///   caller keeps its own not-found handling). Otherwise the characteristic and
-    ///   an optional warning, set when the row had no selector and the characteristic
-    ///   is on several services (first match kept for compatibility).
+    /// - Returns: nil when a row without a selector names a characteristic the
+    ///   accessory doesn't have (each caller keeps its own not-found handling, which
+    ///   for scenes is skip-with-warning). Otherwise the characteristic and an
+    ///   optional warning, set when the row had no selector and the characteristic is
+    ///   on several services (first match kept for compatibility).
     /// - Throws: when a selector is malformed, matches nothing, or still matches
-    ///   several services.
+    ///   several services, including when a row with a selector names a
+    ///   characteristic the accessory doesn't have at all. Skipping that row would
+    ///   let `updateScene` delete the existing action on the gang it was aimed at.
     private func resolveRowCharacteristic(
         property: String, on accessory: HMAccessory, row: [String: String], rowLabel: String
     ) throws -> (characteristic: HMCharacteristic, warning: String?)? {
@@ -4728,6 +4743,12 @@ final class HomeKitManager: NSObject, Observable {
         case .found(let characteristic, _, _):
             return (characteristic, nil)
         case .notFound:
+            if let message = Self.rowNotFoundError(
+                hasSelector: !selector.isEmpty, rowLabel: rowLabel,
+                accessoryName: accessory.name, property: property
+            ) {
+                throw ControlError.characteristicNotFound(message)
+            }
             return nil
         case .noServiceMatched(let carriers):
             throw ControlError.serviceNotFound(Self.rowSelectorMismatchMessage(

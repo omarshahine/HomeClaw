@@ -169,6 +169,21 @@ final class RowServiceSelectorTests: XCTestCase {
         XCTAssertTrue(message.contains("service_id"))
     }
 
+    /// A row with a selector whose property is on no service at all fails rather
+    /// than being skipped (which would let update-scene delete that gang's action).
+    func testMissingCharacteristicWithSelectorIsAnError() {
+        let message = HomeKitManager.rowNotFoundError(
+            hasSelector: true, rowLabel: "Action 2", accessoryName: "Covelight", property: "brightness")
+        XCTAssertNotNil(message)
+        XCTAssertTrue(message?.hasPrefix("Action 2:") == true)
+        XCTAssertTrue(message?.contains("brightness") == true)
+    }
+
+    func testMissingCharacteristicWithoutSelectorKeepsCallerHandling() {
+        XCTAssertNil(HomeKitManager.rowNotFoundError(
+            hasSelector: false, rowLabel: "Action 2", accessoryName: "Covelight", property: "brightness"))
+    }
+
     // MARK: - Duplicate detection
 
     /// The Dual Relay report: two `power` actions on one accessory, one per gang,

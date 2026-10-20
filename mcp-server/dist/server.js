@@ -17554,19 +17554,19 @@ async function handleDeviceMap(args) {
   if (args.home_id) socketArgs.home_id = args.home_id;
   return sendCommand("device_map", socketArgs);
 }
-async function handleAutomations(args) {
+async function handleAutomations(args, send = sendCommand) {
   const action = args.action || "list";
   switch (action) {
     case "list": {
       const socketArgs = {};
       if (args.home_id) socketArgs.home_id = args.home_id;
-      return sendCommand("list_automations", socketArgs);
+      return send("list_automations", socketArgs);
     }
     case "get": {
       if (!args.id) throw new Error("id is required for get action");
       const socketArgs = { id: args.id };
       if (args.home_id) socketArgs.home_id = args.home_id;
-      return sendCommand("get_automation", socketArgs);
+      return send("get_automation", socketArgs);
     }
     case "create_time": {
       if (!args.name) throw new Error("name is required for create_time action");
@@ -17603,7 +17603,7 @@ async function handleAutomations(args) {
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("create_time_automation", socketArgs);
+      return send("create_time_automation", socketArgs);
     }
     case "create": {
       if (!args.name) throw new Error("name is required for create action");
@@ -17646,14 +17646,14 @@ async function handleAutomations(args) {
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("create_automation", socketArgs);
+      return send("create_automation", socketArgs);
     }
     case "delete": {
       if (!args.id) throw new Error("id is required for delete action");
       const socketArgs = { id: args.id };
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("delete_automation", socketArgs);
+      return send("delete_automation", socketArgs);
     }
     case "enable":
     case "disable": {
@@ -17663,7 +17663,7 @@ async function handleAutomations(args) {
         enabled: String(action === "enable")
       };
       if (args.home_id) socketArgs.home_id = args.home_id;
-      return sendCommand("enable_automation", socketArgs);
+      return send("enable_automation", socketArgs);
     }
     case "add_condition": {
       if (typeof args.id !== "string" || args.id.trim() === "") {
@@ -17694,11 +17694,11 @@ async function handleAutomations(args) {
       };
       if (room) socketArgs.room = room;
       for (const key of ["service_name", "service_id", "service_index"]) {
-        if (args.condition[key] != null) socketArgs[key] = args.condition[key];
+        if (Object.prototype.hasOwnProperty.call(args.condition, key)) socketArgs[key] = args.condition[key];
       }
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
-      return sendCommand("add_automation_condition", socketArgs);
+      return send("add_automation_condition", socketArgs);
     }
     default:
       throw new Error(`Unknown automations action: ${action}`);

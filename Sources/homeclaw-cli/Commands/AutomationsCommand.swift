@@ -261,9 +261,7 @@ struct CreateAutomation: ParsableCommand {
     var json = false
 
     func run() throws {
-        guard scene != nil || !action.isEmpty || !actionJSON.isEmpty else {
-            throw ValidationError("Either --scene, --action, or --action-json is required")
-        }
+        try CreateAutomation.validateActionSource(scene: scene, action: action, actionJSON: actionJSON)
 
         var args: [String: Any] = [
             "name": name,
@@ -500,6 +498,19 @@ struct CreateAutomation: ParsableCommand {
         return Array(Swift.Set(weekdays)).sorted()
     }
 
+    /// Exactly one action source: `--scene`, or inline rows from `--action` /
+    /// `--action-json` (which may be combined). Passing both used to drop the
+    /// inline rows silently, though the help calls them alternatives.
+    static func validateActionSource(scene: String?, action: [String], actionJSON: [String]) throws {
+        let hasInline = !action.isEmpty || !actionJSON.isEmpty
+        if scene != nil && hasInline {
+            throw ValidationError("--scene can't be combined with --action or --action-json; pass one or the other")
+        }
+        guard scene != nil || hasInline else {
+            throw ValidationError("Either --scene, --action, or --action-json is required")
+        }
+    }
+
     /// Positional rows first, then JSON rows, in the order given. Shared by `create`
     /// and `create-time` for both actions and conditions.
     static func rows(
@@ -698,9 +709,7 @@ struct CreateTimeAutomation: ParsableCommand {
     var json = false
 
     func run() throws {
-        guard scene != nil || !action.isEmpty || !actionJSON.isEmpty else {
-            throw ValidationError("Either --scene, --action, or --action-json is required")
-        }
+        try CreateAutomation.validateActionSource(scene: scene, action: action, actionJSON: actionJSON)
 
         let canonicalTime = try CreateAutomation.validateTimeOfDaySpec(time)
 

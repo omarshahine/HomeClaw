@@ -100,6 +100,23 @@ struct RowJSONTests {
         #expect(rows.map { $0["service_index"] } == ["1", "2"])
     }
 
+    @Test("--scene can't be combined with inline rows")
+    func sceneExcludesInlineRows() throws {
+        #expect(throws: ValidationError.self) {
+            try CreateAutomation.validateActionSource(
+                scene: "Gym On", action: [], actionJSON: [#"{"accessory":"A","property":"power","value":"1"}"#])
+        }
+        #expect(throws: ValidationError.self) {
+            try CreateAutomation.validateActionSource(scene: "Gym On", action: ["A:power:1"], actionJSON: [])
+        }
+        #expect(throws: ValidationError.self) {
+            try CreateAutomation.validateActionSource(scene: nil, action: [], actionJSON: [])
+        }
+        try CreateAutomation.validateActionSource(scene: "Gym On", action: [], actionJSON: [])
+        try CreateAutomation.validateActionSource(
+            scene: nil, action: ["A:power:1"], actionJSON: [#"{"accessory":"B","property":"power","value":"0"}"#])
+    }
+
     @Test("positional rows come before JSON rows")
     func rowOrder() throws {
         let rows = try CreateAutomation.rows(
