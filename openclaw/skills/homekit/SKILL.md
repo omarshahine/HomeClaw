@@ -157,6 +157,19 @@ homeclaw-cli automations create --name "Dining Unoccupied" \
   --action-json '{"accessory":"<uuid>","property":"power","value":"false","service_index":2}' --dry-run
 homeclaw-cli automations add-condition "<automation>" --accessory "<uuid>" --property power --value true --service-index 2
 
+# Changing an existing automation: edit it in place (keeps the UUID, so button
+# bindings and Siri references survive). Never delete + recreate to change it.
+# Only the options passed change; preview with --dry-run and show the user first.
+homeclaw-cli automations edit "<automation>" --time 06:45 --days mon,tue,wed,thu,fri --dry-run
+homeclaw-cli automations edit "<automation>" --time-after sunset --time-before sunrise --duration 300
+homeclaw-cli automations edit "<automation>" --condition-json '{"accessory":"<uuid>","property":"contact_state","value":"0"}'
+homeclaw-cli automations edit "<automation>" --name "New name"
+# --condition* replaces ALL characteristic conditions; --time-after/--time-before replace
+# the whole time window; clear with --clear-conditions / --clear-time-window /
+# --every-day / --clear-duration. --time replaces the trigger event(s) with a time of day.
+# Timer automations from the Home app accept only --name.
+# After a real run check "verified": false means the re-read differs ("mismatches").
+
 # Replacing an accessory across automations (plan only; never writes without --apply)
 homeclaw-cli automations migrate-actions --replace-accessory "<old-uuid>=<new-uuid>[,<new-uuid>]" --json
 homeclaw-cli automations migrate-actions --replace-accessory "<old-uuid>=<new-uuid>" --automation "<uuid>" --json

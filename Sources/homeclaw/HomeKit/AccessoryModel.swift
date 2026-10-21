@@ -800,6 +800,30 @@ enum AccessoryModel {
                 }
             }
 
+            // Sun-relative time predicate in key-path form. The non-deprecated factories
+            // (`predicateForEvaluatingTriggerOccurring(after/beforeSignificantEvent:)`, which
+            // `TimeCondition.predicate()` uses) build `sunset <= now()` /
+            // `sunrise + offset > now()`: the event is a key-path expression, not a string
+            // constant, so the block above doesn't see it. Which side holds the event
+            // decides the relation: `sunset <= now()` is "after sunset".
+            if let cmp = sub as? NSComparisonPredicate {
+                let sides = [(cmp.leftExpression, true), (cmp.rightExpression, false)]
+                for (expr, isLeft) in sides {
+                    guard let eventName = Self.sunEventKeyPath(expr) else { continue }
+                    let lessThan = cmp.predicateOperatorType == .lessThan || cmp.predicateOperatorType == .lessThanOrEqualTo
+                    let greaterThan = cmp.predicateOperatorType == .greaterThan || cmp.predicateOperatorType == .greaterThanOrEqualTo
+                    guard lessThan || greaterThan else { return unknownCondition(sub) }
+                    // event <= now  → after;  now <= event → before (and mirrored for >).
+                    let relation = (lessThan == isLeft) ? "after" : "before"
+                    return [
+                        "type": "time",
+                        "relation": relation,
+                        "event": eventName,
+                        "summary": "\(relation) \(eventName)",
+                    ]
+                }
+            }
+
             // Time-of-day predicate ("Time is between 16:00 and 00:00", or before/after a
             // clock time). Home-app conditions compare the current time against a
             // DateComponents holding hour/minute; the opposite side is an NSFunctionExpression
@@ -875,6 +899,37 @@ enum AccessoryModel {
                 "operator": "==",
                 "value": value,
             ]
+        }
+    }
+
+    /// Top-level conjuncts of a trigger predicate, flattened exactly as the decoder
+    /// sees them (characteristic leaves stay intact). `HomeKitManager.editAutomation`
+    /// uses this to keep the conjunct kinds an edit doesn't replace.
+    static func topLevelConjuncts(_ predicate: NSPredicate?) -> [NSPredicate] {
+        guard let predicate else { return [] }
+        var out: [NSPredicate] = []
+        flattenTopAnd(predicate, into: &out)
+        return out
+    }
+
+    /// Kind of one top-level conjunct as `extractConditions` classifies it:
+    /// `characteristic`, `time`, `weekdays` or `unknown`.
+    static func conjunctKind(_ conjunct: NSPredicate) -> String {
+        (extractConditions(conjunct, in: nil).first?["type"] as? String) ?? "unknown"
+    }
+
+    /// `sunrise` / `sunset` when the expression is the sun-event key path, either bare
+    /// or inside the `+` offset function HomeKit builds for `sunset-30`.
+    private static func sunEventKeyPath(_ expr: NSExpression) -> String? {
+        switch expr.expressionType {
+        case .keyPath:
+            let path = expr.keyPath
+            return path == HMSignificantEvent.sunrise.rawValue ? "sunrise"
+                : path == HMSignificantEvent.sunset.rawValue ? "sunset" : nil
+        case .function:
+            return (expr.arguments ?? []).lazy.compactMap { sunEventKeyPath($0) }.first
+        default:
+            return nil
         }
     }
 

@@ -824,6 +824,91 @@ enum DemoFixtures {
         return .ok(result)
     }
 
+    /// Edit an automation in place. Mirrors `HomeKitManager.editAutomation`: only the
+    /// fields passed change, `weekdays: []` means every day, empty `conditions` /
+    /// time echoes remove them, and timing edits on a time-based result without a
+    /// weekday gate auto-fill all 7 days. Returns nil when the automation is unknown.
+    @MainActor
+    static func editAutomation(
+        id: String,
+        newName: String?,
+        time: String?,
+        weekdays: [Int]?,
+        conditions: [[String: String]]?,
+        timeEchoes: (after: [String], before: [String])?,
+        durationSeconds: Int?,
+        clearDuration: Bool,
+        dryRun: Bool
+    ) throws -> [String: Any]? {
+        guard let idx = try automationIndex(for: id) else { return nil }
+        let before = automations[idx]
+        var edited = before
+        if let newName { edited.name = newName }
+        if let time {
+            edited.triggerType = "time"
+            edited.time = time
+            edited.accessoryName = nil
+            edited.pressType = nil
+            edited.serviceIndex = nil
+            edited.characteristic = nil
+            edited.triggerValue = nil
+        }
+        if let conditions { edited.conditions = conditions }
+        if let timeEchoes {
+            edited.timeAfter = timeEchoes.after
+            edited.timeBefore = timeEchoes.before
+        }
+        if let weekdays {
+            edited.weekdays = Array(Set(weekdays)).sorted()
+            edited.weekdaysAutoFilled = false
+        }
+        let touchesTiming = time != nil || weekdays != nil || timeEchoes != nil
+        let isTimeBased = edited.triggerType == "time" || !edited.timeAfter.isEmpty || !edited.timeBefore.isEmpty
+        if touchesTiming, isTimeBased, edited.weekdays.isEmpty {
+            edited.weekdays = [1, 2, 3, 4, 5, 6, 7]
+            edited.weekdaysAutoFilled = true
+        }
+        if let durationSeconds { edited.durationSeconds = durationSeconds }
+        if clearDuration { edited.durationSeconds = nil }
+
+        var changes: [String] = []
+        if edited.conditions != before.conditions || edited.timeAfter != before.timeAfter
+            || edited.timeBefore != before.timeBefore { changes.append("predicate") }
+        if edited.weekdays != before.weekdays { changes.append("weekdays") }
+        if time != nil { changes.append("events") }
+        if durationSeconds != nil || clearDuration { changes.append("duration") }
+        if edited.name != before.name { changes.append("name") }
+
+        var planned: [String: Any] = ["name": edited.name]
+        if let time { planned["time"] = time; planned["trigger_type"] = "time" }
+        if weekdays != nil || edited.weekdaysAutoFilled { planned["weekdays"] = edited.weekdays }
+        if edited.weekdaysAutoFilled { planned["weekdays_auto_filled"] = true }
+        if changes.contains("predicate") {
+            planned["conditions"] = edited.conditions
+            planned["time_after"] = edited.timeAfter
+            planned["time_before"] = edited.timeBefore
+        }
+        if let durationSeconds { planned["duration_seconds"] = durationSeconds }
+        if clearDuration { planned["duration_seconds"] = NSNull() }
+
+        var result: [String: Any] = [
+            "id": before.id,
+            "name": edited.name,
+            "home": homeName,
+            "changes": changes,
+            "before": before.detailDict(),
+            "planned": planned,
+            "dry_run": dryRun,
+        ]
+        if changes.isEmpty { result["unchanged"] = true }
+        if !dryRun, !changes.isEmpty {
+            automations[idx] = edited
+            result["automation"] = edited.detailDict()
+            result["verified"] = true
+        }
+        return result
+    }
+
     enum AutomationConditionResult {
         case ok([String: Any])
         case automationNotFound
@@ -963,7 +1048,7 @@ enum DemoFixtures {
         let id: String
         var name: String
         var enabled: Bool
-        let triggerType: String   // "button" | "characteristic" | "time"
+        var triggerType: String   // "button" | "characteristic" | "time"
         var accessoryName: String?
         var pressType: String?
         var serviceIndex: Int?

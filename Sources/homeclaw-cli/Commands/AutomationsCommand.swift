@@ -15,6 +15,7 @@ struct Automations: ParsableCommand {
             DisableAutomation.self,
             RewireAutomation.self,
             AddAutomationCondition.self,
+            EditAutomation.self,
             MigrateAutomationActions.self,
         ],
         defaultSubcommand: ListAutomations.self
@@ -1163,5 +1164,226 @@ struct AddAutomationCondition: ParsableCommand {
             print("  Trigger now has \(count) condition(s)")
         }
         RowJSON.printWarnings(result)
+    }
+}
+
+// MARK: - Edit (in place)
+
+/// Modify-in-place verb: changes only the fields given and keeps the trigger UUID,
+/// so button bindings, Siri references and other UUID-keyed integrations survive
+/// (unlike delete + recreate). See `HomeKitManager.editAutomation`.
+struct EditAutomation: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "edit",
+        abstract: "Edit an existing automation in place (preserves trigger UUID)",
+        discussion: """
+            Only the options you pass change; everything else stays as it is.
+
+            Replacing vs. clearing:
+              --days mon,fri          replace the weekday gate     --every-day        remove it
+              --condition ...         replace all conditions       --clear-conditions remove them
+              --time-after/--time-before  replace the time window  --clear-time-window remove it
+              --duration N            set the auto-revert          --clear-duration   remove it
+
+            --time replaces all trigger events with one time-of-day event (same
+            values as `create-time`). Time-based results without a weekday gate get
+            all 7 days auto-filled, as on `create-time`. Conditions of a kind you
+            don't replace (including ones HomeClaw can't decode) are kept.
+            Timer automations from the Home app accept only --name.
+
+            EXAMPLES
+              # Move a weekday alarm to 06:45 and include Saturday
+              homeclaw-cli automations edit "Coffee Maker" --time 06:45 --days mon,tue,wed,thu,fri,sat
+
+              # Only at night, and turn off again after 5 minutes
+              homeclaw-cli automations edit "Hall Motion" \\
+                --time-after sunset --time-before sunrise --duration 300
+
+              # Replace the conditions, preview first
+              homeclaw-cli automations edit "Porch Lights" \\
+                --condition "Front Door:contact_state:0" --dry-run
+            """
+    )
+
+    @Argument(help: "Automation name or UUID")
+    var id: String
+
+    @Option(name: .long, help: "New name for the automation")
+    var name: String?
+
+    @Option(name: .long, help: "Replace all trigger events with a time of day: 'HH:MM', 'sunrise', 'sunset', or '<sun-event>±<minutes>'")
+    var time: String?
+
+    @Option(name: .long, help: "Replace the weekday gate: comma-separated mon,tue,... (or 1-7 where 1=Sun)")
+    var days: String?
+
+    @Flag(name: .customLong("every-day"), help: "Remove the weekday gate (time-based automations get all 7 days auto-filled)")
+    var everyDay = false
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Replacement characteristic condition as 'accessory:property:value' (repeatable). Replaces all existing characteristic conditions.")
+    var condition: [String] = []
+
+    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Replacement condition as a JSON object (repeatable). Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    var conditionJSON: [String] = []
+
+    @Flag(name: .customLong("clear-conditions"), help: "Remove all characteristic conditions")
+    var clearConditions = false
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Replacement time window: only fire after this time (repeatable). 'HH:MM' or '<sunrise|sunset>[±N]'. Replaces the whole window together with --time-before.")
+    var timeAfter: [String] = []
+
+    @Option(name: .long, parsing: .upToNextOption, help: "Replacement time window: only fire before this time (repeatable). Same format as --time-after.")
+    var timeBefore: [String] = []
+
+    @Flag(name: .customLong("clear-time-window"), help: "Remove the time window (all time-after/time-before conditions)")
+    var clearTimeWindow = false
+
+    @Option(name: .long, help: "Set the auto-revert to this many seconds (1-86400)")
+    var duration: Int?
+
+    @Flag(name: .customLong("clear-duration"), help: "Remove the auto-revert")
+    var clearDuration = false
+
+    @Option(name: .long, help: "Home name or UUID (defaults to primary home)")
+    var home: String?
+
+    @Flag(name: .long, help: "Preview without modifying the automation")
+    var dryRun = false
+
+    @Flag(name: .long, help: "Output raw JSON")
+    var json = false
+
+    func validate() throws {
+        if id.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("Automation id/name must be non-empty")
+        }
+        if let name, name.trimmingCharacters(in: .whitespaces).isEmpty {
+            throw ValidationError("--name must be non-empty when provided")
+        }
+        if days != nil && everyDay {
+            throw ValidationError("Pass either --days or --every-day, not both")
+        }
+        if (!condition.isEmpty || !conditionJSON.isEmpty) && clearConditions {
+            throw ValidationError("Pass either --condition/--condition-json or --clear-conditions, not both")
+        }
+        if (!timeAfter.isEmpty || !timeBefore.isEmpty) && clearTimeWindow {
+            throw ValidationError("Pass either --time-after/--time-before or --clear-time-window, not both")
+        }
+        if let duration {
+            if clearDuration { throw ValidationError("Pass either --duration or --clear-duration, not both") }
+            guard (1...86400).contains(duration) else {
+                throw ValidationError("--duration must be a positive integer between 1 and 86400 (24 hours)")
+            }
+        }
+        let editsSomething = name != nil || time != nil || days != nil || everyDay
+            || !condition.isEmpty || !conditionJSON.isEmpty || clearConditions
+            || !timeAfter.isEmpty || !timeBefore.isEmpty || clearTimeWindow
+            || duration != nil || clearDuration
+        if !editsSomething {
+            throw ValidationError("Nothing to edit. Pass at least one of --name, --time, --days/--every-day, --condition/--clear-conditions, --time-after/--time-before/--clear-time-window, --duration/--clear-duration")
+        }
+    }
+
+    /// Socket arguments for this invocation. Split from `run()` so the presence
+    /// rules (absent vs. empty) are unit-testable without a socket.
+    func socketArgs() throws -> [String: Any] {
+        var args: [String: Any] = ["id": id, "dry_run": dryRun]
+        if let name { args["new_name"] = name }
+        if let time { args["time"] = try CreateAutomation.validateTimeOfDaySpec(time) }
+        if let days { args["weekdays"] = try CreateAutomation.parseWeekdays(days) }
+        if everyDay { args["weekdays"] = [Int]() }
+        if !condition.isEmpty || !conditionJSON.isEmpty {
+            args["conditions"] = try CreateAutomation.rows(
+                positional: condition, json: conditionJSON, flag: "--condition-json", parse: CreateAutomation.parseConditionRow)
+        }
+        if clearConditions { args["conditions"] = [[String: String]]() }
+        if !timeAfter.isEmpty || !timeBefore.isEmpty || clearTimeWindow {
+            args["time_after"] = try timeAfter.map { try CreateAutomation.validateTimeSpec($0, flag: "--time-after") }
+            args["time_before"] = try timeBefore.map { try CreateAutomation.validateTimeSpec($0, flag: "--time-before") }
+        }
+        if let duration { args["duration_seconds"] = duration }
+        if clearDuration { args["clear_duration"] = true }
+        if let home { args["home_id"] = home }
+        return args
+    }
+
+    func run() throws {
+        let response = try SocketClient.sendAny(command: "edit_automation", args: try socketArgs())
+        guard response.success else {
+            throw CommandFailure(response.error ?? "Unknown error")
+        }
+
+        if shouldOutputJSON(json) {
+            printJSON(response.data?.value)
+            return
+        }
+
+        guard let result = response.data?.value as? [String: Any] else {
+            print("Done.")
+            return
+        }
+        for line in Self.summaryLines(result, fallbackName: id) { print(line) }
+        RowJSON.printWarnings(result)
+    }
+
+    /// Human-readable result. Static and pure so it can be tested on fixture dicts.
+    static func summaryLines(_ result: [String: Any], fallbackName: String) -> [String] {
+        let isDryRun = result["dry_run"] as? Bool ?? false
+        let before = result["before"] as? [String: Any] ?? [:]
+        let planned = result["planned"] as? [String: Any] ?? [:]
+        let oldName = before["name"] as? String ?? fallbackName
+        let newName = planned["name"] as? String ?? oldName
+        let changes = result["changes"] as? [String] ?? []
+
+        if result["unchanged"] as? Bool ?? false {
+            return ["No changes: '\(oldName)' already matches."]
+        }
+        var lines = [isDryRun ? "DRY RUN — would edit automation '\(oldName)'" : "Edited automation '\(oldName)'"]
+        if changes.contains("name") { lines.append("  Name: \(oldName) → \(newName)") }
+        if let time = planned["time"] as? String {
+            var line = "  Trigger: at \(time)"
+            if let replaced = (result["replaced_trigger"] as? [String: Any])?["summary"] as? String {
+                line += " (replaces: \(replaced))"
+            }
+            lines.append(line)
+        }
+        if let weekdays = planned["weekdays"] as? [Int] {
+            if planned["weekdays_auto_filled"] as? Bool ?? false {
+                lines.append("  Days: every day (auto-filled — iOS 15+ requires weekday gating on time-conditional automations)")
+            } else {
+                lines.append("  Days: \(weekdays.isEmpty ? "every day" : CreateAutomation.formatWeekdays(weekdays))")
+            }
+        }
+        if changes.contains("predicate") {
+            let conditions = planned["conditions"] as? [[String: Any]] ?? []
+            if conditions.isEmpty {
+                lines.append("  Conditions: none")
+            } else {
+                lines.append("  Conditions:")
+                for c in conditions {
+                    if let accessory = c["accessory"] as? String, let property = c["property"] as? String {
+                        lines.append("    \(accessory): \(property) = \(c["value"].map { "\($0)" } ?? "?")")
+                    } else {
+                        lines.append("    \(c["summary"] as? String ?? "unsupported condition")")
+                    }
+                }
+            }
+        }
+        if changes.contains("duration") {
+            if let seconds = planned["duration_seconds"] as? Int {
+                lines.append("  Auto-off: \(CreateAutomation.formatDuration(seconds))")
+            } else {
+                lines.append("  Auto-off: removed")
+            }
+        }
+        if !isDryRun, let verified = result["verified"] as? Bool {
+            if verified {
+                lines.append("  Verified: re-read matches")
+            } else {
+                let mismatches = (result["mismatches"] as? [String] ?? []).joined(separator: ", ")
+                lines.append("  WARNING: re-read differs from the plan (\(mismatches)) — check with `automations get`")
+            }
+        }
+        return lines
     }
 }

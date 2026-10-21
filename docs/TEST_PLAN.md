@@ -104,6 +104,7 @@ Legend: ✅ has test · 🅿️ parse-only today · ⬜ none today · → target
 | `automations create` | `create_automation` | ⬜ | L1 + L3 | add automation CRUD |
 | `automations create-time` | `create_time_automation` | 🅿️✅ | + L3 | add automation CRUD |
 | `automations add-condition` | `add_automation_condition` | 🅿️✅ | + L3 | add automation CRUD |
+| `automations edit` | `edit_automation` | 🅿️✅ | + L3 | demo `editAutomation` exists; live path needs L3 |
 | `automations delete/enable/disable/rewire` | `*_automation` | ⬜ | L1 + L3 | add automation CRUD |
 | `rename` (home/accessory) | `rename` | ⬜ | L1 + L2 | add rename to fixtures |
 | `create-room`/`rename-room`/`remove-room` | `*_room` | ⬜ | L1 + L2 | add room CRUD |

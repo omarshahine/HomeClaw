@@ -3139,6 +3139,294 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
+    /// Edit an existing automation in place, preserving the trigger UUID.
+    ///
+    /// Every field is optional and only the fields passed are changed:
+    /// - `newName` renames the trigger. This is the only edit a timer automation
+    ///   (HMTimerTrigger) accepts; all other fields need an HMEventTrigger.
+    /// - `time` replaces *all* trigger events with one time-of-day event
+    ///   (`HMCalendarEvent` / `HMSignificantTimeEvent`, same vocabulary as `create-time`).
+    /// - `weekdays` replaces the weekday gate (`recurrences`); an empty array means
+    ///   every day. Weekday conjuncts an older HomeClaw wrote into the predicate are
+    ///   dropped at the same time so the two gates can't disagree.
+    /// - `conditions` replaces every characteristic condition; an empty array removes them.
+    /// - `timeConditions` replaces the whole time window (after *and* before); an empty
+    ///   array removes it.
+    /// - `durationSeconds` sets the auto-revert (`HMDurationEvent` end event);
+    ///   `clearDuration` removes all end events.
+    ///
+    /// Predicate edits work per conjunct kind (see `AccessoryModel.conjunctKind`): the
+    /// kinds an edit doesn't replace are kept as they are, including conjuncts the
+    /// decoder can't read (`unknown`), so editing the time window never drops a
+    /// condition Apple Home wrote.
+    ///
+    /// Weekday auto-fill mirrors `createTimeAutomation`: when an edit touches timing
+    /// (`time`, `weekdays`, the time window) and the result is time-based but has no
+    /// weekday gate, all 7 days are filled in and `weekdays_auto_filled` is reported.
+    ///
+    /// Everything is resolved and validated before the first HomeKit write. Writes run
+    /// in the order predicate → recurrences → events → end events → name; if one fails,
+    /// the steps already applied are restored from the values read before the edit
+    /// (best effort, reported in the error). After the writes the trigger is re-read and
+    /// compared with the plan (`verified`, `mismatches`).
+    func editAutomation(
+        id: String,
+        newName: String? = nil,
+        time: String? = nil,
+        weekdays: [Int]? = nil,
+        conditions: [[String: String]]? = nil,
+        timeConditions: [TimeCondition]? = nil,
+        durationSeconds: Int? = nil,
+        clearDuration: Bool = false,
+        homeID: String? = nil,
+        dryRun: Bool = false
+    ) async throws -> [String: Any] {
+        await waitForReady()
+
+        let trimmedName: String? = try newName.map { raw in
+            let t = raw.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty else { throw ControlError.invalidArgument("'new_name' must be non-empty when provided") }
+            return t
+        }
+        let timeSpec: TimeSpec?
+        do {
+            timeSpec = try time.map { try TimeSpec.parse($0) }
+        } catch let err as TimeSpec.ParseError {
+            throw ControlError.invalidArgument(err.message)
+        }
+        if let weekdays, let bad = weekdays.first(where: { !(1...7).contains($0) }) {
+            throw ControlError.invalidArgument("Invalid weekday \(bad); use 1-7 (1=Sun ... 7=Sat)")
+        }
+        if let durationSeconds {
+            guard !clearDuration else {
+                throw ControlError.invalidArgument("Pass either 'duration_seconds' or 'clear_duration', not both")
+            }
+            guard (1...86400).contains(durationSeconds) else {
+                throw ControlError.invalidArgument("'duration_seconds' must be between 1 and 86400 (24 hours)")
+            }
+        }
+        let editsEventTrigger = timeSpec != nil || weekdays != nil || conditions != nil
+            || timeConditions != nil || durationSeconds != nil || clearDuration
+        guard editsEventTrigger || trimmedName != nil else {
+            throw ControlError.invalidArgument(
+                "Nothing to edit. Pass at least one of new_name, time, weekdays, conditions, time_after, time_before, duration_seconds or clear_duration.")
+        }
+
+        if Self.isDemoMode {
+            guard let result = try DemoFixtures.editAutomation(
+                id: id, newName: trimmedName, time: timeSpec?.canonicalString, weekdays: weekdays,
+                conditions: conditions, timeEchoes: timeConditions.map { Self.timeEchoes($0) },
+                durationSeconds: durationSeconds, clearDuration: clearDuration, dryRun: dryRun)
+            else { throw ControlError.triggerNotFound(id) }
+            return result
+        }
+        let home = try resolveHome(homeID: homeID)
+
+        // Name-only edits work on every trigger subclass; anything else needs an event trigger.
+        guard editsEventTrigger else {
+            let trigger = try resolveTrigger(id: id, in: home)
+            return try await renameTrigger(trigger, to: trimmedName!, in: home, dryRun: dryRun)
+        }
+        let trigger = try resolveEventTrigger(
+            id: id, in: home, operation: "edit",
+            detail: "Only the name of a timer automation can be changed in place (pass just new_name).")
+
+        let (resolvedConditions, warnings) = try conditions.map { try resolveConditions($0, in: home) } ?? ([], [])
+
+        // Snapshot everything an edit can touch, for the before view and for rollback.
+        let before = AccessoryModel.automationDetail(trigger, homeName: home.name, home: home)
+        let oldName = trigger.name
+        let oldPredicate = trigger.predicate
+        let oldRecurrences = trigger.recurrences
+        let oldEvents = trigger.events
+        let oldEndEvents = trigger.endEvents
+
+        // Predicate: keep the conjunct kinds this edit doesn't replace.
+        let replacesCharacteristic = conditions != nil
+        let replacesTime = timeConditions != nil
+        let dropsWeekdayConjuncts = weekdays != nil
+        let oldConjuncts = AccessoryModel.topLevelConjuncts(oldPredicate)
+        var newConjuncts = oldConjuncts.filter { conjunct in
+            switch AccessoryModel.conjunctKind(conjunct) {
+            case "characteristic": return !replacesCharacteristic
+            case "time": return !replacesTime
+            case "weekdays": return !dropsWeekdayConjuncts
+            default: return true
+            }
+        }
+        if let added = buildCombinedPredicate(
+            existing: nil, resolvedConditions: resolvedConditions, timeConditions: timeConditions ?? [])
+        {
+            newConjuncts += AccessoryModel.topLevelConjuncts(added)
+        }
+        let predicateChanged = newConjuncts.map(\.predicateFormat) != oldConjuncts.map(\.predicateFormat)
+        let newPredicate: NSPredicate? = switch newConjuncts.count {
+        case 0: nil
+        case 1: newConjuncts[0]
+        default: NSCompoundPredicate(andPredicateWithSubpredicates: newConjuncts)
+        }
+
+        // Recurrences, with the create-time auto-fill for time-based results.
+        let newEvents: [HMEvent] = timeSpec.map { [$0.makeEvent()] } ?? oldEvents
+        var newRecurrences = weekdays.map { weekdayRecurrences($0) } ?? oldRecurrences
+        var weekdaysAutoFilled = false
+        let touchesTiming = timeSpec != nil || weekdays != nil || timeConditions != nil
+        let isTimeBased = newEvents.contains { $0 is HMCalendarEvent || $0 is HMSignificantTimeEvent }
+            || newConjuncts.contains { AccessoryModel.conjunctKind($0) == "time" }
+        let hasWeekdayConjunct = newConjuncts.contains { AccessoryModel.conjunctKind($0) == "weekdays" }
+        if touchesTiming, isTimeBased, (newRecurrences ?? []).isEmpty, !hasWeekdayConjunct {
+            newRecurrences = weekdayRecurrences([1, 2, 3, 4, 5, 6, 7])
+            weekdaysAutoFilled = true
+        }
+        let recurrencesChanged = Self.weekdaySet(newRecurrences) != Self.weekdaySet(oldRecurrences)
+
+        let newEndEvents: [HMEvent]? = durationSeconds.map { [HMDurationEvent(duration: TimeInterval($0))] }
+            ?? (clearDuration ? [] : nil)
+        let renamed = trimmedName.map { $0 != oldName } ?? false
+
+        var changes: [String] = []
+        if predicateChanged { changes.append("predicate") }
+        if recurrencesChanged { changes.append("weekdays") }
+        if timeSpec != nil { changes.append("events") }
+        if newEndEvents != nil { changes.append("duration") }
+        if renamed { changes.append("name") }
+
+        var planned: [String: Any] = ["name": trimmedName ?? oldName]
+        if let timeSpec {
+            planned["time"] = timeSpec.canonicalString
+            planned["trigger_type"] = { if case .calendar = timeSpec { return "calendar" } else { return "significant_time" } }()
+        }
+        if weekdays != nil || weekdaysAutoFilled { planned["weekdays"] = Self.weekdaySet(newRecurrences) }
+        if weekdaysAutoFilled { planned["weekdays_auto_filled"] = true }
+        if predicateChanged {
+            planned["conditions"] = AccessoryModel.extractConditions(newPredicate, in: home)
+                .filter { ($0["type"] as? String) != "weekdays" }
+        }
+        if let durationSeconds { planned["duration_seconds"] = durationSeconds }
+        if clearDuration { planned["duration_seconds"] = NSNull() }
+
+        var result: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": trimmedName ?? oldName,
+            "home": home.name,
+            "changes": changes,
+            "before": before,
+            "planned": planned,
+        ]
+        if timeSpec != nil {
+            // Time triggers carry no `events` rows in the get shape (they surface as
+            // fire_time / event_summary), so report the summary plus any event rows.
+            var replaced: [String: Any] = ["trigger_type": before["trigger_type"] ?? "unknown"]
+            if let summary = before["event_summary"] as? String { replaced["summary"] = Self.bareEventSummary(summary) }
+            if let rows = before["events"] as? [[String: Any]], !rows.isEmpty { replaced["events"] = rows }
+            result["replaced_trigger"] = replaced
+        }
+        if !warnings.isEmpty { result["warnings"] = warnings }
+        if dryRun || changes.isEmpty {
+            result["dry_run"] = dryRun
+            if changes.isEmpty { result["unchanged"] = true }
+            return result
+        }
+
+        // Apply, restoring earlier steps if a later one fails.
+        var undo: [(step: String, run: @MainActor () async throws -> Void)] = []
+        func apply(_ step: String, _ write: @MainActor () async throws -> Void,
+                   restore: @escaping @MainActor () async throws -> Void) async throws {
+            do {
+                try await write()
+                undo.append((step, restore))
+            } catch {
+                var restored: [String] = []
+                var notRestored: [String] = []
+                for entry in undo.reversed() {
+                    do { try await entry.run(); restored.append(entry.step) } catch { notRestored.append(entry.step) }
+                }
+                var message = "Editing '\(oldName)' failed at step '\(step)': \(error.localizedDescription)."
+                if !restored.isEmpty { message += " Restored: \(restored.joined(separator: ", "))." }
+                if !notRestored.isEmpty {
+                    message += " Could not restore: \(notRestored.joined(separator: ", ")) — check the automation with `automations get`."
+                }
+                throw ControlError.writeFailed(message)
+            }
+        }
+        if predicateChanged {
+            try await apply("predicate", { try await homeKitAsync { trigger.updatePredicate(newPredicate, completionHandler: $0) } },
+                            restore: { try await self.homeKitAsync { trigger.updatePredicate(oldPredicate, completionHandler: $0) } })
+        }
+        if recurrencesChanged {
+            try await apply("weekdays", { try await homeKitAsync { trigger.updateRecurrences(newRecurrences, completionHandler: $0) } },
+                            restore: { try await self.homeKitAsync { trigger.updateRecurrences(oldRecurrences, completionHandler: $0) } })
+        }
+        if timeSpec != nil {
+            try await apply("events", { try await homeKitAsync { trigger.updateEvents(newEvents, completionHandler: $0) } },
+                            restore: { try await self.homeKitAsync { trigger.updateEvents(oldEvents, completionHandler: $0) } })
+        }
+        if let newEndEvents {
+            try await apply("duration", { try await homeKitAsync { trigger.updateEndEvents(newEndEvents, completionHandler: $0) } },
+                            restore: { try await self.homeKitAsync { trigger.updateEndEvents(oldEndEvents, completionHandler: $0) } })
+        }
+        if renamed, let trimmedName {
+            try await apply("name", { try await homeKitAsync { trigger.updateName(trimmedName, completionHandler: $0) } },
+                            restore: { try await self.homeKitAsync { trigger.updateName(oldName, completionHandler: $0) } })
+        }
+
+        // Re-read and compare with the plan.
+        let after = AccessoryModel.automationDetail(trigger, homeName: home.name, home: home)
+        var mismatches: [String] = []
+        if trigger.name != (trimmedName ?? oldName) { mismatches.append("name") }
+        if Self.weekdaySet(trigger.recurrences) != Self.weekdaySet(newRecurrences) { mismatches.append("weekdays") }
+        if predicateChanged,
+           AccessoryModel.topLevelConjuncts(trigger.predicate).count != newConjuncts.count { mismatches.append("predicate") }
+        if timeSpec != nil, trigger.events.count != newEvents.count { mismatches.append("events") }
+        if let newEndEvents {
+            let duration = { (events: [HMEvent]) in events.compactMap { ($0 as? HMDurationEvent)?.duration } }
+            if duration(trigger.endEvents) != duration(newEndEvents) { mismatches.append("duration") }
+        }
+
+        AppLogger.homekit.info("[\(home.name)] Edited automation '\(trigger.name)': \(changes.joined(separator: ", "))")
+        result["dry_run"] = false
+        result["automation"] = after
+        result["verified"] = mismatches.isEmpty
+        if !mismatches.isEmpty { result["mismatches"] = mismatches }
+        return result
+    }
+
+    /// Name-only edit, valid for every trigger subclass.
+    private func renameTrigger(_ trigger: HMTrigger, to newName: String, in home: HMHome, dryRun: Bool) async throws -> [String: Any] {
+        let oldName = trigger.name
+        let changed = newName != oldName
+        var result: [String: Any] = [
+            "id": trigger.uniqueIdentifier.uuidString,
+            "name": newName,
+            "home": home.name,
+            "changes": changed ? ["name"] : [String](),
+            "before": ["name": oldName],
+            "planned": ["name": newName],
+        ]
+        guard changed, !dryRun else {
+            result["dry_run"] = dryRun
+            if !changed { result["unchanged"] = true }
+            return result
+        }
+        try await homeKitAsync { trigger.updateName(newName, completionHandler: $0) }
+        AppLogger.homekit.info("[\(home.name)] Renamed automation '\(oldName)' to '\(trigger.name)'")
+        result["dry_run"] = false
+        result["verified"] = trigger.name == newName
+        return result
+    }
+
+    /// `event_summary` without the auto-off and condition-count suffixes
+    /// `automationSummary` appends, i.e. just the trigger event.
+    static func bareEventSummary(_ summary: String) -> String {
+        summary.replacingOccurrences(
+            of: #" \((off after [^)]*|\+\d+ conditions?)\)"#, with: "", options: .regularExpression)
+    }
+
+    /// Sorted, de-duplicated weekdays (1=Sun ... 7=Sat) of a recurrence list.
+    static func weekdaySet(_ recurrences: [DateComponents]?) -> [Int] {
+        Array(Set((recurrences ?? []).compactMap(\.weekday).filter { (1...7).contains($0) })).sorted()
+    }
+
     func enableAutomation(
         id: String,
         enabled: Bool,
