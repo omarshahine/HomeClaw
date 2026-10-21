@@ -18,6 +18,9 @@
     "esbuild": "^0.28.1"
   },
   "overrides": {
-    "undici": "8.10.2"
+    "undici": "8.10.2",
+    "openclaw": {
+      "npm": "12.2.1"
+    }
   }
 }
