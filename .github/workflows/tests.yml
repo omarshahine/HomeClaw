@@ -40,8 +40,14 @@ jobs:
         with:
           node-version: 24
 
+      - name: Verify patched npm archive against pinned official sources
+        run: python3 scripts/rebuild-security-npm.py --check
+
       - name: Install dependencies
         run: npm install
+
+      - name: Audit the complete dependency tree
+        run: npm audit
 
       - name: Verify native MCP schema parity
         run: |
@@ -72,6 +78,9 @@ jobs:
 
       # The Xcode build phase compiles openclaw/dist via tsc, resolved from
       # node_modules before falling back to npx.
+      - name: Verify patched npm archive against pinned official sources
+        run: python3 scripts/rebuild-security-npm.py --check
+
       - name: Install dependencies
         run: npm install
 
