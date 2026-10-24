@@ -50,3 +50,36 @@ test('create forwards action and condition rows untouched, selectors included', 
   assert.deepEqual(args.actions, actions);
   assert.deepEqual(args.conditions, conditions);
 });
+
+test('edit forwards only the fields given, empty arrays included', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({ action: 'edit', id: 'Porch', weekdays: [], conditions: [], time_after: ['sunset-30'] }, send);
+  const [command, args] = calls[0];
+  assert.equal(command, 'edit_automation');
+  assert.deepEqual(args.weekdays, []);
+  assert.deepEqual(args.conditions, []);
+  assert.deepEqual(args.time_after, ['sunset-30']);
+  for (const key of ['new_name', 'time', 'time_before', 'duration_seconds', 'clear_duration', 'dry_run']) {
+    assert.ok(!Object.prototype.hasOwnProperty.call(args, key), key);
+  }
+});
+
+test('edit forwards rename, time, duration and dry_run', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({ action: 'edit', id: 'Porch', new_name: 'Porch at dusk', time: 'sunset', duration_seconds: 600, dry_run: true }, send);
+  const [, args] = calls[0];
+  assert.equal(args.new_name, 'Porch at dusk');
+  assert.equal(args.time, 'sunset');
+  assert.equal(args.duration_seconds, '600');
+  assert.equal(args.dry_run, 'true');
+});
+
+test('edit rejects a call without changes, and duration together with clear_duration', async () => {
+  const { send } = fakeSend();
+  await assert.rejects(handleAutomations({ action: 'edit', id: 'Porch' }, send), /at least one of/);
+  await assert.rejects(
+    handleAutomations({ action: 'edit', id: 'Porch', duration_seconds: 60, clear_duration: true }, send),
+    /either duration_seconds or clear_duration/,
+  );
+  await assert.rejects(handleAutomations({ action: 'edit', id: '  ', new_name: 'x' }, send), /id is required/);
+});

@@ -17316,13 +17316,13 @@ var tools = [
   },
   {
     name: "homekit_automations",
-    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). Use action=migrate_actions with old_accessory and new_accessories to plan replacing an accessory in the action sets automations run (optionally scoped by id): each action set is classified visible_scene (editable in place, but shared with other automations and the scene tile) or hidden (automation-owned; third-party apps cannot write these, so status is unsupported with manual_steps), with status supported/unsupported/blocked, rollback snapshots, removals, additions and issues. It is plan-only unless apply=true, which writes supported visible scenes and verifies them with a re-read. Use action=add_condition to append a characteristic condition (ANDed) to an existing automation in place \u2014 the trigger UUID is preserved, so button bindings and Siri references survive. List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "presence" | "timer" | "orphaned" | "unknown"; "orphaned" means the trigger has no event left, usually because the device it watched was removed, so it never fires) and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype. Note: the predicate-composition features (conditions, time_after/time_before, add_condition) are built on standard HMEventTrigger predicate composition \u2014 supported by Apple\'s HomeKit framework APIs but not yet surfaced in the Home app\'s Automations tab. They mirror the rule-editor capabilities exposed by third-party HomeKit apps like Controller for HomeKit. Rules created or modified this way execute correctly via HomeKit; use list/get to inspect them since they may not be editable from the Home app.',
+    description: 'Manage HomeKit automations. List existing automations, inspect their events and linked scenes, create automations triggered by any characteristic change (button presses, motion sensors, contact sensors, occupancy, etc.) or by a time of day (clock or sunrise/sunset), delete automations, or enable/disable them. For characteristic-change triggers use action=create with press_type (buttons) or characteristic+trigger_value (sensors). For time-of-day triggers use action=create_time with the `time` field (HH:MM, sunrise, sunset, or <sun-event>\xB1N). Both create actions accept the same predicate vocabulary: weekdays, conditions, time_after, time_before, duration_seconds. Use duration_seconds to auto-revert actions after N seconds (e.g. motion-triggered lights or sunset porch lights that turn off after a delay). Use action=migrate_actions with old_accessory and new_accessories to plan replacing an accessory in the action sets automations run (optionally scoped by id): each action set is classified visible_scene (editable in place, but shared with other automations and the scene tile) or hidden (automation-owned; third-party apps cannot write these, so status is unsupported with manual_steps), with status supported/unsupported/blocked, rollback snapshots, removals, additions and issues. It is plan-only unless apply=true, which writes supported visible scenes and verifies them with a re-read. Use action=add_condition to append a characteristic condition (ANDed) to an existing automation in place \u2014 the trigger UUID is preserved, so button bindings and Siri references survive. Use action=edit to change an existing automation in place, also preserving the UUID: pass only the fields to change \u2014 new_name, time (replaces all trigger events with a time-of-day event), weekdays ([] = every day), conditions (replaces all characteristic conditions; [] removes them), time_after/time_before (replace the whole time window; both [] removes it), duration_seconds or clear_duration. Kinds of conditions you do not pass are kept, including ones HomeClaw cannot decode. Timer automations accept only new_name. edit returns before, planned and changes, and after a real run the re-read automation with verified/mismatches. List/get also surface HMTimerTrigger automations (Apple Home native time automations) and HMCalendarEvent / HMSignificantTimeEvent / HMDurationEvent details on event triggers; result rows include trigger_type ("button" | "characteristic" | "calendar" | "significant_time" | "presence" | "timer" | "orphaned" | "unknown"; "orphaned" means the trigger has no event left, usually because the device it watched was removed, so it never fires) and, where applicable, fire_time, fire_date, and duration_seconds. Delete/enable/disable accept any trigger subtype. Note: the predicate-composition features (conditions, time_after/time_before, add_condition) are built on standard HMEventTrigger predicate composition \u2014 supported by Apple\'s HomeKit framework APIs but not yet surfaced in the Home app\'s Automations tab. They mirror the rule-editor capabilities exposed by third-party HomeKit apps like Controller for HomeKit. Rules created or modified this way execute correctly via HomeKit; use list/get to inspect them since they may not be editable from the Home app.',
     inputSchema: {
       type: "object",
       properties: {
         action: {
           type: "string",
-          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable", "add_condition", "migrate_actions"],
+          enum: ["list", "get", "create", "create_time", "delete", "enable", "disable", "add_condition", "edit", "migrate_actions"],
           description: "Action to perform. Default: list"
         },
         home_id: {
@@ -17331,11 +17331,15 @@ var tools = [
         },
         id: {
           type: "string",
-          description: "Automation UUID or name (get/delete/enable/disable actions; optional filter for migrate_actions)"
+          description: "Automation UUID or name (get/delete/enable/disable/add_condition/edit actions; optional filter for migrate_actions)"
         },
         name: {
           type: "string",
           description: "Automation name (create / create_time actions)"
+        },
+        new_name: {
+          type: "string",
+          description: "New automation name (edit action). The only field a timer automation (HMTimerTrigger) accepts."
         },
         accessory_id: {
           type: "string",
@@ -17343,7 +17347,7 @@ var tools = [
         },
         time: {
           type: "string",
-          description: 'Time of day the automation fires (create_time action, required). Format: "HH:MM" for a wall-clock time (e.g. "06:30", "17:45"; both fields must be zero-padded two digits \u2014 "6:30" is rejected), "sunrise"/"sunset" for sun-relative events, or "<sun-event>\xB1N" where N is minutes (e.g. "sunset-30", "sunrise+15"). Offsets larger than 1440 minutes (24h) are rejected. Implemented as HMCalendarEvent for HH:MM and HMSignificantTimeEvent for sunrise/sunset. All other predicate flags (weekdays, conditions, time_after, time_before, duration_seconds) compose with `time` the same way they do on the create action \u2014 `time` is the trigger event, those are the gating predicates.'
+          description: 'Time of day the automation fires (create_time action, required). Format: "HH:MM" for a wall-clock time (e.g. "06:30", "17:45"; both fields must be zero-padded two digits \u2014 "6:30" is rejected), "sunrise"/"sunset" for sun-relative events, or "<sun-event>\xB1N" where N is minutes (e.g. "sunset-30", "sunrise+15"). Offsets larger than 1440 minutes (24h) are rejected. Implemented as HMCalendarEvent for HH:MM and HMSignificantTimeEvent for sunrise/sunset. All other predicate flags (weekdays, conditions, time_after, time_before, duration_seconds) compose with `time` the same way they do on the create action \u2014 `time` is the trigger event, those are the gating predicates. On edit, `time` replaces all of the automation\'s trigger events (e.g. turns a motion automation into a sunset automation); the previous trigger is reported as replaced_trigger.'
         },
         scene_id: {
           type: "string",
@@ -17386,7 +17390,7 @@ var tools = [
         weekdays: {
           type: "array",
           items: { type: "number", enum: [1, 2, 3, 4, 5, 6, 7] },
-          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, characteristic-trigger automations (create) fire every day; time-of-day automations (create_time) auto-fill all 7 days since iOS 15+ marks time-conditional automations without weekday gating as "unreliable". Setting time_after/time_before on create with no weekdays also auto-fills all 7 days and sets `weekdays_auto_filled: true` in the response. (create / create_time actions)'
+          description: 'Restrict the automation to fire only on these weekdays (1=Sun, 2=Mon, ..., 7=Sat). When omitted, characteristic-trigger automations (create) fire every day; time-of-day automations (create_time) auto-fill all 7 days since iOS 15+ marks time-conditional automations without weekday gating as "unreliable". Setting time_after/time_before on create with no weekdays also auto-fills all 7 days and sets `weekdays_auto_filled: true` in the response. On edit, weekdays replaces the weekday gate and [] means every day; a time-based result without a gate is auto-filled the same way. (create / create_time / edit actions)'
         },
         conditions: {
           type: "array",
@@ -17403,23 +17407,27 @@ var tools = [
             required: ["accessory", "value"],
             anyOf: [{ required: ["property"] }, { required: ["characteristic"] }]
           },
-          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. (create / create_time actions)" + rowServiceSelectorNote
+          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. On edit, conditions replaces every characteristic condition of the automation and [] removes them; time and unrecognized conditions are kept. (create / create_time / edit actions)" + rowServiceSelectorNote
         },
         time_after: {
           type: "array",
           items: { type: "string" },
-          description: 'Time predicates ANDed into the trigger so it only fires after the given time. Same vocabulary as the `time` field: "HH:MM" for a wall-clock time (zero-padded, e.g. "07:00") or "<sunrise|sunset>[\xB1N]" where N is minutes (e.g., "sunset-30", "sunrise+15", "sunset"). Offsets larger than 1440 minutes are rejected. Combine with time_before for a window (e.g., time_after=["07:00"] + time_before=["20:30"] for "only during the day", or time_after=["sunset-30"] + time_before=["sunrise+15"] for "between dusk and dawn"). On create_time these are gating predicates on top of the `time` trigger event, not the trigger itself. When set without explicit weekdays, HomeClaw auto-fills all 7 days; see the weekdays field. (create / create_time actions)'
+          description: 'Time predicates ANDed into the trigger so it only fires after the given time. Same vocabulary as the `time` field: "HH:MM" for a wall-clock time (zero-padded, e.g. "07:00") or "<sunrise|sunset>[\xB1N]" where N is minutes (e.g., "sunset-30", "sunrise+15", "sunset"). Offsets larger than 1440 minutes are rejected. Combine with time_before for a window (e.g., time_after=["07:00"] + time_before=["20:30"] for "only during the day", or time_after=["sunset-30"] + time_before=["sunrise+15"] for "between dusk and dawn"). On create_time these are gating predicates on top of the `time` trigger event, not the trigger itself. When set without explicit weekdays, HomeClaw auto-fills all 7 days; see the weekdays field. On edit, passing time_after and/or time_before replaces the whole time window (both relations); pass [] for both to remove it. (create / create_time / edit actions)'
         },
         time_before: {
           type: "array",
           items: { type: "string" },
-          description: "Time predicates ANDed into the trigger so it only fires before the given time. Same format and offset rules as time_after. (create / create_time actions)"
+          description: "Time predicates ANDed into the trigger so it only fires before the given time. Same format and offset rules as time_after. (create / create_time / edit actions)"
         },
         duration_seconds: {
           type: "integer",
           minimum: 1,
           maximum: 86400,
-          description: "Auto-revert the trigger's actions after this many seconds (1-86400, i.e. up to 24 hours). Implemented as an HMDurationEvent attached to the trigger's endEvents \u2014 HomeKit handles the revert natively, no follow-up automation required. Common use cases: motion-triggered lights that should turn off again after a delay (e.g. `duration_seconds: 300` for a 5-minute hold), or sunset porch lights that should turn off after an hour. (create / create_time actions)"
+          description: "Auto-revert the trigger's actions after this many seconds (1-86400, i.e. up to 24 hours). Implemented as an HMDurationEvent attached to the trigger's endEvents \u2014 HomeKit handles the revert natively, no follow-up automation required. Common use cases: motion-triggered lights that should turn off again after a delay (e.g. `duration_seconds: 300` for a 5-minute hold), or sunset porch lights that should turn off after an hour. On edit it replaces the automation's end events. (create / create_time / edit actions)"
+        },
+        clear_duration: {
+          type: "boolean",
+          description: "Remove the auto-revert (all end events) from an existing automation. Mutually exclusive with duration_seconds. (edit action)"
         },
         condition: {
           type: "object",
@@ -17433,11 +17441,11 @@ var tools = [
           },
           required: ["accessory", "value"],
           anyOf: [{ required: ["property"] }, { required: ["characteristic"] }],
-          description: "Single characteristic condition (object \u2014 note the singular field name, distinct from the plural `conditions` array used by create / create_time) to append (ANDed) to an existing automation's trigger predicate. To add multiple conditions, call add_condition repeatedly \u2014 each call preserves the trigger UUID, so physical button bindings, Siri references, and other UUID-keyed integrations survive every modification. The read-side decoder (list/get) surfaces the new condition automatically. To replace an existing condition set, delete the automation and recreate it. (add_condition action)"
+          description: "Single characteristic condition (object \u2014 note the singular field name, distinct from the plural `conditions` array used by create / create_time) to append (ANDed) to an existing automation's trigger predicate. To add multiple conditions, call add_condition repeatedly \u2014 each call preserves the trigger UUID, so physical button bindings, Siri references, and other UUID-keyed integrations survive every modification. The read-side decoder (list/get) surfaces the new condition automatically. To replace the existing condition set in place, use action=edit with conditions. (add_condition action)"
         },
         dry_run: {
           type: "boolean",
-          description: "Preview changes without applying (create/create_time/delete/add_condition actions)"
+          description: "Preview changes without applying (create/create_time/delete/add_condition/edit actions)"
         },
         old_accessory: {
           type: "string",
@@ -17829,6 +17837,41 @@ async function handleAutomations(args, send = sendCommand) {
       if (args.home_id) socketArgs.home_id = args.home_id;
       if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
       return send("add_automation_condition", socketArgs);
+    }
+    case "edit": {
+      if (typeof args.id !== "string" || args.id.trim() === "") {
+        throw new Error("id is required for edit action (must be a non-empty string)");
+      }
+      const socketArgs = { id: args.id };
+      if (args.new_name != null) {
+        if (typeof args.new_name !== "string" || args.new_name.trim() === "") {
+          throw new Error("new_name must be a non-empty string when provided");
+        }
+        socketArgs.new_name = args.new_name;
+      }
+      if (args.time != null) socketArgs.time = args.time;
+      for (const key of ["weekdays", "conditions", "time_after", "time_before"]) {
+        if (args[key] == null) continue;
+        if (!Array.isArray(args[key])) throw new Error(`${key} must be an array`);
+        socketArgs[key] = args[key];
+      }
+      const clearDuration = args.clear_duration === true || args.clear_duration === "true";
+      if (args.duration_seconds != null) {
+        if (clearDuration) throw new Error("Pass either duration_seconds or clear_duration, not both");
+        const d = args.duration_seconds;
+        if (!Number.isInteger(d) || d < 1 || d > 86400) {
+          throw new Error("duration_seconds must be an integer between 1 and 86400 (24 hours)");
+        }
+        socketArgs.duration_seconds = String(d);
+      }
+      if (clearDuration) socketArgs.clear_duration = "true";
+      const editKeys = ["new_name", "time", "weekdays", "conditions", "time_after", "time_before", "duration_seconds", "clear_duration"];
+      if (!editKeys.some((key) => Object.prototype.hasOwnProperty.call(socketArgs, key))) {
+        throw new Error(`edit needs at least one of: ${editKeys.join(", ")}`);
+      }
+      if (args.home_id) socketArgs.home_id = args.home_id;
+      if (args.dry_run === true || args.dry_run === "true") socketArgs.dry_run = "true";
+      return send("edit_automation", socketArgs);
     }
     case "migrate_actions": {
       if (typeof args.old_accessory !== "string" || args.old_accessory.trim() === "") {

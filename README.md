@@ -191,7 +191,7 @@ The stdio MCP server wraps `homeclaw-cli` and exposes these tools:
 | `homekit_scenes` | List, get details, trigger, import, or delete scenes |
 | `homekit_device_map` | LLM-optimized device map with semantic types and aliases |
 | `homekit_manage` | Manage home structure: rename accessories, individual services, and rooms; set a switch/outlet's Display As; list and manage accessory groups; create/remove rooms and zones, manage zone membership |
-| `homekit_automations` | Manage automations: list, create button-press triggers (single/double/long), link to scenes, enable/disable |
+| `homekit_automations` | Manage automations: list, create (button, sensor or time-of-day triggers with conditions, weekdays and auto-revert), edit in place, add conditions, link to scenes, enable/disable, plan accessory replacement |
 | `homekit_events` | Query recent HomeKit events (characteristic changes, reachability changes, scene triggers, control actions) |
 | `homekit_webhook` | Manage webhook configuration: setup (configure + auto-test), test, reset circuit breaker, status |
 | `homekit_config` | View or update configuration (set active home, filtering) |
@@ -301,6 +301,12 @@ homeclaw-cli automations delete "<name-or-uuid>"             # Delete automation
 homeclaw-cli automations enable "<name-or-uuid>"             # Enable
 homeclaw-cli automations disable "<name-or-uuid>"            # Disable
 
+# Edit in place (keeps the UUID; only the options passed change)
+homeclaw-cli automations edit "Coffee Maker" --time 06:45 --days mon,tue,wed,thu,fri,sat
+homeclaw-cli automations edit "Hall Motion" --time-after sunset --time-before sunrise --duration 300
+homeclaw-cli automations edit "Porch Lights" --condition "Front Door:contact_state:0" --dry-run
+homeclaw-cli automations edit "Porch Lights" --name "Porch at Dusk" --clear-duration
+
 # Replacing an accessory: plan which automation actions move (writes nothing)
 homeclaw-cli automations migrate-actions --replace-accessory "<old-uuid>=<new-uuid>[,<new-uuid>]"
 homeclaw-cli automations migrate-actions --replace-accessory "<old>=<new>" --automation "<name-or-uuid>" --json
@@ -378,6 +384,23 @@ homeclaw-cli automations add-condition "Porch Lights" \
 - **Without a selector** on a property that exists on several services, HomeClaw keeps the old behavior (the first service) so existing scene JSON keeps working, but the response carries a `warnings` entry naming every candidate. Add a selector to silence it.
 - Two actions on the same accessory and property are allowed when they target different services. The same service twice is rejected.
 - `get-scene`, `automations get`, and dry-run previews emit `service_name`, `service_id`, and `service_index` on rows whose accessory has more than one service carrying that property, so their JSON round-trips through `import-scene` / `update-scene` without collapsing gangs. Rows on single-service accessories are unchanged.
+
+### Editing an Automation in Place
+
+`automations edit` changes an existing automation without deleting it, so its UUID stays the same and button bindings, Siri references and integrations keep working. Only the options you pass change:
+
+| Option | Effect | Clear with |
+|--------|--------|------------|
+| `--name` | Rename (the only edit Home app timer automations accept) | |
+| `--time` | Replace the trigger event(s) with a time of day (same values as `create-time`) | |
+| `--days` | Replace the weekday gate | `--every-day` |
+| `--condition` / `--condition-json` | Replace **all** characteristic conditions | `--clear-conditions` |
+| `--time-after` / `--time-before` | Replace the **whole** time window | `--clear-time-window` |
+| `--duration` | Set the auto-revert | `--clear-duration` |
+
+Conditions of a kind you don't replace are kept as they are, including ones HomeClaw can't decode, so changing the time window never drops a condition the Home app wrote. A time-based result without a weekday gate gets all 7 days filled in, as on `create-time`.
+
+Everything is validated before the first write. `--dry-run` shows `before`, `planned` and `changes`. A real run writes the predicate, weekdays, events, end events and name in that order; if a step fails, the steps already written are restored and the error says which. Afterwards the automation is re-read and compared with the plan: `"verified": false` lists the `mismatches`. Over MCP this is `homekit_automations` with `action: "edit"` (`new_name`, `time`, `weekdays`, `conditions`, `time_after`, `time_before`, `duration_seconds`, `clear_duration`; an empty array clears).
 
 ### Replacing an Accessory in Automations
 

@@ -1473,6 +1473,93 @@ final class SocketServer: @unchecked Sendable {
                     homeID: args["home_id"] as? String
                 )
 
+            case "edit_automation":
+                // Modify-in-place verb (preserves the trigger UUID). Every field is
+                // optional; presence decides what changes, so absent and empty differ:
+                // `weekdays: []` means every day, `conditions: []` removes the
+                // characteristic conditions, and passing `time_after` and/or
+                // `time_before` replaces the whole time window ([] + [] removes it).
+                guard let idRaw = args["id"] as? String else {
+                    return encodeResponse(success: false, error: "Missing 'id' argument")
+                }
+                let id = idRaw.trimmingCharacters(in: .whitespaces)
+                guard !id.isEmpty else {
+                    return encodeResponse(success: false, error: "'id' argument must be non-empty (after trimming whitespace)")
+                }
+                var newName: String?
+                if let raw = args["new_name"] {
+                    guard let s = raw as? String, !s.trimmingCharacters(in: .whitespaces).isEmpty else {
+                        return encodeResponse(success: false, error: "'new_name' must be a non-empty string when provided")
+                    }
+                    newName = s
+                }
+                var time: String?
+                if let raw = args["time"] {
+                    guard let s = raw as? String else {
+                        return encodeResponse(success: false, error: "'time' must be a string when provided")
+                    }
+                    do {
+                        _ = try TimeSpec.parse(s)
+                    } catch let err as TimeSpec.ParseError {
+                        return encodeResponse(success: false, error: "Invalid 'time' argument: \(err.message)")
+                    }
+                    time = s
+                }
+                let weekdays: [Int]?
+                let conditions: [[String: String]]?
+                var timeConditions: [TimeCondition]?
+                do {
+                    weekdays = args["weekdays"] == nil ? nil : try Self.parseWeekdaysArg(args["weekdays"])
+                    conditions = args["conditions"] == nil
+                        ? nil : (try Self.parseAccessoryRowsArg(args["conditions"], fieldName: "conditions") ?? [])
+                    if args["time_after"] != nil || args["time_before"] != nil {
+                        var parsed: [TimeCondition] = []
+                        for (key, relation) in [("time_after", TimeCondition.Relation.after), ("time_before", .before)] {
+                            for raw in try Self.parseStringArrayArg(args[key], fieldName: key) {
+                                guard let tc = TimeCondition.parse(raw, relation: relation) else {
+                                    return encodeResponse(success: false,
+                                        error: "Invalid '\(key)' value '\(raw)'. Use a clock time 'HH:MM' (zero-padded) or sunrise/sunset with optional ±N minutes (e.g. 'sunset-30').")
+                                }
+                                parsed.append(tc)
+                            }
+                        }
+                        timeConditions = parsed
+                    }
+                } catch let err as WeekdaysArgError {
+                    return encodeResponse(success: false, error: err.message)
+                } catch let err as AccessoryRowsArgError {
+                    return encodeResponse(success: false, error: err.message)
+                } catch let err as StringArrayArgError {
+                    return encodeResponse(success: false, error: err.message)
+                }
+                // Same absent-vs-unparseable discipline as create_time_automation.
+                let durationSeconds: Int?
+                if let raw = args["duration_seconds"] {
+                    let isBool = (raw as? NSNumber).map { CFGetTypeID($0) == CFBooleanGetTypeID() } ?? false
+                    let parsed: Int? = isBool ? nil : ((raw as? Int) ?? (raw as? String).flatMap(Int.init))
+                    guard let parsed, (1...86400).contains(parsed) else {
+                        return encodeResponse(
+                            success: false,
+                            error: "'duration_seconds' must be a positive integer between 1 and 86400 (24 hours)"
+                        )
+                    }
+                    durationSeconds = parsed
+                } else {
+                    durationSeconds = nil
+                }
+                result = try await hk.editAutomation(
+                    id: id,
+                    newName: newName,
+                    time: time,
+                    weekdays: weekdays,
+                    conditions: conditions,
+                    timeConditions: timeConditions,
+                    durationSeconds: durationSeconds,
+                    clearDuration: parseBool(args, key: "clear_duration"),
+                    homeID: args["home_id"] as? String,
+                    dryRun: parseBool(args, key: "dry_run")
+                )
+
             case "add_automation_condition":
                 // Wire contract: flat args (`accessory`, `property`, `value`, `room`) — the
                 // MCP/JS handler unpacks the nested `condition` object into these flat
