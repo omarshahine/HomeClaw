@@ -2631,6 +2631,11 @@ final class HomeKitManager: NSObject, Observable {
             } else {
                 throw ControlError.accessoryNotFound(condAccessoryID)
             }
+            // Same visibility rule as action rows: a filtered-out accessory is
+            // reported as not found rather than bound into the predicate.
+            guard isAccessoryAllowed(condAccessory) else {
+                throw ControlError.accessoryNotFound(condAccessoryID)
+            }
             guard let (condChar, warning) = try resolveRowCharacteristic(
                 property: condProperty, on: condAccessory, row: cond, rowLabel: "Condition \(offset + 1)"
             ) else {
