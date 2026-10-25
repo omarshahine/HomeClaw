@@ -6,5 +6,5 @@ New
 - Reachability events: HomeClaw now records when an accessory stops responding and when it comes back. Webhook triggers can opt in to these.
 
 Fixed
-- Sunrise and sunset conditions now read back as before or after sunset instead of unknown.
+- Sunrise and sunset conditions now read back as before or after sunrise or sunset instead of unknown.
 - Updated the bundled MCP SDK and npm to fix security advisories.
