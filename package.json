@@ -18,6 +18,13 @@
     "esbuild": "^0.28.1"
   },
   "overrides": {
-    "undici": "8.10.2"
+    "undici": "8.12.3",
+    "openclaw": {
+      "npm": "$npm",
+      "zod": "4.6.7"
+    }
+  },
+  "dependencies": {
+    "npm": "file:vendor/npm-12.2.1-security.20261024.tgz"
   }
 }
