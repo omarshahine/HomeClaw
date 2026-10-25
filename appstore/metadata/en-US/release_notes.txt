@@ -1,5 +1,10 @@
 New
 - Pick a button or switch: scenes and automations can now target one service on accessories that have several of the same kind, such as a dual relay or a multi-gang switch. Add service_name, service_id or service_index to an action or condition. Scenes read back with the service they use, so you can export and re-import them without losing it. When a row could match more than one service, HomeClaw now tells you instead of quietly picking the first.
+- Edit an automation in place: the new automations edit command changes an automation's name, time, weekdays, conditions, time window or auto-revert without deleting and recreating it. Preview with --dry-run, and HomeClaw checks the result after writing.
 - Replace an accessory: the new automations migrate-actions command plans moving an old accessory's actions in your automations onto its replacement. It shows each change before anything is written. Scenes in your Scenes list can be updated with --apply. Actions built into an automation can only be edited by Apple's Home app, so for those you get step-by-step Home app instructions.
 - Matter details: Matter accessories now show their Matter node ID in list, get, search and device-map, so you can match them to what your network sees.
 - Reachability events: HomeClaw now records when an accessory stops responding and when it comes back. Webhook triggers can opt in to these.
+
+Fixed
+- Sunrise and sunset conditions now read back as before or after sunset instead of unknown.
+- Updated the bundled MCP SDK and npm to fix security advisories.

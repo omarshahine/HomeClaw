@@ -22,6 +22,12 @@ import MarkdownPage from '../layouts/MarkdownPage.astro';
       the first. <code>automations create</code> also takes <code>--action-json</code> and <code>--condition-json</code>.
     </li>
     <li>
+      <strong>Edit an automation in place</strong>: <code>automations edit</code> changes the name, time, weekdays,
+      conditions, time window or auto-revert of an existing automation and keeps its ID. It writes only the fields you
+      pass, previews with <code>--dry-run</code>, and re-reads the automation afterwards to confirm. Thanks to
+      kegelmeier.
+    </li>
+    <li>
       <strong>Replace an accessory</strong>: <code>automations migrate-actions</code> plans moving an old accessory's
       automation actions onto its replacement and writes nothing unless you pass <code>--apply</code>. Scenes in the
       Scenes list are edited in place and checked afterwards. Actions owned by an automation can only be edited by
@@ -37,6 +43,12 @@ import MarkdownPage from '../layouts/MarkdownPage.astro';
       accessory stops responding or comes back. Webhook triggers opt in with the characteristic
       <code>reachable</code>.
     </li>
+  </ul>
+  <h4>Fixed</h4>
+  <ul>
+    <li>Sunrise and sunset conditions decode as <code>before</code> or <code>after</code> instead of <code>unknown</code>.</li>
+    <li>Conditions no longer resolve to an accessory hidden by the device filter.</li>
+    <li>Updated the bundled MCP SDK and npm for security advisories.</li>
   </ul>
 
   <hr />
