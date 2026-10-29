@@ -17536,6 +17536,7 @@ function createSocketClient(socketPaths, timeoutMs = TIMEOUT_MS) {
       function connect(index) {
         const path = socketPaths[index];
         const socket = createConnection(path);
+        socket.setEncoding("utf8");
         let connected = false;
         let data = "";
         socket.on("connect", () => {

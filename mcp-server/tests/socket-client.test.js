@@ -29,7 +29,7 @@ function fixture(t, timeoutMs = 1000) {
         if (!data.includes('\n')) return;
         const request = JSON.parse(data);
         requests.push(request);
-        const response = respond(request);
+        const response = respond(request, socket);
         if (response !== undefined) {
           socket.end(typeof response === 'string' ? response : JSON.stringify(response));
         }
@@ -97,6 +97,22 @@ test('reports every attempted path when neither socket accepts connections', asy
     assert.ok(error.message.includes(`${paths[1]}: ENOENT`));
     return true;
   });
+});
+
+test('preserves UTF-8 response strings split across socket data events', async t => {
+  const { paths, listen, send } = fixture(t);
+  const expected = { name: 'Café 💡' };
+  const response = Buffer.from(JSON.stringify({ success: true, data: expected }));
+  const accentSplit = response.indexOf(Buffer.from('é')) + 1;
+  const emojiSplit = response.indexOf(Buffer.from('💡')) + 2;
+  await listen(paths[0], (_request, socket) => {
+    socket.write(response.subarray(0, accentSplit));
+    setTimeout(() => {
+      socket.write(response.subarray(accentSplit, emojiSplit));
+      setTimeout(() => socket.end(response.subarray(emojiSplit)), 20);
+    }, 20);
+  });
+  assert.deepEqual(await send('status'), expected);
 });
 
 for (const [name, respond, error] of [
