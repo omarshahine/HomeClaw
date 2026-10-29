@@ -1167,6 +1167,18 @@ App bundle layout (after build):
 
 ## Debugging
 
+The Node stdio MCP bridge checks the App Group socket at
+`~/Library/Group Containers/group.com.shahine.homeclaw/homeclaw.sock` on each
+request, then tries `/tmp/homeclaw.sock` if the preferred socket is missing or
+refuses the connection. Claude Desktop can start before HomeClaw; a later call
+will discover the running app without restarting Claude. Fallback happens only
+before connecting, so a command is never replayed after it has been sent.
+
+If the bridge cannot connect, its error lists the attempted paths and connection
+errors. Launch HomeClaw, or restart it if it is already running. After installing
+an updated HomeClaw app, restart Claude Desktop to load the updated bundled MCP
+server. No socket symlink is needed.
+
 ```bash
 # Check if HomeClaw is running and HomeKit is ready
 echo '{"command":"status"}' | nc -U ~/Library/Group\ Containers/group.com.shahine.homeclaw/homeclaw.sock

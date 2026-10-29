@@ -17517,7 +17517,6 @@ var tools = [
 
 // lib/socket-client.js
 import { createConnection } from "node:net";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 var APP_GROUP_SOCKET = join(
@@ -17528,48 +17527,62 @@ var APP_GROUP_SOCKET = join(
   "homeclaw.sock"
 );
 var LEGACY_SOCKET = "/tmp/homeclaw.sock";
-var SOCKET_PATH = existsSync(APP_GROUP_SOCKET) ? APP_GROUP_SOCKET : LEGACY_SOCKET;
 var TIMEOUT_MS = 3e4;
-function sendCommand(command, args = {}) {
-  return new Promise((resolve, reject) => {
-    const socket = createConnection(SOCKET_PATH);
+function createSocketClient(socketPaths, timeoutMs = TIMEOUT_MS) {
+  return function sendCommand2(command, args = {}) {
     const request = JSON.stringify({ command, args }) + "\n";
-    let data = "";
-    socket.on("connect", () => socket.write(request));
-    socket.on("data", (chunk) => {
-      data += chunk;
-    });
-    socket.on("end", () => {
-      try {
-        const parsed = JSON.parse(data);
-        if (!parsed.success) {
-          reject(new Error(parsed.error || "Unknown error from HomeClaw"));
-        } else {
-          resolve(parsed.data);
-        }
-      } catch (e) {
-        reject(new Error(`Failed to parse response: ${e.message}`));
+    return new Promise((resolve, reject) => {
+      const failures = [];
+      function connect(index) {
+        const path = socketPaths[index];
+        const socket = createConnection(path);
+        let connected = false;
+        let data = "";
+        socket.on("connect", () => {
+          connected = true;
+          socket.write(request);
+        });
+        socket.on("data", (chunk) => {
+          data += chunk;
+        });
+        socket.on("end", () => {
+          socket.destroy();
+          try {
+            const parsed = JSON.parse(data);
+            if (!parsed.success) {
+              reject(new Error(parsed.error || "Unknown error from HomeClaw"));
+            } else {
+              resolve(parsed.data);
+            }
+          } catch (e) {
+            reject(new Error(`Failed to parse response: ${e.message}`));
+          }
+        });
+        socket.on("error", (err) => {
+          socket.destroy();
+          if (!connected && (err.code === "ENOENT" || err.code === "ECONNREFUSED")) {
+            failures.push(`${path}: ${err.code}`);
+            if (index + 1 < socketPaths.length) {
+              connect(index + 1);
+            } else {
+              reject(new Error(
+                `Cannot connect to HomeClaw (${failures.join("; ")}). Launch HomeClaw.app first, or restart it if it is already running.`
+              ));
+            }
+          } else {
+            reject(err);
+          }
+        });
+        socket.setTimeout(timeoutMs, () => {
+          socket.destroy();
+          reject(new Error("HomeClaw request timed out after " + timeoutMs / 1e3 + "s"));
+        });
       }
+      connect(0);
     });
-    socket.on("error", (err) => {
-      if (err.code === "ENOENT") {
-        reject(new Error(
-          "HomeClaw is not running (socket not found at " + SOCKET_PATH + "). Launch HomeClaw.app first."
-        ));
-      } else if (err.code === "ECONNREFUSED") {
-        reject(new Error(
-          "HomeClaw socket exists but connection was refused. Try restarting the app."
-        ));
-      } else {
-        reject(err);
-      }
-    });
-    socket.setTimeout(TIMEOUT_MS, () => {
-      socket.destroy();
-      reject(new Error("HomeClaw request timed out after " + TIMEOUT_MS / 1e3 + "s"));
-    });
-  });
+  };
 }
+var sendCommand = createSocketClient([APP_GROUP_SOCKET, LEGACY_SOCKET]);
 
 // lib/freshness.js
 function fail(message) {
@@ -18099,7 +18112,7 @@ async function handleConfig(args) {
 
 // mcp-server/server.js
 var server = new Server(
-  { name: "homeclaw", version: "1.0.15" },
+  { name: "homeclaw", version: "1.0.16" },
   { capabilities: { tools: {} } }
 );
 server.setRequestHandler(ListToolsRequestSchema, async () => ({

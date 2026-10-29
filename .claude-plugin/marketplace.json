@@ -8,7 +8,7 @@
       "name": "homeclaw",
       "source": "./",
       "description": "HomeKit smart home control via MCP - control lights, locks, thermostats, and scenes",
-      "version": "1.0.15",
+      "version": "1.0.16",
       "keywords": [
         "homekit",
         "smart-home",
