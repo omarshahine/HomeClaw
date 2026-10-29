@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readdirSync, rmdirSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -97,6 +97,30 @@ test('reports every attempted path when neither socket accepts connections', asy
     assert.ok(error.message.includes(`${paths[1]}: ENOENT`));
     return true;
   });
+});
+
+test('rejects a fallback socket owned by a different user before sending credentials', async t => {
+  const { paths, listen } = fixture(t);
+  const legacy = await listen(paths[1]);
+  // Simulate a different caller UID without chown, sudo, or account changes.
+  const send = createSocketClient(paths, 1000, process.getuid() + 1);
+  await assert.rejects(send('set_webhook', { token: 'fixture-token' }), /Refusing untrusted HomeClaw socket/);
+  assert.equal(legacy.requests.length, 0);
+});
+
+test('rejects a symlink fallback even if its target is a current-user socket', async t => {
+  const { paths, listen, send } = fixture(t);
+  const target = paths[0] + '.target';
+  const listener = await listen(target);
+  symlinkSync(target, paths[1]);
+  await assert.rejects(send('set_webhook', { token: 'fixture-token' }), /Refusing untrusted HomeClaw socket/);
+  assert.equal(listener.requests.length, 0);
+});
+
+test('rejects a non-socket fallback', async t => {
+  const { paths, send } = fixture(t);
+  writeFileSync(paths[1], 'not a socket');
+  await assert.rejects(send('status'), /Refusing untrusted HomeClaw socket/);
 });
 
 test('preserves UTF-8 response strings split across socket data events', async t => {

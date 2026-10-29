@@ -1172,7 +1172,9 @@ The Node stdio MCP bridge checks the App Group socket at
 request, then tries `/tmp/homeclaw.sock` if the preferred socket is missing or
 refuses the connection. Claude Desktop can start before HomeClaw; a later call
 will discover the running app without restarting Claude. Fallback happens only
-before connecting, so a command is never replayed after it has been sent.
+before connecting, so a command is never replayed after it has been sent. Socket
+files must belong to the current user; symlinks and non-socket files are rejected
+before any command is sent.
 
 If the bridge cannot connect, its error lists the attempted paths and connection
 errors. Launch HomeClaw, or restart it if it is already running. After installing
