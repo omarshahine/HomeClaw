@@ -357,6 +357,8 @@ OUTPUT_FORMAT=json homeclaw-cli list          # Force JSON via env var
 
 **Inline vs scene:** Use `--action` for simple button-to-device mappings. This creates a scene named after the automation. Use `--scene` to trigger an existing scene instead. Note: Apple's Home app uses a private API for hidden automation-only action sets; inline actions created via HomeClaw will appear as visible scenes in the Home app.
 
+Doorbells exposing `input_event` on a HomeKit Doorbell service also support button automations (for example, `--accessory "Front Doorbell" --press single`). A lone doorbell needs no `--service-index`. When selecting among multiple button services, the index must match an actual `ServiceLabelIndex`; it is never an array position or an assumed doorbell index. Ambiguous matches are rejected.
+
 **Button modes:** Some buttons (like Aqara AR009) support fast mode (2 buttons, single press each, instant response) or multi-event mode (1 button, single/double/long press, ~300ms delay). Use `--service-index` to target a specific button in fast mode.
 
 Note that `--service-index` on `automations create` picks the **trigger** button. The service an inline action or condition writes to is picked per row, as below.
