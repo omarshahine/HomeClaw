@@ -3832,53 +3832,18 @@ final class HomeKitManager: NSObject, Observable {
         on accessory: HMAccessory,
         serviceIndex: Int?
     ) throws -> HMCharacteristic {
-        // Find all StatelessProgrammableSwitch services
-        let switchServices = accessory.services.filter {
-            $0.serviceType == HMServiceTypeStatelessProgrammableSwitch
-        }
-
-        guard !switchServices.isEmpty else {
-            throw ControlError.serviceNotFound(
-                "'\(accessory.name)' has no programmable switch services"
-            )
-        }
-
-        let targetService: HMService
-        if let serviceIndex {
-            // Match by ServiceLabelIndex characteristic value
-            let labelIndexType = CharacteristicMapper.serviceLabelIndexType
-            guard let matched = switchServices.first(where: { service in
-                guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
-                      let value = indexChar.value as? NSNumber
-                else { return false }
-                return value.intValue == serviceIndex
-            }) else {
-                let available = switchServices.compactMap { service -> String? in
-                    guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
-                          let value = indexChar.value as? NSNumber
-                    else { return nil }
-                    return "\(value.intValue)"
-                }
-                throw ControlError.serviceNotFound(
-                    "No button with service_index \(serviceIndex) on '\(accessory.name)'. Available: \(available.joined(separator: ", "))"
-                )
+        let targetService = try Self.selectInputEventService(
+            from: accessory.services,
+            accessoryName: accessory.name,
+            serviceIndex: serviceIndex,
+            serviceType: { $0.serviceType },
+            labelIndex: { service in
+                guard let indexChar = service.characteristics.first(where: {
+                    $0.characteristicType == CharacteristicMapper.serviceLabelIndexType
+                }), let value = indexChar.value as? NSNumber else { return nil }
+                return value.intValue
             }
-            targetService = matched
-        } else if switchServices.count == 1 {
-            targetService = switchServices[0]
-        } else {
-            // Multiple switch services, index required
-            let labelIndexType = CharacteristicMapper.serviceLabelIndexType
-            let indices = switchServices.compactMap { service -> String? in
-                guard let indexChar = service.characteristics.first(where: { $0.characteristicType == labelIndexType }),
-                      let value = indexChar.value as? NSNumber
-                else { return nil }
-                return "\(value.intValue)"
-            }
-            throw ControlError.serviceNotFound(
-                "'\(accessory.name)' has \(switchServices.count) buttons. Specify --service-index (\(indices.joined(separator: ", ")))"
-            )
-        }
+        )
 
         // Find the input_event characteristic on the selected service
         guard let inputEvent = targetService.characteristics.first(where: {
@@ -3890,6 +3855,54 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         return inputEvent
+    }
+
+    /// Resolve button services using plain values so selection can be tested without
+    /// constructing HomeKit objects. Doorbells carry input_event on their Doorbell
+    /// service; camera, motion and other services must never become button targets.
+    nonisolated static func selectInputEventService<T>(
+        from services: [T],
+        accessoryName: String,
+        serviceIndex: Int?,
+        serviceType: (T) -> String,
+        labelIndex: (T) -> Int?
+    ) throws -> T {
+        let candidates = services.filter {
+            let type = serviceType($0)
+            return type == HMServiceTypeStatelessProgrammableSwitch || type == HMServiceTypeDoorbell
+        }
+        let indices = candidates.compactMap(labelIndex)
+        let available = indices.map(String.init).joined(separator: ", ")
+        let pick = pickService(from: candidates) { service in
+            guard let serviceIndex else { return true }
+            return labelIndex(service) == serviceIndex
+        }
+        switch pick {
+        case .found(let service):
+            return service
+        case .noCandidates:
+            throw ControlError.serviceNotFound(
+                "'\(accessoryName)' has no programmable switch or doorbell services"
+            )
+        case .noMatch:
+            let requested = serviceIndex.map(String.init) ?? "unspecified"
+            throw ControlError.serviceNotFound(
+                "No button with service_index \(requested) on '\(accessoryName)'. Available: \(available)"
+            )
+        case .ambiguous(let matches):
+            if let serviceIndex {
+                throw ControlError.serviceNotFound(
+                    "'\(accessoryName)' has \(matches.count) button services with service_index \(serviceIndex); cannot select a unique button"
+                )
+            }
+            let hasUniqueIndex = indices.contains { index in indices.filter { $0 == index }.count == 1 }
+            let hint = hasUniqueIndex
+                ? "Specify --service-index using a unique ServiceLabelIndex (\(available))"
+                : "No unique service_index is available"
+            throw ControlError.serviceNotFound(
+                "'\(accessoryName)' has \(matches.count) button services. \(hint)"
+            )
+        }
     }
 
     /// Finds a characteristic by its human-readable name on any service of the accessory.
