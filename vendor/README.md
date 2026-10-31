@@ -79,7 +79,9 @@ returns Matcher objects. The root postinstall runs
 method in the systemd environment-file pattern consumer. It checks the exact
 locked version and complete file SHA-256 before and after the one-expression
 change, is idempotent, rejects upstream drift, and refuses to patch dependency
-trees outside this repository. No installed/global OpenClaw host is modified.
+trees outside this repository. If OpenClaw is absent, workspace-only and
+lockfile-only operations safely skip the patch. No installed/global OpenClaw
+host is modified.
 
 When intentionally installing with `--ignore-scripts`, run
 `node scripts/patch-openclaw-minimatch.mjs` before builds, tests, or using the

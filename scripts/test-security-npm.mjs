@@ -152,6 +152,31 @@ test('OpenClaw compatibility patch is idempotent and rejects upstream drift', t 
   assert.match(run().stderr, /outside this repository/);
 });
 
+test('root install hook supports lockfile-only and MCP-only workspace operations', t => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'openclaw-absent-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(join(root, 'scripts'));
+  fs.mkdirSync(join(root, 'mcp-server'));
+  fs.copyFileSync(new URL('./patch-openclaw-minimatch.mjs', import.meta.url), join(root, 'scripts/patch-openclaw-minimatch.mjs'));
+  fs.writeFileSync(join(root, 'package.json'), JSON.stringify({
+    name: 'fixture-root', version: '1.0.0', private: true,
+    workspaces: ['mcp-server'], scripts: { postinstall: 'node scripts/patch-openclaw-minimatch.mjs' },
+  }));
+  fs.writeFileSync(join(root, 'mcp-server/package.json'), JSON.stringify({ name: '@homeclaw/mcp-server', version: '1.0.0' }));
+  for (const args of [['install', '--package-lock-only'], ['ci', '--workspace=@homeclaw/mcp-server']]) {
+    const result = spawnSync(process.execPath, [join(npmRoot, 'bin/npm-cli.js'), ...args, '--offline', '--cache', join(root, 'cache')], {
+      cwd: root, encoding: 'utf8', timeout: 15000,
+      env: { PATH: process.env.PATH, HOME: root,
+        NPM_CONFIG_USERCONFIG: join(root, 'user.npmrc'),
+        NPM_CONFIG_GLOBALCONFIG: join(root, 'global.npmrc') },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /OpenClaw is not installed/);
+    assert.equal(fs.existsSync(join(root, 'node_modules/openclaw')), false);
+  }
+});
+
 test('patched npm installs, discovers and packs workspaces offline', t => {
   const root = fs.mkdtempSync(join(tmpdir(), 'npm-workspace-compat-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -7,7 +7,15 @@ import { join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = realpathSync(fileURLToPath(new URL('../', import.meta.url)));
-const host = realpathSync(join(root, 'node_modules/openclaw'));
+const hostPath = join(root, 'node_modules/openclaw');
+try {
+  lstatSync(hostPath);
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+  console.log('OpenClaw is not installed; compatibility patch is not needed');
+  process.exit(0);
+}
+const host = realpathSync(hostPath);
 assert.ok(host.startsWith(join(root, 'node_modules') + sep), 'Refusing to patch dependencies outside this repository');
 const manifest = JSON.parse(readFileSync(join(host, 'package.json'), 'utf8'));
 assert.equal(manifest.name, 'openclaw');
