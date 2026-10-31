@@ -27,7 +27,8 @@ override alone failed dependency-tree/clean-install checks.
 
 Clean installs consume the already-patched archive, including when install
 scripts are disabled. The archive is checked by the package lock's SHA-512
-integrity. No postinstall patch hook or npm security configuration is required.
+integrity. The npm archive needs no install hook or npm security configuration. A separate
+OpenClaw consumer compatibility patch is described below.
 
 Regenerate manually from the repository root:
 
@@ -69,3 +70,19 @@ regresses cancellation and amplification behavior, and exercises npm install,
 workspace discovery, and package packing in an offline fixture. It also checks
 OpenClaw's declared limiter API. The lockfile keeps p-limit 7.3.3 for OpenClaw
 and the separate compatible 2.3.0 copy for legacy p-locate.
+
+## OpenClaw minimatch consumer compatibility
+
+OpenClaw 2026.10.5 expects RegExp objects in `Minimatch.set`, while minimatch 11
+returns Matcher objects. The root postinstall runs
+`scripts/patch-openclaw-minimatch.mjs` to accept the new objects' public `test`
+method in the systemd environment-file pattern consumer. It checks the exact
+locked version and complete file SHA-256 before and after the one-expression
+change, is idempotent, rejects upstream drift, and refuses to patch dependency
+trees outside this repository. No installed/global OpenClaw host is modified.
+
+When intentionally installing with `--ignore-scripts`, run
+`node scripts/patch-openclaw-minimatch.mjs` before builds, tests, or using the
+local OpenClaw dependency. The regression suite executes the installed wildcard
+consumer without initializing a host, and verifies patch idempotence and drift
+rejection. Review or remove this patch when updating the locked host version.

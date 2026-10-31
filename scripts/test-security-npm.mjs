@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 
 const require = createRequire(import.meta.url);
@@ -103,6 +104,52 @@ test('OpenClaw resolves its declared limiter while legacy consumers retain their
     active--;
   })));
   assert.equal(peak, 2);
+});
+
+test('installed OpenClaw expands wildcard environment-file paths with minimatch 11', async t => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'openclaw-pattern-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  for (const name of ['first.env', 'second.env', 'other.txt']) fs.writeFileSync(join(root, name), 'FIXTURE=true');
+  const source = fs.readFileSync(new URL('../node_modules/openclaw/dist/systemd-service-files-ByFWlfWV.mjs', import.meta.url), 'utf8');
+  const region = source.split('//#region src/daemon/systemd-environment-file-pattern.ts\n')[1]?.split('//#endregion')[0];
+  assert.ok(region, 'Locked consumer region is missing');
+  // Execute the installed consumer's actual function in a context containing only
+  // its filesystem/matcher dependencies; do not initialize an OpenClaw host.
+  const expand = runInNewContext(`(${region.trim()})`, {
+    fs$1: fs.promises, Minimatch: require('minimatch').Minimatch,
+    hasErrnoCode: (error, code) => error?.code === code,
+  });
+  const matches = await expand(join(root, '*.env'));
+  assert.deepEqual(Array.from(matches).sort(), ['first.env', 'second.env'].map(name => join(root, name)));
+  assert.deepEqual(Array.from(await expand(join(root, 'missing*.env'))), []);
+});
+
+test('OpenClaw compatibility patch is idempotent and rejects upstream drift', t => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'openclaw-patch-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const host = join(root, 'node_modules/openclaw');
+  fs.mkdirSync(join(host, 'dist'), { recursive: true });
+  fs.mkdirSync(join(root, 'scripts'));
+  fs.writeFileSync(join(host, 'package.json'), JSON.stringify({ name: 'openclaw', version: '2026.10.5' }));
+  const script = join(root, 'scripts/patch-openclaw-minimatch.mjs');
+  fs.copyFileSync(new URL('./patch-openclaw-minimatch.mjs', import.meta.url), script);
+  const consumer = join(host, 'dist/systemd-service-files-ByFWlfWV.mjs');
+  const installed = fs.readFileSync(new URL('../node_modules/openclaw/dist/systemd-service-files-ByFWlfWV.mjs', import.meta.url), 'utf8');
+  fs.writeFileSync(consumer, installed.replace('part !== null && typeof part === "object" && typeof part.test === "function" && part.test(entry)', 'part instanceof RegExp && part.test(entry)'));
+  const run = () => spawnSync(process.execPath, [script], { encoding: 'utf8', timeout: 2000 });
+  assert.equal(run().status, 0);
+  assert.equal(fs.readFileSync(consumer, 'utf8'), installed);
+  assert.equal(run().status, 0);
+  fs.appendFileSync(consumer, '\n// upstream drift\n');
+  const changed = fs.readFileSync(consumer, 'utf8');
+  const rejected = run();
+  assert.equal(rejected.status, 1);
+  assert.match(rejected.stderr, /consumer changed/);
+  assert.equal(fs.readFileSync(consumer, 'utf8'), changed);
+  const outside = join(root, 'outside-host');
+  fs.renameSync(host, outside);
+  fs.symlinkSync(outside, host, 'dir');
+  assert.match(run().stderr, /outside this repository/);
 });
 
 test('patched npm installs, discovers and packs workspaces offline', t => {
