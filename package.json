@@ -22,9 +22,10 @@
     "openclaw": {
       "npm": "$npm",
       "zod": "4.6.7"
-    }
+    },
+    "minimatch": "11.0.3"
   },
   "dependencies": {
-    "npm": "file:vendor/npm-12.2.1-security.20261024.tgz"
+    "npm": "file:vendor/npm-12.2.1-security.20261031.tgz"
   }
 }
