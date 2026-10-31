@@ -46,6 +46,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Check patched npm security and workspace compatibility
+        run: |
+          npm ls --all
+          node --test scripts/test-security-npm.mjs
+
       - name: Audit the complete dependency tree
         run: npm audit
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild the pinned npm archive with two verified, compatible bundle patches.
+"""Rebuild the pinned npm archive with verified upstream security bundle patches.
 
 Manual developer command only. No install lifecycle hook or npm config changes.
 Downloads remain integrity-pinned; temporary sources are retained for inspection.
@@ -23,10 +23,18 @@ CHECK = parser.parse_args().check
 
 ROOT = Path(__file__).resolve().parent.parent
 VENDOR = ROOT / "vendor"
-VERSION = "12.2.1+security.20261024"
-ARCHIVE = "npm-12.2.1-security.20261024.tgz"
+VERSION = "12.2.1+security.20261031"
+ARCHIVE = "npm-12.2.1-security.20261031.tgz"
 SOURCES = json.loads((VENDOR / "npm-security-sources.json").read_text())
-EXPECTED = {"npm": "12.2.1", "ip-address": "10.7.4", "undici": "6.29.1"}
+EXPECTED = {
+    "npm": "12.2.1", "ip-address": "10.7.4", "undici": "6.29.1",
+    "glob": "14.0.3", "minimatch": "11.0.3", "path-scurry": "3.0.0",
+    "@isaacs/nonrecursive-glob-match": "1.0.3",
+}
+PATCHES = {name: version for name, version in EXPECTED.items() if name != "npm"}
+# npm bundles its dependencies, so root overrides cannot replace these files.
+# Update the bundled consumers' declared ranges as well as the package bytes.
+RANGES = {"glob": "^14.0.3", "minimatch": "^11.0.3", "path-scurry": "^3.0.0"}
 if len(SOURCES) != len(EXPECTED) or {s["name"]: s["version"] for s in SOURCES} != EXPECTED:
     raise ValueError("Unexpected source package set")
 WORK = Path(tempfile.mkdtemp(prefix="npm-security-bundle-"))
@@ -66,35 +74,54 @@ def snapshot(directory):
 packages = {}
 for source in SOURCES:
     url = source["tarball"]
-    expected_url = "https://registry.npmjs.org/{0}/-/{0}-{1}.tgz".format(source["name"], source["version"])
+    expected_url = "https://registry.npmjs.org/{0}/-/{1}-{2}.tgz".format(source["name"], source["name"].split("/")[-1], source["version"])
     if url != expected_url:
         raise ValueError("Only pinned public npm registry URLs are supported")
-    archive = WORK / (source["name"] + ".tgz")
+    archive = WORK / (source["name"].replace("/", "_") + ".tgz")
     with urllib.request.urlopen(url, timeout=90) as response:
         data = response.read()
     integrity = "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode()
     if integrity != source["integrity"]:
         raise ValueError("Source integrity mismatch: " + source["name"])
     archive.write_bytes(data)
-    packages[source["name"]] = unpack(archive, WORK / source["name"])
+    packages[source["name"]] = unpack(archive, WORK / source["name"].replace("/", "_"))
     manifest = json.loads((packages[source["name"]] / "package.json").read_text())
     if manifest["name"] != source["name"] or manifest["version"] != source["version"]:
         raise ValueError("Source manifest mismatch")
 
 package = packages["npm"]
 before = snapshot(package)
-original_manifest = json.loads((package / "package.json").read_text())
-for name in ["ip-address", "undici"]:
+for name in PATCHES:
     target = package / "node_modules" / name
-    target.rename(WORK / ("original-" + name))
+    if target.exists():
+        target.rename(WORK / ("original-" + name.replace("/", "_")))
+    target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(packages[name], target, symlinks=True)
-manifest = dict(original_manifest)
-manifest["version"] = VERSION
-(package / "package.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+
+changed_manifests = {}
+for path in sorted(package.rglob("package.json")):
+    relative = path.relative_to(package).as_posix()
+    # Keep every upstream replacement package byte-for-byte identical.
+    if any(relative.startswith("node_modules/" + name + "/") for name in PATCHES):
+        continue
+    manifest = json.loads(path.read_text())
+    updates = {}
+    for name, version_range in RANGES.items():
+        if name in manifest.get("dependencies", {}):
+            updates[name] = {"from": manifest["dependencies"][name], "to": version_range}
+            manifest["dependencies"][name] = version_range
+    if relative == "package.json":
+        manifest["version"] = VERSION
+    if updates or relative == "package.json":
+        path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    if updates:
+        changed_manifests[relative] = updates
+
 after = snapshot(package)
 changed = sorted(k for k in before.keys() | after.keys() if before.get(k) != after.get(k))
-if any(k != "package.json" and not k.startswith(("node_modules/ip-address/", "node_modules/undici/")) for k in changed):
-    raise ValueError("Unexpected file changes outside the two patched bundles")
+allowed_manifests = {"package.json", *changed_manifests}
+if any(k not in allowed_manifests and not any(k.startswith("node_modules/" + name + "/") for name in PATCHES) for k in changed):
+    raise ValueError("Unexpected file changes outside patched bundles and dependency manifests")
 
 if CHECK:
     archive = VENDOR / ARCHIVE
@@ -103,7 +130,7 @@ if CHECK:
         raise ValueError("Committed archive differs from the pinned patched source tree")
     data = archive.read_bytes()
     provenance = json.loads((VENDOR / "npm-security-provenance.json").read_text())
-    expected = {"archive": ARCHIVE, "packageVersion": VERSION, "sha256": hashlib.sha256(data).hexdigest(), "integrity": "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode(), "sources": SOURCES, "changedFiles": changed, "unchangedOutsidePatchedBundlesAndVersion": True}
+    expected = {"archive": ARCHIVE, "packageVersion": VERSION, "sha256": hashlib.sha256(data).hexdigest(), "integrity": "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode(), "sources": SOURCES, "changedFiles": changed, "changedManifestDependencies": changed_manifests, "unchangedOutsidePatchedBundlesAndManifests": True}
     if provenance != expected:
         raise ValueError("Committed archive provenance mismatch")
     print(json.dumps({"verified": True, "archive": str(archive), "sha256": expected["sha256"], "changedFiles": len(changed)}, indent=2))
@@ -133,6 +160,6 @@ verified = unpack(output, WORK / "verification")
 if snapshot(verified) != after:
     raise ValueError("Generated archive does not match the verified patched tree")
 data = output.read_bytes()
-provenance = {"archive": ARCHIVE, "packageVersion": VERSION, "sha256": hashlib.sha256(data).hexdigest(), "integrity": "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode(), "sources": SOURCES, "changedFiles": changed, "unchangedOutsidePatchedBundlesAndVersion": True}
+provenance = {"archive": ARCHIVE, "packageVersion": VERSION, "sha256": hashlib.sha256(data).hexdigest(), "integrity": "sha512-" + base64.b64encode(hashlib.sha512(data).digest()).decode(), "sources": SOURCES, "changedFiles": changed, "changedManifestDependencies": changed_manifests, "unchangedOutsidePatchedBundlesAndManifests": True}
 (VENDOR / "npm-security-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 print(json.dumps({"archive": str(output), "sha256": provenance["sha256"], "integrity": provenance["integrity"], "changedFiles": len(changed), "temporarySources": str(WORK)}, indent=2))

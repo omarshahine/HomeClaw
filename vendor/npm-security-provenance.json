@@ -1,8 +1,8 @@
 {
-  "archive": "npm-12.2.1-security.20261024.tgz",
-  "packageVersion": "12.2.1+security.20261024",
-  "sha256": "bc845cf944e23b9f15e62d6aecc93d2fee5b74a70d831ac75c0126b43b21afb6",
-  "integrity": "sha512-KI/mGWgcr9vh6q3Wex86veQXBflTjRjODYsMLUs+x+ukDf6hQHbRDww6L3GsTDuFyEk7GlYvtMCj2GOKBBGUZg==",
+  "archive": "npm-12.2.1-security.20261031.tgz",
+  "packageVersion": "12.2.1+security.20261031",
+  "sha256": "30da6d0a20b463c82c85023420643b15f4ab7a8963ac1742bdebf18deb829610",
+  "integrity": "sha512-0UKnnw+Z+nlRg+tB+UpsPlHZasXTxEbQ81kdPMmHTMvCKMCt/OubuFFVNu/RUbDvoCfVZY3SEtBwz17m/YwfzQ==",
   "sources": [
     {
       "name": "npm",
@@ -21,9 +21,132 @@
       "version": "6.29.1",
       "tarball": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
       "integrity": "sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA=="
+    },
+    {
+      "name": "glob",
+      "version": "14.0.3",
+      "tarball": "https://registry.npmjs.org/glob/-/glob-14.0.3.tgz",
+      "integrity": "sha512-A1vjIwC3qpdCso45Iw127gnp7sPhqgY8lUQhDrArIs+GbmfaaVPFuoyy7WyLT9EPZCRZ7j7aLdwUhQmHWesEow=="
+    },
+    {
+      "name": "minimatch",
+      "version": "11.0.3",
+      "tarball": "https://registry.npmjs.org/minimatch/-/minimatch-11.0.3.tgz",
+      "integrity": "sha512-iny/40PEGkNJQ5/Pv6z3nm6FbRAby32GeZRjCUJk2WnNDbgPSTcdI+DDvLqsgBdD4cD5sMtMheqPPnehCCa8Nw=="
+    },
+    {
+      "name": "path-scurry",
+      "version": "3.0.0",
+      "tarball": "https://registry.npmjs.org/path-scurry/-/path-scurry-3.0.0.tgz",
+      "integrity": "sha512-1pTbQqH1wIwMi/eleQ5leFTTCkzFsPcgXNjwOA8YGGW/W4/kHT3dssE7Z6NH+zuqNLOzOB0uaD61yl7cAcVhgg=="
+    },
+    {
+      "name": "@isaacs/nonrecursive-glob-match",
+      "version": "1.0.3",
+      "tarball": "https://registry.npmjs.org/@isaacs/nonrecursive-glob-match/-/nonrecursive-glob-match-1.0.3.tgz",
+      "integrity": "sha512-SI7kyKHq4XXDRozw+r9GlRZkia1ZkFrpLW98r2IC2Bpr8YkFGE3fvjzmxCG0x78A++69HmDNrDvSMYBZmHGpKA=="
     }
   ],
   "changedFiles": [
+    "node_modules/@isaacs/nonrecursive-glob-match/LICENSE.md",
+    "node_modules/@isaacs/nonrecursive-glob-match/README.md",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/index.d.ts",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/index.d.ts.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/index.js",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/index.js.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/index.min.js",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/index.min.js.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/package.json",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/parse-class.d.ts",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/parse-class.d.ts.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/parse-class.js",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/commonjs/parse-class.js.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/index.d.ts",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/index.d.ts.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/index.js",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/index.js.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/index.min.js",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/index.min.js.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/package.json",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/parse-class.d.ts",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/parse-class.d.ts.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/parse-class.js",
+    "node_modules/@isaacs/nonrecursive-glob-match/dist/esm/parse-class.js.map",
+    "node_modules/@isaacs/nonrecursive-glob-match/package.json",
+    "node_modules/@isaacs/nonrecursive-glob-match/src/index.ts",
+    "node_modules/@isaacs/nonrecursive-glob-match/src/parse-class.ts",
+    "node_modules/@npmcli/arborist/package.json",
+    "node_modules/@npmcli/map-workspaces/package.json",
+    "node_modules/@npmcli/package-json/package.json",
+    "node_modules/@tufjs/models/package.json",
+    "node_modules/cacache/package.json",
+    "node_modules/glob/README.md",
+    "node_modules/glob/dist/commonjs/glob.d.ts",
+    "node_modules/glob/dist/commonjs/glob.d.ts.map",
+    "node_modules/glob/dist/commonjs/glob.js",
+    "node_modules/glob/dist/commonjs/glob.js.map",
+    "node_modules/glob/dist/commonjs/has-magic.d.ts",
+    "node_modules/glob/dist/commonjs/has-magic.d.ts.map",
+    "node_modules/glob/dist/commonjs/has-magic.js",
+    "node_modules/glob/dist/commonjs/has-magic.js.map",
+    "node_modules/glob/dist/commonjs/ignore.d.ts",
+    "node_modules/glob/dist/commonjs/ignore.d.ts.map",
+    "node_modules/glob/dist/commonjs/ignore.js",
+    "node_modules/glob/dist/commonjs/ignore.js.map",
+    "node_modules/glob/dist/commonjs/index.d.ts",
+    "node_modules/glob/dist/commonjs/index.d.ts.map",
+    "node_modules/glob/dist/commonjs/index.js.map",
+    "node_modules/glob/dist/commonjs/index.min.js",
+    "node_modules/glob/dist/commonjs/index.min.js.map",
+    "node_modules/glob/dist/commonjs/pattern.d.ts",
+    "node_modules/glob/dist/commonjs/pattern.d.ts.map",
+    "node_modules/glob/dist/commonjs/pattern.js",
+    "node_modules/glob/dist/commonjs/pattern.js.map",
+    "node_modules/glob/dist/commonjs/processor.d.ts",
+    "node_modules/glob/dist/commonjs/processor.d.ts.map",
+    "node_modules/glob/dist/commonjs/processor.js",
+    "node_modules/glob/dist/commonjs/processor.js.map",
+    "node_modules/glob/dist/commonjs/walker.d.ts",
+    "node_modules/glob/dist/commonjs/walker.d.ts.map",
+    "node_modules/glob/dist/commonjs/walker.js",
+    "node_modules/glob/dist/commonjs/walker.js.map",
+    "node_modules/glob/dist/esm/glob.d.ts",
+    "node_modules/glob/dist/esm/glob.d.ts.map",
+    "node_modules/glob/dist/esm/glob.js",
+    "node_modules/glob/dist/esm/glob.js.map",
+    "node_modules/glob/dist/esm/has-magic.d.ts",
+    "node_modules/glob/dist/esm/has-magic.d.ts.map",
+    "node_modules/glob/dist/esm/has-magic.js",
+    "node_modules/glob/dist/esm/has-magic.js.map",
+    "node_modules/glob/dist/esm/ignore.d.ts",
+    "node_modules/glob/dist/esm/ignore.d.ts.map",
+    "node_modules/glob/dist/esm/ignore.js",
+    "node_modules/glob/dist/esm/ignore.js.map",
+    "node_modules/glob/dist/esm/index.d.ts",
+    "node_modules/glob/dist/esm/index.d.ts.map",
+    "node_modules/glob/dist/esm/index.js.map",
+    "node_modules/glob/dist/esm/index.min.js",
+    "node_modules/glob/dist/esm/index.min.js.map",
+    "node_modules/glob/dist/esm/pattern.d.ts",
+    "node_modules/glob/dist/esm/pattern.d.ts.map",
+    "node_modules/glob/dist/esm/pattern.js",
+    "node_modules/glob/dist/esm/pattern.js.map",
+    "node_modules/glob/dist/esm/processor.d.ts",
+    "node_modules/glob/dist/esm/processor.d.ts.map",
+    "node_modules/glob/dist/esm/processor.js",
+    "node_modules/glob/dist/esm/processor.js.map",
+    "node_modules/glob/dist/esm/walker.d.ts",
+    "node_modules/glob/dist/esm/walker.d.ts.map",
+    "node_modules/glob/dist/esm/walker.js",
+    "node_modules/glob/dist/esm/walker.js.map",
+    "node_modules/glob/package.json",
+    "node_modules/glob/src/glob.ts",
+    "node_modules/glob/src/has-magic.ts",
+    "node_modules/glob/src/ignore.ts",
+    "node_modules/glob/src/index.ts",
+    "node_modules/glob/src/pattern.ts",
+    "node_modules/glob/src/processor.ts",
+    "node_modules/glob/src/walker.ts",
     "node_modules/ip-address/README.md",
     "node_modules/ip-address/dist/address-error.d.ts",
     "node_modules/ip-address/dist/address-error.js.map",
@@ -47,6 +170,51 @@
     "node_modules/ip-address/dist/v6/regular-expressions.d.ts",
     "node_modules/ip-address/dist/v6/regular-expressions.js.map",
     "node_modules/ip-address/package.json",
+    "node_modules/libnpmdiff/package.json",
+    "node_modules/minimatch/README.md",
+    "node_modules/minimatch/dist/commonjs/assert-valid-pattern.d.ts",
+    "node_modules/minimatch/dist/commonjs/assert-valid-pattern.d.ts.map",
+    "node_modules/minimatch/dist/commonjs/assert-valid-pattern.js.map",
+    "node_modules/minimatch/dist/commonjs/ast.js",
+    "node_modules/minimatch/dist/commonjs/brace-expressions.js",
+    "node_modules/minimatch/dist/commonjs/escape.d.ts",
+    "node_modules/minimatch/dist/commonjs/escape.d.ts.map",
+    "node_modules/minimatch/dist/commonjs/escape.js.map",
+    "node_modules/minimatch/dist/commonjs/index.d.ts",
+    "node_modules/minimatch/dist/commonjs/index.d.ts.map",
+    "node_modules/minimatch/dist/commonjs/index.js",
+    "node_modules/minimatch/dist/commonjs/index.js.map",
+    "node_modules/minimatch/dist/commonjs/unescape.d.ts",
+    "node_modules/minimatch/dist/commonjs/unescape.d.ts.map",
+    "node_modules/minimatch/dist/commonjs/unescape.js.map",
+    "node_modules/minimatch/dist/esm/assert-valid-pattern.d.ts",
+    "node_modules/minimatch/dist/esm/assert-valid-pattern.d.ts.map",
+    "node_modules/minimatch/dist/esm/assert-valid-pattern.js.map",
+    "node_modules/minimatch/dist/esm/ast.js",
+    "node_modules/minimatch/dist/esm/brace-expressions.js",
+    "node_modules/minimatch/dist/esm/escape.d.ts",
+    "node_modules/minimatch/dist/esm/escape.d.ts.map",
+    "node_modules/minimatch/dist/esm/escape.js.map",
+    "node_modules/minimatch/dist/esm/index.d.ts",
+    "node_modules/minimatch/dist/esm/index.d.ts.map",
+    "node_modules/minimatch/dist/esm/index.js",
+    "node_modules/minimatch/dist/esm/index.js.map",
+    "node_modules/minimatch/dist/esm/unescape.d.ts",
+    "node_modules/minimatch/dist/esm/unescape.d.ts.map",
+    "node_modules/minimatch/dist/esm/unescape.js.map",
+    "node_modules/minimatch/package.json",
+    "node_modules/npm-packlist/node_modules/ignore-walk/package.json",
+    "node_modules/npm-packlist/package.json",
+    "node_modules/path-scurry/README.md",
+    "node_modules/path-scurry/dist/commonjs/index.d.ts",
+    "node_modules/path-scurry/dist/commonjs/index.d.ts.map",
+    "node_modules/path-scurry/dist/commonjs/index.js",
+    "node_modules/path-scurry/dist/commonjs/index.js.map",
+    "node_modules/path-scurry/dist/esm/index.d.ts",
+    "node_modules/path-scurry/dist/esm/index.d.ts.map",
+    "node_modules/path-scurry/dist/esm/index.js",
+    "node_modules/path-scurry/dist/esm/index.js.map",
+    "node_modules/path-scurry/package.json",
     "node_modules/undici/README.md",
     "node_modules/undici/docs/docs/api/Client.md",
     "node_modules/undici/index.d.ts",
@@ -102,5 +270,69 @@
     "node_modules/undici/types/websocket.d.ts",
     "package.json"
   ],
-  "unchangedOutsidePatchedBundlesAndVersion": true
+  "changedManifestDependencies": {
+    "node_modules/@npmcli/arborist/package.json": {
+      "minimatch": {
+        "from": "^10.0.3",
+        "to": "^11.0.3"
+      }
+    },
+    "node_modules/@npmcli/map-workspaces/package.json": {
+      "glob": {
+        "from": "^13.0.0",
+        "to": "^14.0.3"
+      },
+      "minimatch": {
+        "from": "^10.0.3",
+        "to": "^11.0.3"
+      }
+    },
+    "node_modules/@npmcli/package-json/package.json": {
+      "glob": {
+        "from": "^13.0.0",
+        "to": "^14.0.3"
+      }
+    },
+    "node_modules/@tufjs/models/package.json": {
+      "minimatch": {
+        "from": "^10.2.1",
+        "to": "^11.0.3"
+      }
+    },
+    "node_modules/cacache/package.json": {
+      "glob": {
+        "from": "^13.0.0",
+        "to": "^14.0.3"
+      }
+    },
+    "node_modules/libnpmdiff/package.json": {
+      "minimatch": {
+        "from": "^10.0.3",
+        "to": "^11.0.3"
+      }
+    },
+    "node_modules/npm-packlist/node_modules/ignore-walk/package.json": {
+      "minimatch": {
+        "from": "^10.0.3",
+        "to": "^11.0.3"
+      }
+    },
+    "node_modules/npm-packlist/package.json": {
+      "glob": {
+        "from": "^13.0.6",
+        "to": "^14.0.3"
+      }
+    },
+    "package.json": {
+      "glob": {
+        "from": "^13.0.6",
+        "to": "^14.0.3"
+      },
+      "minimatch": {
+        "from": "^10.2.5",
+        "to": "^11.0.3"
+      }
+    }
+  },
+  "unchangedOutsidePatchedBundlesAndManifests": true
 }

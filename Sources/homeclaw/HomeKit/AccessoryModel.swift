@@ -863,20 +863,22 @@ enum AccessoryModel {
             }
 
             // Characteristic predicate: HomeKit wraps each as a 2-sub AND
-            // (characteristic == <HMCharacteristic> AND characteristicValue == X).
+            // (characteristic == <HMCharacteristic> AND characteristicValue <op> X).
             guard let compound = sub as? NSCompoundPredicate, compound.compoundPredicateType == .and else { return unknownCondition(sub) }
             let inner = compound.subpredicates as? [NSPredicate] ?? []
             var foundChar: HMCharacteristic?
-            var foundValue: String?
+            var foundComparison: (value: String, op: String)?
             for innerSub in inner {
                 guard let cmp = innerSub as? NSComparisonPredicate else { continue }
-                if let hmChar = cmp.rightExpression.safeConstantValue as? HMCharacteristic {
+                if let hmChar = (cmp.rightExpression.safeConstantValue ?? cmp.leftExpression.safeConstantValue) as? HMCharacteristic,
+                   cmp.predicateOperatorType == .equalTo
+                {
                     foundChar = hmChar
-                } else if let val = cmp.rightExpression.safeConstantValue {
-                    foundValue = "\(val)"
+                } else {
+                    foundComparison = characteristicValueComparison(cmp)
                 }
             }
-            guard let char = foundChar, let value = foundValue else { return unknownCondition(sub) }
+            guard inner.count == 2, let char = foundChar, let comparison = foundComparison else { return unknownCondition(sub) }
             let uuid = char.uniqueIdentifier.uuidString.uppercased()
             if let entry = charMap[uuid] {
                 var condition: [String: Any] = [
@@ -884,8 +886,8 @@ enum AccessoryModel {
                     "accessory": entry.accessory.name,
                     "accessory_id": entry.accessory.uniqueIdentifier.uuidString,
                     "property": CharacteristicMapper.name(for: entry.characteristic.characteristicType),
-                    "operator": "==",
-                    "value": value,
+                    "operator": comparison.op,
+                    "value": comparison.value,
                 ]
                 for (key, selectorValue) in serviceSelectorFields(for: entry.characteristic) {
                     condition[key] = selectorValue
@@ -896,10 +898,35 @@ enum AccessoryModel {
             return [
                 "type": "characteristic",
                 "characteristic_id": uuid,
-                "operator": "==",
-                "value": value,
+                "operator": comparison.op,
+                "value": comparison.value,
             ]
         }
+    }
+
+    /// Normalize the value comparison with the characteristic value on the left.
+    /// Refuse unfamiliar expressions/modifiers instead of reporting false equality.
+    static func characteristicValueComparison(_ comparison: NSComparisonPredicate) -> (value: String, op: String)? {
+        guard comparison.comparisonPredicateModifier == .direct, comparison.options.isEmpty else { return nil }
+        let constantOnRight = comparison.rightExpression.expressionType == .constantValue
+            && comparison.leftExpression.expressionType == .keyPath
+        let constantOnLeft = comparison.leftExpression.expressionType == .constantValue
+            && comparison.rightExpression.expressionType == .keyPath
+        guard constantOnRight || constantOnLeft,
+              (constantOnRight ? comparison.leftExpression : comparison.rightExpression).keyPath == "characteristicValue",
+              let value = (constantOnRight ? comparison.rightExpression : comparison.leftExpression).safeConstantValue
+        else { return nil }
+        let op: String
+        switch comparison.predicateOperatorType {
+        case .equalTo: op = "=="
+        case .notEqualTo: op = "!="
+        case .lessThan: op = constantOnRight ? "<" : ">"
+        case .lessThanOrEqualTo: op = constantOnRight ? "<=" : ">="
+        case .greaterThan: op = constantOnRight ? ">" : "<"
+        case .greaterThanOrEqualTo: op = constantOnRight ? ">=" : "<="
+        default: return nil
+        }
+        return ("\(value)", op)
     }
 
     /// Top-level conjuncts of a trigger predicate, flattened exactly as the decoder
