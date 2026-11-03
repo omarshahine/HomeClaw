@@ -89,6 +89,11 @@ xcodegen generate
 bash scripts/test-catalyst.sh
 ```
 
+Project generation writes `HomeClaw.xcodeproj/project.xcproj` through Apple's
+JSON converter. Install Xcode 27.2 or later alongside the pinned 27.1 build
+toolchain; the finalizer selects the converter per process and leaves the build
+pin and global developer-tools selection unchanged.
+
 The test script saves the xcodebuild log and `.xcresult` under
 `.build/catalyst-test-evidence/` and fails on empty or skipped test results. For a
 repeat run, set `CATALYST_EVIDENCE_DIR` to a fresh directory. Unit-test hosting

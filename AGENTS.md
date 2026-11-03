@@ -102,6 +102,20 @@ Xcode, and warns instead of failing when it does not.
 
 ### XcodeGen
 
+XcodeGen checks converter availability before generation, then runs
+`scripts/finalize-project.sh` after generation. The script uses
+Apple's `xcodebuild -convert-project 'Xcode Project'` to write
+`project.xcproj` inside the existing `.xcodeproj` bundle. Generation requires an
+installed Xcode 27.2 or later; it uses `DEVELOPER_DIR` when suitable, otherwise
+finds a compatible Xcode in `/Applications`. This selection applies only to the
+conversion process and does not change the selected build toolchain. Set
+`XCODE_PROJECT_CONVERTER_DIR` to require a specific converter without discovery.
+If conversion fails, the finalizer restores the previous JSON (or the initial
+PBX project) and retains failed output for diagnosis. Xcode 27
+and later can read the generated JSON project. Do not run a PBX-only patch after
+the finalizer.
+
+
 The root `project.yml` defines all three targets (HomeClaw, macOSBridge, homeclaw-cli). The generated `.xcodeproj` is gitignored — regenerate after cloning:
 ```bash
 xcodegen generate

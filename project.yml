@@ -1,5 +1,7 @@
 name: HomeClaw
 options:
+  preGenCommand: bash scripts/finalize-project.sh --check
+  postGenCommand: bash scripts/finalize-project.sh
   bundleIdPrefix: com.shahine
   deploymentTarget:
     iOS: "18.0"

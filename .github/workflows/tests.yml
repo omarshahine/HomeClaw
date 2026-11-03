@@ -92,6 +92,8 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
+      # The finalizer uses installed Xcode 27.2+ only for JSON conversion;
+      # .xcode-version still controls the build toolchain.
       - name: Generate Xcode project
         run: xcodegen generate
 
