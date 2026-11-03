@@ -3,8 +3,11 @@
 """Generate a Markdown optimization report from benchmark and diagnostics artifacts."""
 
 import argparse
+import fnmatch
 import json
 import re
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -82,6 +85,64 @@ def _parse_target_configs(pbxproj: str) -> Dict[str, Dict[str, Dict[str, str]]]:
     """Extract per-target Debug and Release build settings."""
     all_configs = _parse_all_build_configs(pbxproj)
     return _resolve_config_list(pbxproj, all_configs, "PBXNativeTarget")
+
+
+def _json_config_settings(settings: Dict, configuration: str) -> Dict[str, str]:
+    """Expand configuration selectors, retaining unevaluated SDK/arch qualifiers."""
+    if not isinstance(settings, dict):
+        raise ValueError("Project build-settings must be an object")
+    selected: Dict[str, str] = {}
+    # Defaults precede conditional values; exact configurations override globs.
+    def specificity(item):
+        selectors = re.findall(r"\[config=([^\]]+)\]", item[0])
+        return bool(selectors), sum(len(pattern.replace("*", "").replace("?", "")) for pattern in selectors)
+
+    for key, value in sorted(settings.items(), key=specificity):
+        selectors = re.findall(r"\[config=([^\]]+)\]", key)
+        if selectors and not all(fnmatch.fnmatchcase(configuration, pattern) for pattern in selectors):
+            continue
+        key = re.sub(r"\[config=[^\]]+\]", "", key)
+        if isinstance(value, list):
+            rendered = " ".join(str(item) for item in value)
+        elif isinstance(value, bool):
+            rendered = "YES" if value else "NO"
+        elif isinstance(value, (str, int, float)):
+            rendered = str(value)
+        else:
+            raise ValueError(f"Unsupported build setting value for {key}")
+        selected[key] = rendered
+    return selected
+
+
+def _read_project_configs(project: Path) -> Tuple[Dict[str, Dict[str, str]], Dict[str, Dict[str, Dict[str, str]]]]:
+    definitions = [path for path in (project / "project.pbxproj", project / "project.xcproj") if path.is_file()]
+    if len(definitions) != 1:
+        raise ValueError(f"Expected exactly one project.pbxproj or project.xcproj in {project}")
+    definition = definitions[0]
+    if definition.suffix == ".pbxproj":
+        source = definition.read_text()
+        return _parse_project_level_configs(source), _parse_target_configs(source)
+    # Apple's JSON includes trailing commas; macOS plutil accepts that syntax.
+    normalized = subprocess.run(
+        ["/usr/bin/plutil", "-convert", "json", "-o", "-", str(definition)],
+        capture_output=True, text=True, check=True,
+    )
+    document = json.loads(normalized.stdout)
+    configurations = document["configurations"]
+    if not isinstance(configurations, list) or not configurations or not all(isinstance(name, str) for name in configurations):
+        raise ValueError(f"Invalid configurations in {definition}")
+    project_configs = {
+        name: _json_config_settings(document.get("build-settings", {}), name)
+        for name in configurations
+    }
+    target_configs = {
+        target["name"]: {
+            name: _json_config_settings(target.get("build-settings", {}), name)
+            for name in configurations
+        }
+        for target in document.get("targets", [])
+    }
+    return project_configs, target_configs
 
 
 # ---------------------------------------------------------------------------
@@ -493,11 +554,11 @@ def main() -> int:
     project_configs: Dict[str, Dict[str, str]] = {}
     target_configs: Dict[str, Dict[str, Dict[str, str]]] = {}
     if args.project_path:
-        pbxproj_path = Path(args.project_path) / "project.pbxproj"
-        if pbxproj_path.exists():
-            pbxproj = pbxproj_path.read_text()
-            project_configs = _parse_project_level_configs(pbxproj)
-            target_configs = _parse_target_configs(pbxproj)
+        try:
+            project_configs, target_configs = _read_project_configs(Path(args.project_path))
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError) as error:
+            sys.stderr.write(f"Unable to audit project build settings: {error}\n")
+            return 1
 
     if recommendations is None and project_configs:
         auto = _auto_recommendations_from_audit(project_configs)

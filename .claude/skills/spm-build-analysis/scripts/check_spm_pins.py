@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Scan a project.pbxproj for branch-pinned SPM dependencies and check tag availability."""
+"""Scan an Xcode project for branch-pinned SPM dependencies and check tag availability."""
 
 import argparse
 import json
@@ -57,6 +57,44 @@ def find_branch_pins(pbxproj: str) -> List[Dict[str, str]]:
     return results
 
 
+def find_json_branch_pins(document: Dict) -> List[Dict[str, str]]:
+    """Read package requirements from Apple's project.xcproj representation."""
+    results: List[Dict[str, str]] = []
+    for package in document.get("packages", []):
+        if package.get("kind") != "remote":
+            continue
+        requirement = package.get("version", {})
+        branch = requirement.get("branch")
+        if not isinstance(branch, str):
+            continue
+        url = package["repository"]
+        name = package.get("name")
+        if not name:
+            name = url.rstrip("/").rsplit("/", 1)[-1]
+            if name.endswith(".git"):
+                name = name[:-4]
+        results.append({"name": name, "url": url, "branch": branch})
+    return results
+
+
+def read_branch_pins(project: Path) -> List[Dict[str, str]]:
+    definitions = [path for path in (project / "project.pbxproj", project / "project.xcproj") if path.is_file()]
+    if len(definitions) != 1:
+        raise ValueError(f"Expected exactly one project.pbxproj or project.xcproj in {project}")
+    definition = definitions[0]
+    if definition.suffix == ".pbxproj":
+        return find_branch_pins(definition.read_text())
+    # Apple's JSON includes trailing commas; macOS plutil accepts that syntax.
+    normalized = subprocess.run(
+        ["/usr/bin/plutil", "-convert", "json", "-o", "-", str(definition)],
+        capture_output=True, text=True, check=True,
+    )
+    document = json.loads(normalized.stdout)
+    if not isinstance(document, dict) or not isinstance(document.get("packages", []), list):
+        raise ValueError(f"Invalid package list in {definition}")
+    return find_json_branch_pins(document)
+
+
 def check_tags(url: str) -> List[str]:
     try:
         result = subprocess.run(
@@ -79,13 +117,11 @@ def check_tags(url: str) -> List[str]:
 
 def main() -> int:
     args = parse_args()
-    pbxproj_path = Path(args.project) / "project.pbxproj"
-    if not pbxproj_path.exists():
-        sys.stderr.write(f"Not found: {pbxproj_path}\n")
+    try:
+        pins = read_branch_pins(Path(args.project))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError) as error:
+        sys.stderr.write(f"Unable to read project package requirements: {error}\n")
         return 1
-
-    pbxproj = pbxproj_path.read_text()
-    pins = find_branch_pins(pbxproj)
 
     if not pins:
         print("No branch-pinned SPM dependencies found.")
