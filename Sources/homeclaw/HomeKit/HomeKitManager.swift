@@ -2678,7 +2678,9 @@ final class HomeKitManager: NSObject, Observable {
                 )
             }
 
-            guard let parsed = parseConditionValue(condValueStr, property: condProperty, characteristic: condChar) else {
+            guard let parsed = parseConditionValue(
+                condValueStr, property: condProperty, characteristic: condChar, comparison: comparison
+            ) else {
                 throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
             }
             try Self.validateConditionOperand(
@@ -3058,7 +3060,7 @@ final class HomeKitManager: NSObject, Observable {
                     + "also starts with a comparison; pass the bare value (for example '30')."
             )
         }
-        let resolvedTrimmedValue = resolvedValue.trimmingCharacters(in: .whitespaces)
+        let resolvedTrimmedValue = resolvedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         // Any operator the caller spelled — explicit key or symbolic prefix — needs a value,
         // including `==`, whose resolved comparison is `.equal` and would otherwise slip past
         // this check into the demo path (live rejects it later with a generic message).
@@ -3137,7 +3139,10 @@ final class HomeKitManager: NSObject, Observable {
         ) else {
             throw ControlError.invalidArgument("Characteristic '\(trimmedProperty)' not found on '\(condAccessory.name)'")
         }
-        guard let parsedValue = parseConditionValue(trimmedValue, property: trimmedProperty, characteristic: condChar) else {
+        guard let parsedValue = parseConditionValue(
+            trimmedValue, property: trimmedProperty, characteristic: condChar,
+            comparison: effectiveComparison
+        ) else {
             throw ControlError.invalidArgument("Cannot parse condition value '\(trimmedValue)' for '\(trimmedProperty)'")
         }
         try Self.validateConditionOperand(
@@ -4613,12 +4618,21 @@ final class HomeKitManager: NSObject, Observable {
         return NSNumber(value: integer)
     }
 
-    /// Parse a condition operand, preferring the characteristic's numeric metadata over
-    /// `parseActionValue`'s boolean coercion of "0"/"1". Action writes are unaffected.
+    /// Parse a condition operand.
+    ///
+    /// Only an ordered comparison consults the characteristic's numeric metadata, because only
+    /// there does `parseActionValue`'s boolean coercion of "0"/"1" produce a gate that can never
+    /// match. An equality condition keeps the exact operand it always had, so a pre-existing
+    /// `occupancy_detected == 1` row is still written as a boolean, not silently turned into a
+    /// number comparison.
     private func parseConditionValue(
-        _ raw: String, property: String, characteristic: HMCharacteristic
+        _ raw: String,
+        property: String,
+        characteristic: HMCharacteristic,
+        comparison: ConditionComparison
     ) -> (NSCopying & NSObjectProtocol)? {
-        if let number = Self.numericConditionOperand(raw, format: characteristic.metadata?.format) {
+        if comparison.requiresNumericOperand,
+           let number = Self.numericConditionOperand(raw, format: characteristic.metadata?.format) {
             return number
         }
         return parseActionValue(raw, property: property)

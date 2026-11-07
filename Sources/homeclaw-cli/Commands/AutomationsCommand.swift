@@ -1120,12 +1120,20 @@ struct AddAutomationCondition: ParsableCommand {
             guard !trimmed.isEmpty else {
                 throw ValidationError("--operator must be non-empty when provided")
             }
-            guard RowJSON.normalizedComparisonOperator(trimmed) != nil else {
+            guard let normalized = RowJSON.normalizedComparisonOperator(trimmed) else {
                 throw ValidationError(
                     "Unknown --operator '\(trimmed)'. Allowed: "
                         + RowJSON.comparisonOperators.joined(separator: ", ")
                         + " (or eq, ne, lt, lte, gt, gte)."
                 )
+            }
+            // Same contradiction `--condition-json` refuses before the round trip. Catching it
+            // here too means the mistake reads the same whether the app is running or not,
+            // instead of surfacing as a connection error when it is not.
+            if let split = RowJSON.splitComparisonPrefix(value) {
+                throw ValidationError(
+                    "Invalid --operator: operator '\(normalized)' was given but --value '\(value)' "
+                        + "also starts with '\(split.op)'. Pass the bare value (for example '\(split.value)').")
             }
         }
         if let room, room.trimmingCharacters(in: .whitespaces).isEmpty {

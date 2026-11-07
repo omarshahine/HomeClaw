@@ -230,4 +230,21 @@ final class ConditionOperandValidationTests: XCTestCase {
             XCTAssertTrue("\(error)".contains("has operator"), "\(error)")
         }
     }
+
+    func testOnlyOrderedComparisonsUseNumericMetadata() {
+        // The metadata-driven numeric parse exists to stop `current_temperature < 0` becoming
+        // `< false`. Applying it to equality too would change the operand type of existing
+        // `occupancy_detected == 1` rows, which this change promises not to touch.
+        XCTAssertTrue(ConditionComparison.lessThan.requiresNumericOperand)
+        XCTAssertTrue(ConditionComparison.greaterThanOrEqual.requiresNumericOperand)
+        XCTAssertFalse(ConditionComparison.equal.requiresNumericOperand)
+        XCTAssertFalse(ConditionComparison.notEqual.requiresNumericOperand)
+
+        // The helper itself is metadata-driven and operator-agnostic; the call sites gate it.
+        XCTAssertNotNil(HomeKitManager.numericConditionOperand("1", format: HMCharacteristicMetadataFormatFloat))
+        XCTAssertNotNil(HomeKitManager.numericConditionOperand("0", format: HMCharacteristicMetadataFormatInt))
+        XCTAssertNil(HomeKitManager.numericConditionOperand("1", format: HMCharacteristicMetadataFormatBool))
+        XCTAssertNil(HomeKitManager.numericConditionOperand("inf", format: HMCharacteristicMetadataFormatFloat))
+        XCTAssertNil(HomeKitManager.numericConditionOperand("1", format: nil))
+    }
 }

@@ -394,11 +394,14 @@ homeclaw-cli automations add-condition "Porch Lights" \
 
 ### Numeric and Ordered Conditions
 
-A condition row has always meant "this characteristic equals this value". HomeKit itself
-supports ordered comparisons on any characteristic — the trigger predicate factory takes
-`.equalTo`, `.notEqualTo`, `.lessThan`, `.lessThanOrEqualTo`, `.greaterThan` and
-`.greaterThanOrEqualTo` — but HomeClaw only ever wrote equality, so a threshold condition
-like "only when the room is darker than 30 lux" could not be expressed. It can now.
+A condition row has always meant "this characteristic equals this value". The HomeKit
+trigger predicate factory takes `.equalTo`, `.notEqualTo`, `.lessThan`,
+`.lessThanOrEqualTo`, `.greaterThan` and `.greaterThanOrEqualTo`, but HomeClaw only ever
+wrote equality, so a threshold condition like "only when the room is darker than 30 lux"
+could not be expressed. It can now. Ordered comparisons are limited to numeric
+characteristics: an on/off, string or unknown-format characteristic only accepts `==` and
+`!=`, and the write is refused with an explanation rather than producing a gate that can
+never match.
 
 | Operator | Mnemonics | Meaning |
 |----------|-----------|---------|

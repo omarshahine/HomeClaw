@@ -63,35 +63,32 @@ export async function checkConditionOperators() {
 
   // 5. The CLI keeps its own copy of the operator vocabulary and the prefix splitter, because
   //    it cannot import the app target. That copy has drifted twice already — once letting the
-  //    CLI split a prefix the app had stopped splitting. Compare the two tables so the next
-  //    divergence fails here instead of in review.
+  //    CLI split a prefix the app had stopped splitting. Compare the prefix tables themselves,
+  //    in order, so a symbol added to one side and not the other fails here. Comparing a
+  //    filtered set would hide exactly the extra-operator case this is meant to catch.
   const rowJSONPath = resolve(root, 'Sources/homeclaw-cli/Commands/RowJSON.swift');
   const rowJSON = await readFile(rowJSONPath, 'utf8');
-  const cliOperators = [...rowJSON.matchAll(/^\s*"([=!<>]+)",\s*$/gm)].map(match => match[1]);
-  const cliSymbols = [...new Set([...rowJSON.matchAll(/"([=!<>]{1,2})"/g)].map(match => match[1]))]
-    .filter(symbol => cases.includes(symbol));
-  for (const symbol of cases) {
-    assert.ok(
-      cliSymbols.includes(symbol),
-      `CLI RowJSON is missing the '${symbol}' operator the app defines; the CLI and app vocabularies must match`
-    );
-  }
+
+  const prefixTable = (source, pattern) => {
+    const block = source.match(pattern);
+    assert.ok(block, 'could not locate the operator prefix table to compare');
+    // Each entry is a tuple whose first element is the operator symbol, so take only that.
+    return [...block[1].matchAll(/\(\s*"([^"]+)"/g)].map(match => match[1]);
+  };
+  const cliPrefixes = prefixTable(rowJSON, /let prefixes: \[\(String, String\)\] = \[([\s\S]*?)\]/);
+  const appPrefixes = prefixTable(comparisonSource, /let prefixes: \[\(String, ConditionComparison\)\] = \[([\s\S]*?)\]/);
   assert.deepEqual(
-    [...cliSymbols].sort(),
-    [...cases].sort(),
-    `CLI RowJSON operators (${cliSymbols.join(', ')}) differ from the app's (${cases.join(', ')})`
+    cliPrefixes,
+    appPrefixes,
+    `CLI prefix table (${cliPrefixes.join(', ')}) differs from the app's (${appPrefixes.join(', ')}); the two copies must list the same operators in the same order`
   );
 
-  // 6. The CLI splitter decides a prefix is a threshold by the same decimal rule as the app.
-  //    A `Double(...)` check here would accept `inf`, `nan` and hex floats and rewrite string
-  //    values the app leaves alone.
-  assert.ok(
-    !/Double\(numericPart\)/.test(rowJSON),
-    'RowJSON.splitComparisonPrefix uses Double() to detect a threshold; use isDecimalThreshold so `inf`/`nan`/hex text stays literal'
-  );
+  // 6. The CLI splitter must gate prefix peeling on the decimal rule. Without this the CLI
+  //    peels `inf`, `nan` and hex text that the app leaves literal, which is how the two
+  //    drifted apart before.
   assert.ok(
     /isDecimalThreshold\(numericPart\)/.test(rowJSON),
-    'RowJSON.splitComparisonPrefix must gate prefix peeling on isDecimalThreshold'
+    'RowJSON.splitComparisonPrefix must gate prefix peeling on isDecimalThreshold so `inf`/`nan`/hex text stays literal'
   );
 
   return { relations: relationSources, operators: cases.length };
