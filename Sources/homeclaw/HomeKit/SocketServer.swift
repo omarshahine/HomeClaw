@@ -236,13 +236,12 @@ final class SocketServer: @unchecked Sendable {
                 row["room"] = trimmed
             }
             // Optional comparison operator for condition rows (`<`, `<=`, `>`, `>=`,
-            // `==`, `!=`, or the lt/lte/gt/gte/eq/ne mnemonics). Absent means
-            // equality, which is what every pre-existing row gets, so a payload that
-            // does not know about operators is bit-identical to before. Gated to
-            // condition rows: an `actions` row has no predicate to compare.
-            // An action has no predicate to compare, so an `operator` there is a mistake the
-            // caller should hear about rather than have silently dropped.
-            // Absent and JSON null both mean "no operator", matching the Node handler.
+            // `==`, `!=`, or the lt/lte/gt/gte/eq/ne mnemonics). Absent and JSON null both
+            // mean "no operator", matching the Node handler, which means equality — what
+            // every pre-existing row gets, so a payload that does not know about operators
+            // is bit-identical to before. Gated to condition rows: an action has no
+            // predicate to compare, so an `operator` there is a mistake the caller should
+            // hear about rather than have silently dropped.
             let operatorArg = ConditionComparison.parseOperatorArg(dict["operator"])
             if fieldName != "conditions", operatorArg != .absent {
                 throw AccessoryRowsArgError(

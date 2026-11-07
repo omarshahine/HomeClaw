@@ -73,9 +73,6 @@ enum ConditionComparison: String, CaseIterable, Sendable {
     /// Split a leading comparison off a value string: `"<30"` → (`.lessThan`, `"30"`).
     ///
     /// Longest prefix wins, so `"<=30"` never parses as `<` followed by `"=30"`.
-    /// Returns nil when the value carries no operator prefix, which leaves plain
-    /// equality rows byte-identical to their previous behavior.
-    /// Split a symbolic prefix such as `"<30"` into a comparison and a value.
     ///
     /// A prefix is only peeled when what follows is a number, because the prefix exists for
     /// numeric thresholds. A string characteristic can legitimately hold a value that starts

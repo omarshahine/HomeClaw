@@ -118,4 +118,39 @@ struct ConditionOperatorTests {
         #expect(row["operator"] == "<")
         #expect(row["value"] == "30")
     }
+
+    @Test("string values starting with a comparison character stay literal")
+    func stringValuesAreNotSplit() throws {
+        // The app refuses to peel a prefix unless a number follows, so the CLI must agree:
+        // otherwise it sends `<` with value `none` for a row the user meant literally, and
+        // the add-condition warning fires on a value that has no operator in it.
+        let none = try CreateAutomation.parseConditionRow("Door:status:<none>")
+        #expect(none["value"] == "<none>")
+        #expect(none["operator"] == nil)
+
+        let bang = try CreateAutomation.parseConditionRow("Door:status:!=x")
+        #expect(bang["value"] == "!=x")
+        #expect(bang["operator"] == nil)
+
+        #expect(RowJSON.splitComparisonPrefix("<none>") == nil)
+        #expect(RowJSON.splitComparisonPrefix(">unknown") == nil)
+    }
+
+    @Test("numeric prefixes still split, including a percent sign")
+    func numericPrefixesSplit() throws {
+        #expect(RowJSON.splitComparisonPrefix("<30")?.op == "<")
+        #expect(RowJSON.splitComparisonPrefix("<30")?.value == "30")
+        #expect(RowJSON.splitComparisonPrefix(">=-5")?.value == "-5")
+        #expect(RowJSON.splitComparisonPrefix("<=30%")?.value == "30%")
+
+        let percent = try CreateAutomation.parseConditionRow("Lux:current_light_level:<30%")
+        #expect(percent["operator"] == "<")
+        #expect(percent["value"] == "30%")
+    }
+
+    @Test("a bare operator still reports that it has no value")
+    func bareOperatorStillSplits() {
+        #expect(RowJSON.splitComparisonPrefix("<")?.value == "")
+        #expect(RowJSON.splitComparisonPrefix("<=")?.value == "")
+    }
 }

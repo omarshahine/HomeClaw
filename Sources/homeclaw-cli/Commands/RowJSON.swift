@@ -50,16 +50,27 @@ enum RowJSON {
         return comparisonOperatorAliases[trimmed]
     }
 
-    /// Split a leading comparison off a value (`"<30"` → (`"<"`, `"30"`)`). Longest
-    /// prefix wins so `"<=30"` never parses as `<` + `"=30"`. Returns nil when there is
-    /// no prefix, which leaves plain equality rows untouched.
+    /// Split a symbolic operator prefix off a CLI-supplied value: `"<30"` → (`"<"`, `"30"`).
+    ///
+    /// This mirrors the app's `ConditionComparison.splitValuePrefix` and must stay in step with
+    /// it: the CLI validates before anything reaches the socket, so a divergence here rejects a
+    /// row the app would accept, or sends a comparison the app then refuses.
+    ///
+    /// A prefix is only peeled when what follows is a number. A string value can legitimately
+    /// begin with a comparison character (`"<none>"`), and splitting it would turn an equality
+    /// row into a comparison the caller never asked for.
     static func splitComparisonPrefix(_ raw: String) -> (op: String, value: String)? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefixes: [(String, String)] = [
             ("==", "=="), ("!=", "!="), ("<=", "<="), (">=", ">="), ("<", "<"), (">", ">"),
         ]
         for (prefix, op) in prefixes where trimmed.hasPrefix(prefix) {
-            return (op, String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines))
+            let remainder = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            // A bare operator still splits so the caller reports "operator but no value".
+            if remainder.isEmpty { return (op, remainder) }
+            let numericPart = remainder.hasSuffix("%") ? String(remainder.dropLast()) : remainder
+            guard Double(numericPart) != nil else { return nil }
+            return (op, remainder)
         }
         return nil
     }
