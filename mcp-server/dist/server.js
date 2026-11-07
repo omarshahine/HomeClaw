@@ -17401,7 +17401,7 @@ var tools = [
               property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power, current_light_level)" },
               characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
               value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"), compared using `operator`. A symbolic prefix ("<30") is also accepted and sets the operator for you.' },
-              operator: { type: "string", enum: ["==", "!=", "<", "<=", ">", ">=", "eq", "ne", "lt", "lte", "gt", "gte"], description: 'Comparison applied to the value. Defaults to "==". HomeKit supports ordered comparisons on any characteristic, so this is how a numeric gate is expressed \u2014 e.g. current_light_level "<" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, gt, gte) are accepted.' },
+              operator: { type: "string", enum: ["==", "!=", "<", "<=", ">", ">=", "eq", "ne", "lt", "lte", "gt", "gte"], description: 'Comparison applied to the value. Defaults to "==". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed \u2014 e.g. current_light_level "<" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, gt, gte) are accepted.' },
               room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" },
               ...rowServiceSelectors
             },

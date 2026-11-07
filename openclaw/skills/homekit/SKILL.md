@@ -149,8 +149,24 @@ homeclaw-cli automations create --name "Movie Mode" \
 # Use --service-index for multi-button accessories (e.g., Aqara in fast mode); this picks the TRIGGER button
 # Note: inline actions create a visible scene (Apple uses a private API for hidden ones)
 
+# Threshold conditions: a condition compares with == by default; ordered comparisons
+# (<, <=, >, >=, !=, or mnemonics lt/lte/gt/gte/eq/ne) go in the value prefix, the JSON
+# row's "operator" key, or --operator on add-condition. All three are equivalent:
+homeclaw-cli automations create --name "Guest Bath Motion Lights" \
+  --accessory "<fp2-uuid>" --characteristic occupancy_detected --trigger-value true \
+  --action-json '{"accessory":"<uuid>","property":"power","value":"true"}' \
+  --condition "<lux-uuid>:current_light_level:<30" --dry-run
+#   --condition-json '{"accessory":"<lux-uuid>","property":"current_light_level","value":"30","operator":"lt"}'
+homeclaw-cli automations add-condition "<automation>" --accessory "<lux-uuid>" --property current_light_level --value 30 --operator lt
+# Omitted operator = "==". An unknown operator, or an operator plus a "<30"-style prefix, is
+# an error. Ordered comparisons need a numeric characteristic and value: on/off
+# characteristics (power, ...) only support == and != (e.g. power < on is refused).
+# Over MCP use conditions[].operator / condition.operator. Action rows take no operator.
+# `automations get` reports "operator" per condition, so get -> edit -> write round-trips.
+
 # One gang of a multi-gang accessory as an action or condition target: JSON row form
-# (repeatable; keys: accessory, property|characteristic, value, room, service_name, service_id, service_index)
+# (repeatable; keys: accessory, property|characteristic, value, room, service_name,
+# service_id, service_index; condition rows also accept operator)
 homeclaw-cli automations create --name "Dining Unoccupied" \
   --accessory "Dining FP2" --characteristic occupancy_detected --trigger-value false \
   --action-json '{"accessory":"<uuid>","property":"power","value":"false","service_index":1}' \

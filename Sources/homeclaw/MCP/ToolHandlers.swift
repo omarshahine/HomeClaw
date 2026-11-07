@@ -489,7 +489,7 @@ enum ToolHandlers {
                       "gt",
                       "gte"
                     ],
-                    "description": "Comparison applied to the value. Defaults to \"==\". HomeKit supports ordered comparisons on any characteristic, so this is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, gt, gte) are accepted."
+                    "description": "Comparison applied to the value. Defaults to \"==\". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, gt, gte) are accepted."
                   },
                   "room": {
                     "type": "string",
@@ -843,6 +843,24 @@ enum ToolHandlers {
         }
     }
 
+    /// The `operator` of an `add_condition` condition: nil when absent or JSON null
+    /// (as in the Node handler), otherwise a known operator or an error.
+    static func addConditionComparison(_ condition: [String: Any]) throws -> ConditionComparison? {
+        switch ConditionComparison.parseOperatorArg(condition["operator"]) {
+        case .absent:
+            return nil
+        case .comparison(let comparison):
+            return comparison
+        case .notString, .empty:
+            throw HomeKitManager.ControlError.invalidArgument("condition.operator must be a non-empty string when provided")
+        case .unknown(let operatorString):
+            throw HomeKitManager.ControlError.invalidArgument(
+                "Unknown condition.operator '\(operatorString)'. Allowed: "
+                    + ConditionComparison.allowedOperatorsDescription + "."
+            )
+        }
+    }
+
     @MainActor private static func automations(_ args: [String: Any], hk: HomeKitManager) async throws -> Any {
         let action = string(args, "action") ?? "list"
         let home = string(args, "home_id"), dry = bool(args, "dry_run")
@@ -861,19 +879,7 @@ enum ToolHandlers {
             // dropped here while `create`/`edit` honored it, which silently wrote an
             // equality rule for a threshold request — the failure this feature exists
             // to prevent.
-            var comparison: ConditionComparison?
-            if let rawOperator = condition["operator"] {
-                guard let operatorString = rawOperator as? String else {
-                    throw HomeKitManager.ControlError.invalidArgument("condition.operator must be a string")
-                }
-                guard let parsedComparison = ConditionComparison.parse(operatorString) else {
-                    throw HomeKitManager.ControlError.invalidArgument(
-                        "Unknown condition.operator '\(operatorString)'. Allowed: "
-                            + ConditionComparison.allowedOperatorsDescription + "."
-                    )
-                }
-                comparison = parsedComparison
-            }
+            let comparison = try addConditionComparison(condition)
             return try await hk.addAutomationCondition(id: id, accessoryID: accessory, conditionRoom: condition["room"] as? String, property: property, value: value, comparison: comparison, serviceSelector: serviceSelector, homeID: home, dryRun: dry)
         case "edit":
             guard let id = string(args, "id") else { throw HomeKitManager.ControlError.invalidArgument("id is required") }

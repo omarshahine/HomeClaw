@@ -2678,7 +2678,7 @@ final class HomeKitManager: NSObject, Observable {
                 )
             }
 
-            guard let parsed = parseActionValue(condValueStr, property: condProperty) else {
+            guard let parsed = parseConditionValue(condValueStr, property: condProperty, characteristic: condChar) else {
                 throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
             }
             try Self.validateConditionOperand(
@@ -3070,6 +3070,11 @@ final class HomeKitManager: NSObject, Observable {
                     + "or drop the operator."
             )
         }
+        // Before the demo branch: an on/off token under an ordered comparison is invalid
+        // with or without characteristic metadata, so demo refuses it exactly as live does.
+        if let message = ConditionComparison.booleanTokenRejection(resolution, value: resolvedValue, property: property) {
+            throw ControlError.invalidArgument(message)
+        }
         if Self.isDemoMode {
             // Validate the selector the same way the live path does, so a malformed
             // service_index fails identically in demo mode.
@@ -3132,7 +3137,7 @@ final class HomeKitManager: NSObject, Observable {
         ) else {
             throw ControlError.invalidArgument("Characteristic '\(trimmedProperty)' not found on '\(condAccessory.name)'")
         }
-        guard let parsedValue = parseActionValue(trimmedValue, property: trimmedProperty) else {
+        guard let parsedValue = parseConditionValue(trimmedValue, property: trimmedProperty, characteristic: condChar) else {
             throw ControlError.invalidArgument("Cannot parse condition value '\(trimmedValue)' for '\(trimmedProperty)'")
         }
         try Self.validateConditionOperand(
@@ -4489,6 +4494,9 @@ final class HomeKitManager: NSObject, Observable {
                         "Condition for \(label) has operator '\(comparison.apiValue)' but no value"
                     )
                 }
+                if let message = ConditionComparison.booleanTokenRejection(comparison, value: value, property: property) {
+                    throw ControlError.invalidArgument(message)
+                }
             case let .unknownOperator(operatorText):
                 throw ControlError.invalidArgument(
                     "Unknown condition operator '\(operatorText)'. Allowed: "
@@ -4517,25 +4525,92 @@ final class HomeKitManager: NSObject, Observable {
         property: String,
         characteristic: HMCharacteristic
     ) throws {
-        guard comparison.requiresNumericOperand else { return }
-        // Check the characteristic, not only the value: `power < 50` parses to a number
-        // and would slip past a value-only check, yet on a boolean characteristic it is a
-        // gate that can never be false (or never true) — an automation that silently never
-        // does what was asked.
-        if characteristic.metadata?.format == HMCharacteristicMetadataFormatBool {
-            throw ControlError.invalidArgument(
-                "Operator '\(comparison.apiValue)' needs a numeric characteristic, but '\(property)' is on/off. "
-                    + "On/off characteristics only support == and !=; "
-                    + "use a numeric characteristic (for example current_light_level) for a threshold."
-            )
+        if let message = conditionOperandRejection(
+            comparison, parsed: parsed, property: property, format: characteristic.metadata?.format) {
+            throw ControlError.invalidArgument(message)
+        }
+    }
+
+    /// HomeKit metadata formats whose values are numbers, so ordered comparisons mean
+    /// something. Everything else (bool, string, data, tlv8, …) only supports == / !=.
+    nonisolated static let numericCharacteristicFormats: Set<String> = [
+        HMCharacteristicMetadataFormatFloat, HMCharacteristicMetadataFormatInt,
+        HMCharacteristicMetadataFormatUInt8, HMCharacteristicMetadataFormatUInt16,
+        HMCharacteristicMetadataFormatUInt32, HMCharacteristicMetadataFormatUInt64,
+    ]
+
+    /// Properties `parseActionValue` always treats as numeric — "0"/"1" are never read as
+    /// booleans for these. Also the fallback evidence that a property is numeric when a
+    /// characteristic reports no metadata.
+    nonisolated static let knownNumericProperties: Set<String> = [
+        "target_position", "current_position", "brightness", "hue", "saturation",
+        "color_temperature", "target_temperature", "rotation_speed", "battery_level",
+        "volume", "volume_control_type", "rotation_direction", "position_state",
+        "current_tilt_angle", "target_tilt_angle", "swing_mode",
+        "target_fan_state", "current_fan_state",
+        "current_heating_cooling", "target_heating_cooling",
+        "current_humidity", "target_humidity", "current_light_level",
+        "charging_state", "lock_current_state", "lock_target_state",
+        "current_door_state", "target_door_state", "contact_state",
+    ]
+
+    /// Plain-value core of `validateConditionOperand`, so it is testable without an
+    /// `HMCharacteristic` (which has no public initializer). Returns the error message,
+    /// or nil when the comparison is acceptable.
+    ///
+    /// Only an ordered comparison is checked. It is allowed only when the characteristic
+    /// is known to be numeric: a numeric metadata format, or — when the characteristic
+    /// reports no metadata at all — a property `parseActionValue` classifies as numeric.
+    /// Unknown metadata is otherwise refused rather than trusted, because HomeKit accepts
+    /// `power < 50` as a predicate and the automation then silently never does what was
+    /// asked. A boolean operand is refused even on a numeric characteristic.
+    nonisolated static func conditionOperandRejection(
+        _ comparison: ConditionComparison,
+        parsed: NSCopying & NSObjectProtocol,
+        property: String,
+        format: String?
+    ) -> String? {
+        guard comparison.requiresNumericOperand else { return nil }
+        let advice = "use a numeric characteristic (for example current_light_level) for a threshold."
+        if let format {
+            if format == HMCharacteristicMetadataFormatBool {
+                return "Operator '\(comparison.apiValue)' needs a numeric characteristic, but '\(property)' is on/off. "
+                    + "On/off characteristics only support == and !=; " + advice
+            }
+            if !numericCharacteristicFormats.contains(format) {
+                return "Operator '\(comparison.apiValue)' needs a numeric characteristic, but '\(property)' has "
+                    + "format '\(format)'. Non-numeric characteristics only support == and !=; " + advice
+            }
+        } else if !knownNumericProperties.contains(property.lowercased()) {
+            return "Operator '\(comparison.apiValue)' needs a numeric characteristic, but '\(property)' reports "
+                + "no format metadata, so it cannot be confirmed numeric. Use == or !=, or " + advice
         }
         if let number = parsed as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
-            throw ControlError.invalidArgument(
-                "Operator '\(comparison.apiValue)' needs a numeric value, but '\(property)' resolved "
-                    + "'\(number)' to a boolean. On/off characteristics only support == and !=; "
-                    + "use a numeric characteristic (for example current_light_level) for a threshold."
-            )
+            return "Operator '\(comparison.apiValue)' needs a numeric value, but '\(property)' resolved "
+                + "'\(number)' to a boolean. On/off characteristics only support == and !=; " + advice
         }
+        return nil
+    }
+
+    /// Integer operand for a condition on a numeric-format characteristic, or nil to fall
+    /// back to `parseActionValue`. That parser reads "0"/"1" as booleans for any property
+    /// outside `knownNumericProperties`, so `current_temperature < 0` would otherwise
+    /// become `< false`. The characteristic's metadata is the authority, not the list.
+    nonisolated static func numericConditionOperand(_ raw: String, format: String?) -> NSNumber? {
+        guard let format, numericCharacteristicFormats.contains(format),
+              let integer = Int(raw.trimmingCharacters(in: .whitespaces)) else { return nil }
+        return NSNumber(value: integer)
+    }
+
+    /// Parse a condition operand, preferring the characteristic's numeric metadata over
+    /// `parseActionValue`'s boolean coercion of "0"/"1". Action writes are unaffected.
+    private func parseConditionValue(
+        _ raw: String, property: String, characteristic: HMCharacteristic
+    ) -> (NSCopying & NSObjectProtocol)? {
+        if let number = Self.numericConditionOperand(raw, format: characteristic.metadata?.format) {
+            return number
+        }
+        return parseActionValue(raw, property: property)
     }
 
     /// Parse a human-readable action value back to an NSCopying-conforming type.
@@ -4545,18 +4620,7 @@ final class HomeKitManager: NSObject, Observable {
         let trimmed = raw.trimmingCharacters(in: .whitespaces)
 
         // Properties that are always numeric — never interpret "0"/"1" as boolean
-        let numericProperties: Set<String> = [
-            "target_position", "current_position", "brightness", "hue", "saturation",
-            "color_temperature", "target_temperature", "rotation_speed", "battery_level",
-            "volume", "volume_control_type", "rotation_direction", "position_state",
-            "current_tilt_angle", "target_tilt_angle", "swing_mode",
-            "target_fan_state", "current_fan_state",
-            "current_heating_cooling", "target_heating_cooling",
-            "current_humidity", "target_humidity", "current_light_level",
-            "charging_state", "lock_current_state", "lock_target_state",
-            "current_door_state", "target_door_state", "contact_state",
-        ]
-        let isNumericProperty = numericProperties.contains(property.lowercased())
+        let isNumericProperty = Self.knownNumericProperties.contains(property.lowercased())
 
         // Boolean ON/OFF — but only for non-numeric properties
         if !isNumericProperty {

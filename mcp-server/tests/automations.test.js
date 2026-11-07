@@ -58,6 +58,13 @@ test('add_condition omits operator when the condition does not set one', async (
   assert.ok(!Object.prototype.hasOwnProperty.call(calls[0][1], 'operator'));
 });
 
+// null means "not provided" here, in SocketServer and in the app's native handler alike.
+test('add_condition treats a null operator as absent', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({ ...base, condition: { ...base.condition, operator: null } }, send);
+  assert.ok(!Object.prototype.hasOwnProperty.call(calls[0][1], 'operator'));
+});
+
 test('add_condition rejects a non-string or empty operator', async () => {
   for (const operator of ['', '   ', 5, {}]) {
     const { send } = fakeSend();

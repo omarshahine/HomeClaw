@@ -220,7 +220,7 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use --action-json instead.")
     var action: [String] = []
 
-    @Option(name: .customLong("action-json"), parsing: .singleValue, help: "Inline action as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"false\",\"service_index\":2}'. Keys: accessory, property (or characteristic), value, operator (==, !=, <, <=, >, >= or eq/ne/lt/lte/gt/gte), room, service_name, service_id, service_index.")
+    @Option(name: .customLong("action-json"), parsing: .singleValue, help: "Inline action as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"false\",\"service_index\":2}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
     var actionJSON: [String] = []
 
     @Option(name: .long, help: "Press type: single, double, or long (default: single). For button triggers only; mutually exclusive with --characteristic.")
@@ -603,8 +603,10 @@ struct CreateAutomation: ParsableCommand {
                 let acc = RowJSON.targetLabel(c)
                 let prop = c["property"] ?? "?"
                 let val = c["value"] ?? "?"
+                // Same rendering as `edit`'s planned summary: equality keeps the
+                // pre-existing `= value` form, only a real comparison shows its operator.
                 let op = c["operator"] ?? "=="
-                print("    \(acc): \(prop) \(op) \(val)")
+                print("    \(acc): \(prop) \(op == "==" ? "=" : op) \(val)")
             }
         }
         if let timeAfter = result["time_after"] as? [String], !timeAfter.isEmpty {
@@ -696,7 +698,7 @@ struct CreateTimeAutomation: ParsableCommand {
     @Option(name: .long, parsing: .upToNextOption, help: "Inline action as 'accessory:property:value' (repeatable, alternative to --scene). Accessory names with colons are not supported; use --action-json instead.")
     var action: [String] = []
 
-    @Option(name: .customLong("action-json"), parsing: .singleValue, help: "Inline action as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"false\",\"service_index\":2}'. Keys: accessory, property (or characteristic), value, operator (==, !=, <, <=, >, >= or eq/ne/lt/lte/gt/gte), room, service_name, service_id, service_index.")
+    @Option(name: .customLong("action-json"), parsing: .singleValue, help: "Inline action as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"false\",\"service_index\":2}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
     var actionJSON: [String] = []
 
     @Option(name: .long, help: "Comma-separated weekdays the automation may fire on: mon,tue,wed,thu,fri,sat,sun (or numeric 1-7 where 1=Sun). When omitted, all 7 days are auto-filled — iOS 15+ requires weekday gating on time-conditional automations.")

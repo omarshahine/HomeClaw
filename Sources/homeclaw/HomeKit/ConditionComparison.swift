@@ -122,6 +122,56 @@ enum ConditionComparison: String, CaseIterable, Sendable {
         return .ok(comparison: .equal, value: trimmedValue)
     }
 
+    /// Outcome of reading an optional `operator` wire argument.
+    enum OperatorArg: Equatable {
+        /// Absent or JSON `null`: no operator was named.
+        case absent
+        case comparison(ConditionComparison)
+        /// Present but not a string (a number, a bool, an object, …).
+        case notString
+        /// A string that is empty after trimming.
+        case empty
+        case unknown(String)
+    }
+
+    /// Read an optional `operator` argument from a decoded JSON payload. Every entry
+    /// point (socket rows, socket `add-condition`, the app's MCP handler) uses this so
+    /// they agree with the Node handler: absent and `null` both mean "not provided";
+    /// anything else must be a non-empty, known operator string. Each caller maps the
+    /// failure cases to its own error type and wording.
+    static func parseOperatorArg(_ raw: Any?) -> OperatorArg {
+        guard let raw, !(raw is NSNull) else { return .absent }
+        guard let string = raw as? String else { return .notString }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .empty }
+        guard let comparison = parse(trimmed) else { return .unknown(trimmed) }
+        return .comparison(comparison)
+    }
+
+    /// True when `value` is an explicit on/off token (`on`, `off`, `true`, `false`,
+    /// case-insensitive). Such a token is never a valid operand for an ordered
+    /// comparison, whatever the characteristic, so this needs no metadata and demo and
+    /// live mode both reject it. "0"/"1" are deliberately NOT included: on a numeric
+    /// characteristic they are ordinary thresholds, and only the characteristic's
+    /// metadata (live mode) can tell the two readings apart.
+    static func isBooleanToken(_ value: String) -> Bool {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "on", "off", "true", "false": return true
+        default: return false
+        }
+    }
+
+    /// Error message when an ordered comparison is given an on/off token, or nil when
+    /// the pair is acceptable as far as can be told without characteristic metadata.
+    static func booleanTokenRejection(_ comparison: ConditionComparison, value: String, property: String) -> String? {
+        guard comparison.requiresNumericOperand, isBooleanToken(value) else { return nil }
+        let label = property.trimmingCharacters(in: .whitespaces)
+        return "Operator '\(comparison.apiValue)' needs a numeric value, but the condition for "
+            + "'\(label)' compares against '\(value.trimmingCharacters(in: .whitespacesAndNewlines))'. "
+            + "On/off values only support == and !=; "
+            + "use a numeric characteristic (for example current_light_level) for a threshold."
+    }
+
     /// The allowed set, so error messages never restate a list that can drift from the
     /// enum itself.
     static var allowedOperatorsDescription: String {
