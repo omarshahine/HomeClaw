@@ -240,9 +240,19 @@ final class ConditionOperandValidationTests: XCTestCase {
         XCTAssertFalse(ConditionComparison.equal.requiresNumericOperand)
         XCTAssertFalse(ConditionComparison.notEqual.requiresNumericOperand)
 
-        // The helper itself is metadata-driven and operator-agnostic; the call sites gate it.
+        // The gate itself: ordered comparisons get the number, equality keeps the old path.
+        XCTAssertNotNil(HomeKitManager.orderedNumericConditionOperand(
+            "1", format: HMCharacteristicMetadataFormatFloat, comparison: .lessThan))
+        XCTAssertNotNil(HomeKitManager.orderedNumericConditionOperand(
+            "0", format: HMCharacteristicMetadataFormatInt, comparison: .greaterThanOrEqual))
+        XCTAssertNil(HomeKitManager.orderedNumericConditionOperand(
+            "1", format: HMCharacteristicMetadataFormatFloat, comparison: .equal),
+            "equality must keep parseActionValue's boolean coercion")
+        XCTAssertNil(HomeKitManager.orderedNumericConditionOperand(
+            "1", format: HMCharacteristicMetadataFormatFloat, comparison: .notEqual))
+
+        // The helper underneath is metadata-driven and operator-agnostic.
         XCTAssertNotNil(HomeKitManager.numericConditionOperand("1", format: HMCharacteristicMetadataFormatFloat))
-        XCTAssertNotNil(HomeKitManager.numericConditionOperand("0", format: HMCharacteristicMetadataFormatInt))
         XCTAssertNil(HomeKitManager.numericConditionOperand("1", format: HMCharacteristicMetadataFormatBool))
         XCTAssertNil(HomeKitManager.numericConditionOperand("inf", format: HMCharacteristicMetadataFormatFloat))
         XCTAssertNil(HomeKitManager.numericConditionOperand("1", format: nil))

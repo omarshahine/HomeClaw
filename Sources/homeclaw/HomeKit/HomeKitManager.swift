@@ -4618,6 +4618,18 @@ final class HomeKitManager: NSObject, Observable {
         return NSNumber(value: integer)
     }
 
+    /// Metadata-driven numeric operand, but only for a comparison that needs one.
+    ///
+    /// Extracted so the gate itself is testable: removing the `requiresNumericOperand` condition
+    /// would silently restore the pre-fix behaviour for equality rows, and nothing else would
+    /// notice.
+    nonisolated static func orderedNumericConditionOperand(
+        _ raw: String, format: String?, comparison: ConditionComparison
+    ) -> NSNumber? {
+        guard comparison.requiresNumericOperand else { return nil }
+        return numericConditionOperand(raw, format: format)
+    }
+
     /// Parse a condition operand.
     ///
     /// Only an ordered comparison consults the characteristic's numeric metadata, because only
@@ -4631,8 +4643,8 @@ final class HomeKitManager: NSObject, Observable {
         characteristic: HMCharacteristic,
         comparison: ConditionComparison
     ) -> (NSCopying & NSObjectProtocol)? {
-        if comparison.requiresNumericOperand,
-           let number = Self.numericConditionOperand(raw, format: characteristic.metadata?.format) {
+        if let number = Self.orderedNumericConditionOperand(
+            raw, format: characteristic.metadata?.format, comparison: comparison) {
             return number
         }
         return parseActionValue(raw, property: property)

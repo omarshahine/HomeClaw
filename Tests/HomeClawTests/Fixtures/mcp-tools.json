@@ -473,10 +473,12 @@
                   "ne",
                   "lt",
                   "lte",
+                  "le",
                   "gt",
-                  "gte"
+                  "gte",
+                  "ge"
                 ],
-                "description": "Comparison applied to the value. Defaults to \"==\". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, gt, gte) are accepted."
+                "description": "Comparison applied to the value. Defaults to \"==\". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, le, gt, gte, ge) are accepted."
               },
               "room": {
                 "type": "string",
@@ -570,10 +572,12 @@
                 "ne",
                 "lt",
                 "lte",
+                "le",
                 "gt",
-                "gte"
+                "gte",
+                "ge"
               ],
-              "description": "Comparison applied to the value. Defaults to \"==\". Use \"<\" / \"<=\" etc. for a numeric gate, e.g. current_light_level \"<\" 30 for \"only when the room is darker than 30 lux\". Mnemonics (eq, ne, lt, lte, gt, gte) are accepted."
+              "description": "Comparison applied to the value. Defaults to \"==\". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, le, gt, gte, ge) are accepted."
             },
             "room": {
               "type": "string",
