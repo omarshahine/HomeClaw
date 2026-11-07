@@ -70,6 +70,30 @@ enum ConditionComparison: String, CaseIterable, Sendable {
         }
     }
 
+    /// True when the text is a plain decimal number: optional sign, digits, at most one dot.
+    ///
+    /// `Double(String)` is too permissive for this decision — it also accepts `nan`, `inf`,
+    /// `infinity` and hex floats such as `0x1p3`, so `"<inf"` on a string characteristic would
+    /// still be peeled into a comparison. Only ordinary decimal text counts as a threshold.
+    static func isDecimalThreshold(_ text: String) -> Bool {
+        var digits = Substring(text)
+        if digits.first == "+" || digits.first == "-" { digits = digits.dropFirst() }
+        guard !digits.isEmpty else { return false }
+        var sawDigit = false
+        var sawDot = false
+        for character in digits {
+            if character >= "0", character <= "9" {
+                sawDigit = true
+            } else if character == "." {
+                if sawDot { return false }
+                sawDot = true
+            } else {
+                return false
+            }
+        }
+        return sawDigit
+    }
+
     /// Split a leading comparison off a value string: `"<30"` → (`.lessThan`, `"30"`).
     ///
     /// Longest prefix wins, so `"<=30"` never parses as `<` followed by `"=30"`.
@@ -93,7 +117,7 @@ enum ConditionComparison: String, CaseIterable, Sendable {
             let remainder = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
             if remainder.isEmpty { return (comparison, remainder) }
             let numericPart = remainder.hasSuffix("%") ? String(remainder.dropLast()) : remainder
-            guard Double(numericPart) != nil else { return nil }
+            guard isDecimalThreshold(numericPart) else { return nil }
             return (comparison, remainder)
         }
         return nil

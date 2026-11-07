@@ -61,6 +61,39 @@ export async function checkConditionOperators() {
   const rowsEnum = automations.inputSchema.properties.conditions.items.properties.operator.enum;
   assert.deepEqual(rowsEnum, allowed, 'condition and conditions[] operator enums must agree');
 
+  // 5. The CLI keeps its own copy of the operator vocabulary and the prefix splitter, because
+  //    it cannot import the app target. That copy has drifted twice already — once letting the
+  //    CLI split a prefix the app had stopped splitting. Compare the two tables so the next
+  //    divergence fails here instead of in review.
+  const rowJSONPath = resolve(root, 'Sources/homeclaw-cli/Commands/RowJSON.swift');
+  const rowJSON = await readFile(rowJSONPath, 'utf8');
+  const cliOperators = [...rowJSON.matchAll(/^\s*"([=!<>]+)",\s*$/gm)].map(match => match[1]);
+  const cliSymbols = [...new Set([...rowJSON.matchAll(/"([=!<>]{1,2})"/g)].map(match => match[1]))]
+    .filter(symbol => cases.includes(symbol));
+  for (const symbol of cases) {
+    assert.ok(
+      cliSymbols.includes(symbol),
+      `CLI RowJSON is missing the '${symbol}' operator the app defines; the CLI and app vocabularies must match`
+    );
+  }
+  assert.deepEqual(
+    [...cliSymbols].sort(),
+    [...cases].sort(),
+    `CLI RowJSON operators (${cliSymbols.join(', ')}) differ from the app's (${cases.join(', ')})`
+  );
+
+  // 6. The CLI splitter decides a prefix is a threshold by the same decimal rule as the app.
+  //    A `Double(...)` check here would accept `inf`, `nan` and hex floats and rewrite string
+  //    values the app leaves alone.
+  assert.ok(
+    !/Double\(numericPart\)/.test(rowJSON),
+    'RowJSON.splitComparisonPrefix uses Double() to detect a threshold; use isDecimalThreshold so `inf`/`nan`/hex text stays literal'
+  );
+  assert.ok(
+    /isDecimalThreshold\(numericPart\)/.test(rowJSON),
+    'RowJSON.splitComparisonPrefix must gate prefix peeling on isDecimalThreshold'
+  );
+
   return { relations: relationSources, operators: cases.length };
 }
 

@@ -154,4 +154,21 @@ final class ConditionComparisonTests: XCTestCase {
         XCTAssertEqual(ConditionComparison.splitValuePrefix("<=30%")?.value, "30%")
         XCTAssertEqual(ConditionComparison.splitValuePrefix("<30%")?.comparison, .lessThan)
     }
+
+    func testNonFiniteAndHexTextIsNotTreatedAsAThreshold() {
+        // Double("inf") and Double("0x1p3") both succeed, so a Double-based check would still
+        // peel these into comparisons and rewrite a string value.
+        XCTAssertNil(ConditionComparison.splitValuePrefix("<inf"))
+        XCTAssertNil(ConditionComparison.splitValuePrefix(">nan"))
+        XCTAssertNil(ConditionComparison.splitValuePrefix("<=infinity"))
+        XCTAssertNil(ConditionComparison.splitValuePrefix("<0x1p3"))
+        XCTAssertFalse(ConditionComparison.isDecimalThreshold("inf"))
+        XCTAssertFalse(ConditionComparison.isDecimalThreshold("nan"))
+        XCTAssertFalse(ConditionComparison.isDecimalThreshold(""))
+        XCTAssertFalse(ConditionComparison.isDecimalThreshold("."))
+        XCTAssertFalse(ConditionComparison.isDecimalThreshold("1.2.3"))
+        XCTAssertTrue(ConditionComparison.isDecimalThreshold("30"))
+        XCTAssertTrue(ConditionComparison.isDecimalThreshold("-4.5"))
+        XCTAssertTrue(ConditionComparison.isDecimalThreshold("+7"))
+    }
 }

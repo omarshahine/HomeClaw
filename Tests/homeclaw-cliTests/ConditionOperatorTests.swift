@@ -153,4 +153,17 @@ struct ConditionOperatorTests {
         #expect(RowJSON.splitComparisonPrefix("<")?.value == "")
         #expect(RowJSON.splitComparisonPrefix("<=")?.value == "")
     }
+
+    @Test("non-finite and hex text is not treated as a threshold")
+    func nonFiniteTextStaysLiteral() throws {
+        #expect(RowJSON.splitComparisonPrefix("<inf") == nil)
+        #expect(RowJSON.splitComparisonPrefix(">nan") == nil)
+        #expect(RowJSON.splitComparisonPrefix("<0x1p3") == nil)
+        #expect(RowJSON.isDecimalThreshold("inf") == false)
+        #expect(RowJSON.isDecimalThreshold("1.2.3") == false)
+
+        let row = try CreateAutomation.parseConditionRow("Door:status:<inf")
+        #expect(row["value"] == "<inf")
+        #expect(row["operator"] == nil)
+    }
 }

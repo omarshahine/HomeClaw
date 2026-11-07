@@ -50,6 +50,29 @@ enum RowJSON {
         return comparisonOperatorAliases[trimmed]
     }
 
+    /// True when the text is a plain decimal number: optional sign, digits, at most one dot.
+    ///
+    /// `Double(String)` also accepts `nan`, `inf` and hex floats such as `0x1p3`, which would
+    /// let `"<inf"` be peeled into a comparison. Mirrors `ConditionComparison.isDecimalThreshold`.
+    static func isDecimalThreshold(_ text: String) -> Bool {
+        var digits = Substring(text)
+        if digits.first == "+" || digits.first == "-" { digits = digits.dropFirst() }
+        guard !digits.isEmpty else { return false }
+        var sawDigit = false
+        var sawDot = false
+        for character in digits {
+            if character >= "0", character <= "9" {
+                sawDigit = true
+            } else if character == "." {
+                if sawDot { return false }
+                sawDot = true
+            } else {
+                return false
+            }
+        }
+        return sawDigit
+    }
+
     /// Split a symbolic operator prefix off a CLI-supplied value: `"<30"` → (`"<"`, `"30"`).
     ///
     /// This mirrors the app's `ConditionComparison.splitValuePrefix` and must stay in step with
@@ -69,7 +92,7 @@ enum RowJSON {
             // A bare operator still splits so the caller reports "operator but no value".
             if remainder.isEmpty { return (op, remainder) }
             let numericPart = remainder.hasSuffix("%") ? String(remainder.dropLast()) : remainder
-            guard Double(numericPart) != nil else { return nil }
+            guard RowJSON.isDecimalThreshold(numericPart) else { return nil }
             return (op, remainder)
         }
         return nil
