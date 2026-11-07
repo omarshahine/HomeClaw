@@ -3059,7 +3059,11 @@ final class HomeKitManager: NSObject, Observable {
             )
         }
         let resolvedTrimmedValue = resolvedValue.trimmingCharacters(in: .whitespaces)
-        if resolvedTrimmedValue.isEmpty, resolution != .equal {
+        // Any operator the caller spelled — explicit key or symbolic prefix — needs a value,
+        // including `==`, whose resolved comparison is `.equal` and would otherwise slip past
+        // this check into the demo path (live rejects it later with a generic message).
+        let operatorSupplied = comparison != nil || ConditionComparison.splitValuePrefix(value) != nil
+        if resolvedTrimmedValue.isEmpty, operatorSupplied {
             throw ControlError.invalidArgument(
                 "Condition for '\(property.trimmingCharacters(in: .whitespaces))' has operator "
                     + "'\(resolution.apiValue)' but no value; write the comparison against a value, "
@@ -4456,9 +4460,6 @@ final class HomeKitManager: NSObject, Observable {
         return try uniqueAccessory(named: name, among: matches)
     }
 
-    /// Validate condition-row shapes that need no home graph, so demo mode refuses the same
-    /// malformed operator input the live path refuses. Accessory existence, characteristic
-    /// resolution and operand typing still require the real home and are checked later.
     /// Resolve each row to the canonical (operator, value) shape live would write. Demo mode
     /// stores rows as given, so without this a `"<30"` value persists as a literal while the
     /// live path stores `< 30`.
@@ -4474,6 +4475,9 @@ final class HomeKitManager: NSObject, Observable {
         }
     }
 
+    /// Validate condition-row shapes that need no home graph, so demo mode refuses the same
+    /// malformed operator input the live path refuses. Accessory existence, characteristic
+    /// resolution and operand typing still require the real home and are checked later.
     static func validateConditionRowShapes(_ rows: [[String: String]]) throws {
         for row in rows {
             let property = (row["property"] ?? row["characteristic"] ?? "").trimmingCharacters(in: .whitespaces)
