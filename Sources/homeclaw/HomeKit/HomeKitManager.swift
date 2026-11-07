@@ -254,6 +254,10 @@ fileprivate struct ResolvedCondition {
     let property: String
     let value: NSCopying & NSObjectProtocol
     let rawValue: String
+    /// Comparison the condition applies. Defaults to equality everywhere the row
+    /// does not name an operator, so existing `accessory:property:value` rows keep
+    /// producing the exact predicate they always have.
+    let comparison: ConditionComparison
 }
 
 /// One-shot resume guard for `HomeKitManager.readValueWithTimeout`. The HomeKit
@@ -1956,6 +1960,8 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        // Shape check before the demo branch so demo and live reject the same bad operators.
+        try Self.validateConditionRowShapes(conditions)
         if Self.isDemoMode {
             let weekdaysAutoFilled = !timeConditions.isEmpty && weekdays.isEmpty
             let effectiveWeekdays = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
@@ -1971,7 +1977,7 @@ final class HomeKitManager: NSObject, Observable {
                 triggerValue: triggerValue,
                 sceneName: sceneID,
                 actions: actions,
-                conditions: conditions,
+                conditions: Self.normalizedConditionRows(conditions),
                 timeAfter: echoes.after,
                 timeBefore: echoes.before,
                 weekdays: effectiveWeekdays,
@@ -2016,6 +2022,7 @@ final class HomeKitManager: NSObject, Observable {
                 "accessory_id": $0.accessory.uniqueIdentifier.uuidString,
                 "property": $0.property,
                 "value": $0.rawValue,
+                "operator": $0.comparison.apiValue,
             ], for: $0.characteristic)
         }
         let (timeAfterEcho, timeBeforeEcho) = Self.timeEchoes(timeConditions)
@@ -2313,6 +2320,7 @@ final class HomeKitManager: NSObject, Observable {
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        try Self.validateConditionRowShapes(conditions)
         if Self.isDemoMode {
             let weekdaysAutoFilled = weekdays.isEmpty
             let effectiveWeekdays = weekdaysAutoFilled ? [1, 2, 3, 4, 5, 6, 7] : weekdays
@@ -2322,7 +2330,7 @@ final class HomeKitManager: NSObject, Observable {
                 time: time,
                 sceneName: sceneID,
                 actions: actions,
-                conditions: conditions,
+                conditions: Self.normalizedConditionRows(conditions),
                 timeAfter: echoes.after,
                 timeBefore: echoes.before,
                 weekdays: effectiveWeekdays,
@@ -2362,6 +2370,7 @@ final class HomeKitManager: NSObject, Observable {
                 "accessory_id": $0.accessory.uniqueIdentifier.uuidString,
                 "property": $0.property,
                 "value": $0.rawValue,
+                "operator": $0.comparison.apiValue,
             ], for: $0.characteristic)
         }
         let (timeAfterEcho, timeBeforeEcho) = Self.timeEchoes(timeConditions)
@@ -2602,7 +2611,7 @@ final class HomeKitManager: NSObject, Observable {
             // point. (Tightens behavior of PR #56's existing parser.)
             let condAccessoryID = (cond["accessory"] ?? "").trimmingCharacters(in: .whitespaces)
             let condProperty = (cond["property"] ?? cond["characteristic"] ?? "").trimmingCharacters(in: .whitespaces)
-            let condValueStr = (cond["value"] ?? "").trimmingCharacters(in: .whitespaces)
+            var condValueStr = (cond["value"] ?? "").trimmingCharacters(in: .whitespaces)
             guard !condAccessoryID.isEmpty, !condProperty.isEmpty, !condValueStr.isEmpty else {
                 throw ControlError.invalidArgument("Condition must have non-empty 'accessory', 'property', and 'value' keys")
             }
@@ -2642,15 +2651,45 @@ final class HomeKitManager: NSObject, Observable {
                 throw ControlError.invalidArgument("Characteristic '\(condProperty)' not found on '\(condAccessory.name)' for --condition")
             }
             if let warning { warnings.append(warning) }
+
+            // Comparison + bare value, decided by the one shared precedence rule: a
+            // named operator wins, a symbol prefix applies only when no operator was
+            // named, and naming one plus leaving a prefix is an error rather than a
+            // guess. Absent both, equality — unchanged for every pre-existing row.
+            let comparison: ConditionComparison
+            switch ConditionComparison.resolve(explicitOperator: cond["operator"], value: condValueStr) {
+            case let .ok(resolvedComparison, resolvedValue):
+                comparison = resolvedComparison
+                condValueStr = resolvedValue
+            case let .unknownOperator(operatorText):
+                throw ControlError.invalidArgument(
+                    "Unknown condition operator '\(operatorText)'. Allowed: "
+                        + ConditionComparison.allowedOperatorsDescription + "."
+                )
+            case let .conflict(comparison, conflictValue):
+                throw ControlError.invalidArgument(
+                    "Condition for '\(condProperty)' names operator '\(comparison.apiValue)' but its value "
+                        + "'\(conflictValue)' also starts with a comparison; pass the bare value (for example '30')."
+                )
+            }
+            guard !condValueStr.isEmpty else {
+                throw ControlError.invalidArgument(
+                    "Condition for '\(condProperty)' has operator '\(comparison.apiValue)' but no value"
+                )
+            }
+
             guard let parsed = parseActionValue(condValueStr, property: condProperty) else {
                 throw ControlError.invalidArgument("Cannot parse condition value '\(condValueStr)' for '\(condProperty)'")
             }
+            try Self.validateConditionOperand(
+                comparison, parsed: parsed, property: condProperty, characteristic: condChar)
             resolved.append(ResolvedCondition(
                 accessory: condAccessory,
                 characteristic: condChar,
                 property: condProperty,
                 value: parsed,
-                rawValue: condValueStr
+                rawValue: condValueStr,
+                comparison: comparison
             ))
         }
         return (resolved, warnings)
@@ -2694,7 +2733,7 @@ final class HomeKitManager: NSObject, Observable {
             subpredicates.append(
                 HMEventTrigger.predicateForEvaluatingTrigger(
                     cond.characteristic,
-                    relatedBy: .equalTo,
+                    relatedBy: cond.comparison.nsOperator,
                     toValue: cond.value
                 )
             )
@@ -2993,16 +3032,45 @@ final class HomeKitManager: NSObject, Observable {
         conditionRoom: String? = nil,
         property: String,
         value: String,
+        comparison: ConditionComparison? = nil,
         serviceSelector: [String: String] = [:],
         homeID: String? = nil,
         dryRun: Bool = false
     ) async throws -> [String: Any] {
         await waitForReady()
+        // Decide comparison + bare value up front, before the demo branch, so demo mode
+        // resolves `--value "<30"` exactly as live does instead of persisting the literal
+        // "<30" and echoing equality.
+        let resolution: ConditionComparison
+        var resolvedValue = value
+        switch ConditionComparison.resolve(explicitOperator: comparison?.apiValue, value: value) {
+        case let .ok(resolvedComparison, resolvedConditionValue):
+            resolution = resolvedComparison
+            resolvedValue = resolvedConditionValue
+        case let .unknownOperator(operatorText):
+            throw ControlError.invalidArgument(
+                "Unknown condition operator '\(operatorText)'. Allowed: "
+                    + ConditionComparison.allowedOperatorsDescription + "."
+            )
+        case let .conflict(conflictComparison, conflictValue):
+            throw ControlError.invalidArgument(
+                "Condition names operator '\(conflictComparison.apiValue)' but its value '\(conflictValue)' "
+                    + "also starts with a comparison; pass the bare value (for example '30')."
+            )
+        }
+        let resolvedTrimmedValue = resolvedValue.trimmingCharacters(in: .whitespaces)
+        if resolvedTrimmedValue.isEmpty, resolution != .equal {
+            throw ControlError.invalidArgument(
+                "Condition for '\(property.trimmingCharacters(in: .whitespaces))' has operator "
+                    + "'\(resolution.apiValue)' but no value; write the comparison against a value, "
+                    + "or drop the operator."
+            )
+        }
         if Self.isDemoMode {
             // Validate the selector the same way the live path does, so a malformed
             // service_index fails identically in demo mode.
             _ = try Self.rowServiceSelector(from: serviceSelector, label: "Condition")
-            switch try DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: value, serviceSelector: serviceSelector, dryRun: dryRun) {
+            switch try DemoFixtures.addAutomationCondition(id: id, accessoryID: accessoryID, room: conditionRoom, property: property, value: resolvedValue, comparison: resolution, serviceSelector: serviceSelector, dryRun: dryRun) {
             case .ok(let result): return result
             case .automationNotFound: throw ControlError.triggerNotFound(id)
             case .accessoryNotFound: throw ControlError.accessoryNotFound(accessoryID)
@@ -3028,7 +3096,8 @@ final class HomeKitManager: NSObject, Observable {
         // discipline — defensive layer-symmetry, not a duplicate of the wire check.
         let trimmedAccessoryID = accessoryID.trimmingCharacters(in: .whitespaces)
         let trimmedProperty = property.trimmingCharacters(in: .whitespaces)
-        let trimmedValue = value.trimmingCharacters(in: .whitespaces)
+        let trimmedValue = resolvedValue.trimmingCharacters(in: .whitespaces)
+        let effectiveComparison = resolution
         let trimmedRoom: String? = {
             guard let raw = conditionRoom else { return nil }
             let t = raw.trimmingCharacters(in: .whitespaces)
@@ -3062,10 +3131,12 @@ final class HomeKitManager: NSObject, Observable {
         guard let parsedValue = parseActionValue(trimmedValue, property: trimmedProperty) else {
             throw ControlError.invalidArgument("Cannot parse condition value '\(trimmedValue)' for '\(trimmedProperty)'")
         }
+        try Self.validateConditionOperand(
+            effectiveComparison, parsed: parsedValue, property: trimmedProperty, characteristic: condChar)
 
         let newConditionPredicate = HMEventTrigger.predicateForEvaluatingTrigger(
             condChar,
-            relatedBy: .equalTo,
+            relatedBy: effectiveComparison.nsOperator,
             toValue: parsedValue
         )
 
@@ -3117,6 +3188,7 @@ final class HomeKitManager: NSObject, Observable {
             "accessory_id": condAccessory.uniqueIdentifier.uuidString,
             "property": trimmedProperty,
             "value": trimmedValue,
+            "operator": effectiveComparison.apiValue,
             "condition_count_after": projectedConditionCount,
         ]
         for (key, selectorValue) in AccessoryModel.serviceSelectorFields(for: condChar) {
@@ -3139,7 +3211,7 @@ final class HomeKitManager: NSObject, Observable {
         try await homeKitAsync { trigger.updatePredicate(combinedPredicate, completionHandler: $0) }
 
         AppLogger.homekit.info(
-            "[\(home.name)] Added condition to automation '\(trigger.name)': \(condAccessory.name).\(trimmedProperty) = \(trimmedValue)")
+            "[\(home.name)] Added condition to automation '\(trigger.name)': \(condAccessory.name).\(trimmedProperty) \(effectiveComparison.displaySymbol) \(trimmedValue)")
         result["dry_run"] = false
         return result
     }
@@ -3217,10 +3289,12 @@ final class HomeKitManager: NSObject, Observable {
                 "Nothing to edit. Pass at least one of new_name, time, weekdays, conditions, time_after, time_before, duration_seconds or clear_duration.")
         }
 
+        try Self.validateConditionRowShapes(conditions ?? [])
         if Self.isDemoMode {
             guard let result = try DemoFixtures.editAutomation(
                 id: id, newName: trimmedName, time: timeSpec?.canonicalString, weekdays: weekdays,
-                conditions: conditions, timeEchoes: timeConditions.map { Self.timeEchoes($0) },
+                conditions: conditions.map(Self.normalizedConditionRows),
+                timeEchoes: timeConditions.map { Self.timeEchoes($0) },
                 durationSeconds: durationSeconds, clearDuration: clearDuration, dryRun: dryRun)
             else { throw ControlError.triggerNotFound(id) }
             return result
@@ -4380,6 +4454,84 @@ final class HomeKitManager: NSObject, Observable {
             return accessory.room?.name.localizedCaseInsensitiveCompare(roomName) == .orderedSame
         }
         return try uniqueAccessory(named: name, among: matches)
+    }
+
+    /// Validate condition-row shapes that need no home graph, so demo mode refuses the same
+    /// malformed operator input the live path refuses. Accessory existence, characteristic
+    /// resolution and operand typing still require the real home and are checked later.
+    /// Resolve each row to the canonical (operator, value) shape live would write. Demo mode
+    /// stores rows as given, so without this a `"<30"` value persists as a literal while the
+    /// live path stores `< 30`.
+    static func normalizedConditionRows(_ rows: [[String: String]]) -> [[String: String]] {
+        rows.map { row in
+            var normalized = row
+            if case let .ok(comparison, value) = ConditionComparison.resolve(
+                explicitOperator: row["operator"], value: row["value"] ?? "") {
+                normalized["operator"] = comparison.apiValue
+                normalized["value"] = value
+            }
+            return normalized
+        }
+    }
+
+    static func validateConditionRowShapes(_ rows: [[String: String]]) throws {
+        for row in rows {
+            let property = (row["property"] ?? row["characteristic"] ?? "").trimmingCharacters(in: .whitespaces)
+            let label = property.isEmpty ? "condition" : "'\(property)'"
+            switch ConditionComparison.resolve(explicitOperator: row["operator"], value: row["value"] ?? "") {
+            case let .ok(comparison, value):
+                guard !value.isEmpty else {
+                    throw ControlError.invalidArgument(
+                        "Condition for \(label) has operator '\(comparison.apiValue)' but no value"
+                    )
+                }
+            case let .unknownOperator(operatorText):
+                throw ControlError.invalidArgument(
+                    "Unknown condition operator '\(operatorText)'. Allowed: "
+                        + ConditionComparison.allowedOperatorsDescription + "."
+                )
+            case let .conflict(comparison, conflictValue):
+                throw ControlError.invalidArgument(
+                    "Condition for \(label) names operator '\(comparison.apiValue)' but its value "
+                        + "'\(conflictValue)' also starts with a comparison; "
+                        + "pass the bare value (for example '30')."
+                )
+            }
+        }
+    }
+
+    /// Reject an ordered comparison whose operand is not numeric.
+    ///
+    /// `parseActionValue` maps "1"/"0"/"true"/"on" to a bool for any property it does not
+    /// classify as numeric, so `power < 1` would otherwise become `power < true`; and on a
+    /// boolean characteristic even `power < 50` yields a gate that can never do what was
+    /// asked. HomeKit accepts both predicates and the automation silently misbehaves, which
+    /// is worse than refusing the write. Equality and inequality on booleans stay allowed.
+    private static func validateConditionOperand(
+        _ comparison: ConditionComparison,
+        parsed: NSCopying & NSObjectProtocol,
+        property: String,
+        characteristic: HMCharacteristic
+    ) throws {
+        guard comparison.requiresNumericOperand else { return }
+        // Check the characteristic, not only the value: `power < 50` parses to a number
+        // and would slip past a value-only check, yet on a boolean characteristic it is a
+        // gate that can never be false (or never true) — an automation that silently never
+        // does what was asked.
+        if characteristic.metadata?.format == HMCharacteristicMetadataFormatBool {
+            throw ControlError.invalidArgument(
+                "Operator '\(comparison.apiValue)' needs a numeric characteristic, but '\(property)' is on/off. "
+                    + "On/off characteristics only support == and !=; "
+                    + "use a numeric characteristic (for example current_light_level) for a threshold."
+            )
+        }
+        if let number = parsed as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            throw ControlError.invalidArgument(
+                "Operator '\(comparison.apiValue)' needs a numeric value, but '\(property)' resolved "
+                    + "'\(number)' to a boolean. On/off characteristics only support == and !=; "
+                    + "use a numeric characteristic (for example current_light_level) for a threshold."
+            )
+        }
     }
 
     /// Parse a human-readable action value back to an NSCopying-conforming type.

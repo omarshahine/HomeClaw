@@ -227,6 +227,33 @@ final class SocketServer: @unchecked Sendable {
                 }
                 row["room"] = trimmed
             }
+            // Optional comparison operator for condition rows (`<`, `<=`, `>`, `>=`,
+            // `==`, `!=`, or the lt/lte/gt/gte/eq/ne mnemonics). Absent means
+            // equality, which is what every pre-existing row gets, so a payload that
+            // does not know about operators is bit-identical to before. Gated to
+            // condition rows: an `actions` row has no predicate to compare.
+            // An action has no predicate to compare, so an `operator` there is a mistake the
+            // caller should hear about rather than have silently dropped.
+            if fieldName != "conditions", dict["operator"] != nil {
+                throw AccessoryRowsArgError(
+                    message: "'\(fieldName)'[\(index)].operator is not supported; an action has no comparison. "
+                        + "Remove it, or express the comparison as a condition.")
+            }
+            if fieldName == "conditions", let operatorRaw = dict["operator"] {
+                guard let operatorStr = operatorRaw as? String else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].operator must be a non-empty string when provided")
+                }
+                let trimmedOperator = operatorStr.trimmingCharacters(in: .whitespaces)
+                guard !trimmedOperator.isEmpty else {
+                    throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].operator must be a non-empty string when provided")
+                }
+                guard let comparison = ConditionComparison.parse(trimmedOperator) else {
+                    throw AccessoryRowsArgError(
+                        message: "'\(fieldName)'[\(index)].operator '\(trimmedOperator)' is not a supported comparison; allowed: "
+                            + ConditionComparison.allowedOperatorsDescription)
+                }
+                row["operator"] = comparison.apiValue
+            }
             // Optional service selectors (#87): pick one service when the
             // characteristic exists on several (the gangs of a dual relay).
             for key in HomeKitManager.RowServiceSelector.keys {
@@ -1603,6 +1630,31 @@ final class SocketServer: @unchecked Sendable {
                 guard !value.isEmpty else {
                     return encodeResponse(success: false, error: "'value' argument must be non-empty (after trimming whitespace)")
                 }
+                // Optional comparison operator (`"<"`, `"lte"`, …). Absent means
+                // equality, which is exactly what this command wrote before ordered
+                // comparisons existed. It is passed through as nil rather than `.equal`
+                // so the manager can still tell "no operator given" (split a symbolic
+                // prefix off the value) from "caller explicitly asked for ==" (which
+                // contradicts a prefix and must fail).
+                let comparison: ConditionComparison?
+                if let operatorRaw = args["operator"] {
+                    guard let operatorStr = operatorRaw as? String else {
+                        return encodeResponse(success: false, error: "'operator' must be a string when provided")
+                    }
+                    let trimmedOperator = operatorStr.trimmingCharacters(in: .whitespaces)
+                    guard !trimmedOperator.isEmpty else {
+                        return encodeResponse(success: false, error: "'operator' must be non-empty when provided")
+                    }
+                    guard let parsedOperator = ConditionComparison.parse(trimmedOperator) else {
+                        return encodeResponse(
+                            success: false,
+                            error: "'operator' '\(trimmedOperator)' is not a supported comparison; allowed: "
+                                + ConditionComparison.allowedOperatorsDescription)
+                    }
+                    comparison = parsedOperator
+                } else {
+                    comparison = nil
+                }
                 // Optional room disambiguator — mirrors the `condition.room` field
                 // accepted by `create`/`create-time`. Forwarded to HomeKitManager so
                 // accessory name lookup can scope by room when multiple accessories
@@ -1641,6 +1693,7 @@ final class SocketServer: @unchecked Sendable {
                     conditionRoom: conditionRoom,
                     property: property,
                     value: value,
+                    comparison: comparison,
                     serviceSelector: serviceSelector,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")

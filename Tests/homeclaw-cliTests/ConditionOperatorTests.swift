@@ -1,0 +1,121 @@
+import Testing
+@testable import homeclaw_cli
+
+/// CLI-layer coverage for condition comparison operators.
+///
+/// The app target owns the authoritative parse (`ConditionComparison`) and the socket
+/// re-validates every row; these tests pin the CLI's half: splitting a symbolic prefix
+/// off `--condition`, normalizing `--operator` spellings, and rejecting a typo before a
+/// socket round-trip. Mirrors how `--time-after`/`--time-before` are validated at each
+/// layer rather than only at the end.
+@Suite("Condition comparison operators (CLI)")
+struct ConditionOperatorTests {
+    @Test("symbolic prefix moves out of the value into operator")
+    func prefixBecomesOperator() throws {
+        let parsed = try CreateAutomation.parseConditionRow("Lux:current_light_level:<30")
+        #expect(parsed["accessory"] == "Lux")
+        #expect(parsed["property"] == "current_light_level")
+        #expect(parsed["value"] == "30")
+        #expect(parsed["operator"] == "<")
+    }
+
+    @Test("two-character comparisons win over their one-character prefix")
+    func longestPrefixWins() throws {
+        let lte = try CreateAutomation.parseConditionRow("Lux:current_light_level:<=30")
+        #expect(lte["operator"] == "<=")
+        #expect(lte["value"] == "30")
+
+        let gte = try CreateAutomation.parseConditionRow("Lux:current_light_level:>=30")
+        #expect(gte["operator"] == ">=")
+        #expect(gte["value"] == "30")
+    }
+
+    @Test("rows without a prefix stay equality rows")
+    func plainRowsUnchanged() throws {
+        let parsed = try CreateAutomation.parseConditionRow("Front Door:contact_state:0")
+        #expect(parsed["operator"] == nil)
+        #expect(parsed["value"] == "0")
+    }
+
+    @Test("naked comparison operator rejected as a value")
+    func nakedOperatorRejected() {
+        #expect(throws: (any Error).self) {
+            _ = try CreateAutomation.parseConditionRow("Lux:current_light_level:<")
+        }
+    }
+
+    @Test("mnemonics and symbols normalize to one canonical spelling")
+    func normalization() {
+        #expect(RowJSON.normalizedComparisonOperator("lt") == "<")
+        #expect(RowJSON.normalizedComparisonOperator("LTE") == "<=")
+        #expect(RowJSON.normalizedComparisonOperator("  >=  ") == ">=")
+        #expect(RowJSON.normalizedComparisonOperator("eq") == "==")
+        #expect(RowJSON.normalizedComparisonOperator("ne") == "!=")
+        #expect(RowJSON.normalizedComparisonOperator("ltt") == nil)
+        #expect(RowJSON.normalizedComparisonOperator("") == nil)
+    }
+
+    @Test("--operator is validated at the CLI boundary")
+    func addConditionValidatesOperator() throws {
+        let ok = try AddAutomationCondition.parse([
+            "Porch Lights",
+            "--accessory", "Lux",
+            "--property", "current_light_level",
+            "--value", "30",
+            "--operator", "lte",
+        ])
+        #expect(ok.comparisonOperator == "lte")
+
+        #expect(throws: (any Error).self) {
+            _ = try AddAutomationCondition.parse([
+                "Porch Lights",
+                "--accessory", "Lux",
+                "--property", "current_light_level",
+                "--value", "30",
+                "--operator", "ltt",
+            ])
+        }
+    }
+
+    @Test("condition JSON operator is validated at the CLI, not after a round-trip")
+    func conditionJSONValidatesOperator() {
+        #expect(throws: (any Error).self) {
+            _ = try RowJSON.parseFlagRow(
+                #"{"accessory":"Lux","property":"current_light_level","value":"30","operator":"ltt"}"#,
+                flag: "--condition-json")
+        }
+        // Mnemonic is accepted and normalized to the canonical symbol.
+        let row = try? RowJSON.parseFlagRow(
+            #"{"accessory":"Lux","property":"current_light_level","value":"30","operator":" lt "}"#,
+            flag: "--condition-json")
+        #expect(row?["operator"] == "<")
+    }
+
+    @Test("operator plus a comparison prefix on the value is rejected as contradictory")
+    func explicitOperatorWithPrefixRejected() {
+        #expect(throws: (any Error).self) {
+            _ = try RowJSON.parseFlagRow(
+                #"{"accessory":"Lux","property":"current_light_level","value":"<30","operator":"=="}"#,
+                flag: "--condition-json")
+        }
+    }
+
+    @Test("operator on an action row is rejected rather than silently dropped")
+    func actionRowRejectsOperator() {
+        #expect(throws: (any Error).self) {
+            _ = try RowJSON.parseFlagRow(
+                #"{"accessory":"Lamp","property":"power","value":"true","operator":"<"}"#,
+                flag: "--action-json")
+        }
+    }
+
+    @Test("condition JSON rows may carry an operator")
+    func conditionJSONAcceptsOperator() throws {
+        let row = try RowJSON.parseFlagRow(
+            #"{"accessory":"Lux","property":"current_light_level","value":"30","operator":"<"}"#,
+            flag: "--condition-json"
+        )
+        #expect(row["operator"] == "<")
+        #expect(row["value"] == "30")
+    }
+}

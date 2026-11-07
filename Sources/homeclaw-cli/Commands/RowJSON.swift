@@ -19,8 +19,50 @@ enum RowJSON {
 
     /// Keys an `--action-json` / `--condition-json` object may carry.
     static let flagRowKeys: Swift.Set<String> = Swift.Set(
-        ["accessory", "property", "characteristic", "value", "room"] + serviceSelectorKeys
+        ["accessory", "property", "characteristic", "value", "room", "operator"] + serviceSelectorKeys
     )
+
+    /// Canonical comparison operators a condition row may carry.
+    ///
+    /// The CLI is an SPM target and cannot see the app's `ConditionComparison`, so it
+    /// validates the spelling itself — the same defense-in-depth split the repo already
+    /// uses for time specs (`validateTimeSpec` here, `TimeCondition.parse` in the app).
+    /// SocketServer owns the authoritative parse and rejects anything this lets through
+    /// that it does not recognize.
+    static let comparisonOperators: [String] = ["==", "!=", "<", "<=", ">", ">="]
+
+    /// Mnemonic spellings, mapped to the canonical symbol.
+    static let comparisonOperatorAliases: [String: String] = [
+        "eq": "==", "equals": "==", "equalto": "==",
+        "ne": "!=", "neq": "!=", "notequalto": "!=",
+        "lt": "<", "lessthan": "<",
+        "lte": "<=", "le": "<=", "lessthanorequalto": "<=",
+        "gt": ">", "greaterthan": ">",
+        "gte": ">=", "ge": ">=", "greaterthanorequalto": ">=",
+    ]
+
+    /// Normalize an operator written as a symbol or a mnemonic to its canonical form.
+    /// Returns nil for anything unrecognized so the caller fails loud instead of
+    /// silently falling back to equality and shipping a different rule than asked for.
+    static func normalizedComparisonOperator(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if comparisonOperators.contains(trimmed) { return trimmed }
+        return comparisonOperatorAliases[trimmed]
+    }
+
+    /// Split a leading comparison off a value (`"<30"` → (`"<"`, `"30"`)`). Longest
+    /// prefix wins so `"<=30"` never parses as `<` + `"=30"`. Returns nil when there is
+    /// no prefix, which leaves plain equality rows untouched.
+    static func splitComparisonPrefix(_ raw: String) -> (op: String, value: String)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes: [(String, String)] = [
+            ("==", "=="), ("!=", "!="), ("<=", "<="), (">=", ">="), ("<", "<"), (">", ">"),
+        ]
+        for (prefix, op) in prefixes where trimmed.hasPrefix(prefix) {
+            return (op, String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
+    }
 
     /// Parses one `--action-json` / `--condition-json` value into the row dict the
     /// socket layer expects. Strict: unknown keys (a typo such as `service-index`),
@@ -53,7 +95,37 @@ enum RowJSON {
         for key in ["accessory", "property", "value"] where row[key] == nil {
             throw ValidationError("Invalid \(flag): missing required key '\(key)'.")
         }
+        try validateOperator(in: &row, flag: flag)
         return row
+    }
+
+    /// Validate (and normalize) the optional `operator` key of a JSON row.
+    ///
+    /// Only condition rows have a predicate to compare, so an `operator` on an action
+    /// row is rejected rather than silently dropped by the socket. Spelling is checked
+    /// here too: leaving it to the socket would let `--condition-json {"operator":"ltt"}`
+    /// fail only after a round-trip, and with the app down it would surface as a
+    /// connection error instead of a bad argument.
+    private static func validateOperator(in row: inout [String: String], flag: String) throws {
+        guard let rawOperator = row["operator"] else { return }
+        guard !flag.contains("action") else {
+            throw ValidationError(
+                "Invalid \(flag): 'operator' applies to conditions only; an action has no comparison.")
+        }
+        let trimmed = rawOperator.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let normalized = normalizedComparisonOperator(trimmed) else {
+            throw ValidationError(
+                "Unknown \(flag) operator '\(trimmed)'. Allowed: "
+                    + comparisonOperators.joined(separator: ", ") + " (or eq, ne, lt, lte, gt, gte).")
+        }
+        // An explicit operator plus a symbolic prefix on the value is contradictory.
+        // The app rejects it too; catching it here fails before the socket round-trip.
+        if let value = row["value"], let split = splitComparisonPrefix(value) {
+            throw ValidationError(
+                "Invalid \(flag): operator '\(normalized)' was given but value '\(value)' "
+                    + "also starts with '\(split.op)'. Pass the bare value (for example '\(split.value)').")
+        }
+        row["operator"] = normalized
     }
 
     /// Converts the `actions` array of an `import-scene` / `update-scene` file to

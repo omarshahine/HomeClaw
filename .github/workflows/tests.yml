@@ -60,6 +60,9 @@ jobs:
           node --test scripts/check-openclaw-failure.test.mjs
           node scripts/check-mcp-schema-parity.mjs
 
+      - name: Verify condition operator wiring
+        run: node scripts/check-condition-operators.mjs
+
       - name: Build MCP server
         run: npm run build:mcp
 

@@ -1,0 +1,130 @@
+import Foundation
+
+/// Comparison operator for a characteristic automation condition.
+///
+/// HomeKit has always supported ordered comparisons here — the trigger predicate
+/// factory `HMEventTrigger.predicateForEvaluatingTrigger(_:relatedBy:toValue:)`
+/// accepts every `NSComparisonPredicate.Operator` except the string-matching ones —
+/// but HomeClaw only ever wrote `.equalTo`, so a numeric gate such as "only when the
+/// room is darker than 30 lux" could not be expressed at all. This type is the
+/// single vocabulary shared by the CLI rows, the socket args, the app's MCP handlers
+/// and the predicate builder.
+///
+/// The canonical spelling matches what the read side reports for a decoded
+/// characteristic condition (`operator: "<"`), so a condition read back from
+/// `automations get` round-trips into a create/edit unchanged.
+enum ConditionComparison: String, CaseIterable, Sendable {
+    case equal = "=="
+    case notEqual = "!="
+    case lessThan = "<"
+    case lessThanOrEqual = "<="
+    case greaterThan = ">"
+    case greaterThanOrEqual = ">="
+
+    /// Canonical API spelling, identical to the `operator` field `automations get`
+    /// reports for a decoded characteristic condition.
+    var apiValue: String { rawValue }
+
+    /// Human-readable form for CLI output, e.g. `current_light_level < 30`.
+    var displaySymbol: String { rawValue }
+
+    /// True for the four ordered comparisons, which need a numeric operand. HomeKit
+    /// will accept `power < true` as a predicate and the resulting automation simply
+    /// never fires, so this is checked before anything is written.
+    var requiresNumericOperand: Bool {
+        switch self {
+        case .lessThan, .lessThanOrEqual, .greaterThan, .greaterThanOrEqual: return true
+        case .equal, .notEqual: return false
+        }
+    }
+
+    var nsOperator: NSComparisonPredicate.Operator {
+        switch self {
+        case .equal: return .equalTo
+        case .notEqual: return .notEqualTo
+        case .lessThan: return .lessThan
+        case .lessThanOrEqual: return .lessThanOrEqualTo
+        case .greaterThan: return .greaterThan
+        case .greaterThanOrEqual: return .greaterThanOrEqualTo
+        }
+    }
+
+    /// Parse an operator from either the symbolic form (`<`, `<=`, `==`, …) or the
+    /// short mnemonic (`lt`, `lte`, `gt`, `gte`, `eq`, `ne`). Case-insensitive;
+    /// surrounding whitespace and newlines are ignored.
+    ///
+    /// Returns nil for anything else so every caller can fail loud. Falling back to
+    /// equality would turn a typo (`--operator ltt`) into a silently different rule
+    /// that still fires, which is the failure mode this whole path exists to avoid.
+    static func parse(_ raw: String) -> ConditionComparison? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let exact = ConditionComparison(rawValue: trimmed) { return exact }
+        switch trimmed {
+        case "eq", "equals", "equalto": return .equal
+        case "ne", "neq", "notequalto": return .notEqual
+        case "lt", "lessthan": return .lessThan
+        case "lte", "le", "lessthanorequalto": return .lessThanOrEqual
+        case "gt", "greaterthan": return .greaterThan
+        case "gte", "ge", "greaterthanorequalto": return .greaterThanOrEqual
+        default: return nil
+        }
+    }
+
+    /// Split a leading comparison off a value string: `"<30"` → (`.lessThan`, `"30"`).
+    ///
+    /// Longest prefix wins, so `"<=30"` never parses as `<` followed by `"=30"`.
+    /// Returns nil when the value carries no operator prefix, which leaves plain
+    /// equality rows byte-identical to their previous behavior.
+    static func splitValuePrefix(_ raw: String) -> (comparison: ConditionComparison, value: String)? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes: [(String, ConditionComparison)] = [
+            ("==", .equal), ("!=", .notEqual),
+            ("<=", .lessThanOrEqual), (">=", .greaterThanOrEqual),
+            ("<", .lessThan), (">", .greaterThan),
+        ]
+        for (prefix, comparison) in prefixes where trimmed.hasPrefix(prefix) {
+            let remainder = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            return (comparison, remainder)
+        }
+        return nil
+    }
+
+    /// Outcome of deciding the comparison and bare value for one condition row.
+    enum Resolution: Equatable {
+        case ok(comparison: ConditionComparison, value: String)
+        /// An explicit operator and a symbolic prefix on the value contradict.
+        case conflict(comparison: ConditionComparison, value: String)
+        case unknownOperator(String)
+    }
+
+    /// Decide the comparison and bare value, with one precedence rule for every entry
+    /// point (`create`, `edit`, `add-condition`, socket, app MCP).
+    ///
+    /// An operator the caller names always wins, and leaving a comparison prefix on the
+    /// value at the same time is an error rather than a guess — `operator: "=="` with
+    /// `value: "<30"` used to be silently written as `< 30`. Only when no operator is
+    /// named does a prefix get peeled off the value.
+    static func resolve(explicitOperator: String?, value: String) -> Resolution {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let explicitOperator {
+            let trimmedOperator = explicitOperator.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let comparison = parse(trimmedOperator) else {
+                return .unknownOperator(trimmedOperator)
+            }
+            if splitValuePrefix(trimmedValue) != nil {
+                return .conflict(comparison: comparison, value: trimmedValue)
+            }
+            return .ok(comparison: comparison, value: trimmedValue)
+        }
+        if let split = splitValuePrefix(trimmedValue) {
+            return .ok(comparison: split.comparison, value: split.value)
+        }
+        return .ok(comparison: .equal, value: trimmedValue)
+    }
+
+    /// The allowed set, so error messages never restate a list that can drift from the
+    /// enum itself.
+    static var allowedOperatorsDescription: String {
+        allCases.map(\.apiValue).joined(separator: ", ") + " (or eq, ne, lt, lte, gt, gte)"
+    }
+}
