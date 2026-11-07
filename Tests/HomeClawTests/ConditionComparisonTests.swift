@@ -132,4 +132,26 @@ final class ConditionComparisonTests: XCTestCase {
         XCTAssertEqual(split?.comparison, .lessThan)
         XCTAssertEqual(split?.value, "")
     }
+
+    func testStringValuesStartingWithAComparisonCharacterAreLeftAlone() {
+        // A string characteristic can legitimately hold "<none>" or "!=x". Peeling those
+        // would rewrite an existing equality condition into a comparison, and naming `==`
+        // explicitly is rejected as a conflict, so the value would be inexpressible.
+        XCTAssertNil(ConditionComparison.splitValuePrefix("<none>"))
+        XCTAssertNil(ConditionComparison.splitValuePrefix("!=x"))
+        XCTAssertNil(ConditionComparison.splitValuePrefix(">unknown"))
+        XCTAssertEqual(
+            ConditionComparison.resolve(explicitOperator: "==", value: "<none>"),
+            .ok(comparison: .equal, value: "<none>"))
+        XCTAssertEqual(
+            ConditionComparison.resolve(explicitOperator: nil, value: "<none>"),
+            .ok(comparison: .equal, value: "<none>"))
+    }
+
+    func testNumericPrefixesStillSplitIncludingPercent() {
+        XCTAssertEqual(ConditionComparison.splitValuePrefix("<30")?.value, "30")
+        XCTAssertEqual(ConditionComparison.splitValuePrefix(">=-5")?.value, "-5")
+        XCTAssertEqual(ConditionComparison.splitValuePrefix("<=30%")?.value, "30%")
+        XCTAssertEqual(ConditionComparison.splitValuePrefix("<30%")?.comparison, .lessThan)
+    }
 }

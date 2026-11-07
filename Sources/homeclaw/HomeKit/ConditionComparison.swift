@@ -75,6 +75,16 @@ enum ConditionComparison: String, CaseIterable, Sendable {
     /// Longest prefix wins, so `"<=30"` never parses as `<` followed by `"=30"`.
     /// Returns nil when the value carries no operator prefix, which leaves plain
     /// equality rows byte-identical to their previous behavior.
+    /// Split a symbolic prefix such as `"<30"` into a comparison and a value.
+    ///
+    /// A prefix is only peeled when what follows is a number, because the prefix exists for
+    /// numeric thresholds. A string characteristic can legitimately hold a value that starts
+    /// with a comparison character (`"<none>"`, `"!=x"`); splitting those would silently
+    /// rewrite an existing equality condition into a comparison, and naming `==` explicitly
+    /// would then be rejected as a conflict, leaving the value inexpressible.
+    ///
+    /// A bare operator with nothing after it still splits, with an empty remainder, so callers
+    /// keep reporting "operator but no value" instead of treating `"<"` as a literal string.
     static func splitValuePrefix(_ raw: String) -> (comparison: ConditionComparison, value: String)? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefixes: [(String, ConditionComparison)] = [
@@ -84,6 +94,9 @@ enum ConditionComparison: String, CaseIterable, Sendable {
         ]
         for (prefix, comparison) in prefixes where trimmed.hasPrefix(prefix) {
             let remainder = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if remainder.isEmpty { return (comparison, remainder) }
+            let numericPart = remainder.hasSuffix("%") ? String(remainder.dropLast()) : remainder
+            guard Double(numericPart) != nil else { return nil }
             return (comparison, remainder)
         }
         return nil

@@ -208,4 +208,26 @@ final class ConditionOperandValidationTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("'ltt'"), error.localizedDescription)
         }
     }
+
+    @MainActor
+    func testPlainEmptyValueIsNotBlamedOnAnOperator() {
+        // A row that never named an operator should not be told it "has operator '=='".
+        XCTAssertThrowsError(
+            try HomeKitManager.validateConditionRowShapes([["property": "power", "value": ""]])
+        ) { error in
+            let message = "\(error)"
+            XCTAssertTrue(message.contains("non-empty value"), message)
+            XCTAssertFalse(message.contains("has operator"), message)
+        }
+    }
+
+    @MainActor
+    func testNamedOperatorWithEmptyValueStillBlamesTheOperator() {
+        XCTAssertThrowsError(
+            try HomeKitManager.validateConditionRowShapes(
+                [["property": "current_light_level", "value": "", "operator": "<"]])
+        ) { error in
+            XCTAssertTrue("\(error)".contains("has operator"), "\(error)")
+        }
+    }
 }

@@ -4490,8 +4490,19 @@ final class HomeKitManager: NSObject, Observable {
             switch ConditionComparison.resolve(explicitOperator: row["operator"], value: row["value"] ?? "") {
             case let .ok(comparison, value):
                 guard !value.isEmpty else {
+                    // Only blame the operator when the caller actually named one, or wrote a
+                    // bare operator as the value. A plain row with a missing value is a
+                    // different mistake, and "operator '==' but no value" about a row that
+                    // never named an operator sends the caller looking in the wrong place.
+                    let namedOperator = row["operator"] != nil
+                        || ConditionComparison.splitValuePrefix(row["value"] ?? "") != nil
+                    if namedOperator {
+                        throw ControlError.invalidArgument(
+                            "Condition for \(label) has operator '\(comparison.apiValue)' but no value"
+                        )
+                    }
                     throw ControlError.invalidArgument(
-                        "Condition for \(label) has operator '\(comparison.apiValue)' but no value"
+                        "Condition for \(label) must have a non-empty value"
                     )
                 }
                 if let message = ConditionComparison.booleanTokenRejection(comparison, value: value, property: property) {
