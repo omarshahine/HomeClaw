@@ -92,10 +92,23 @@ enum RowJSON {
             // A bare operator still splits so the caller reports "operator but no value".
             if remainder.isEmpty { return (op, remainder) }
             let numericPart = remainder.hasSuffix("%") ? String(remainder.dropLast()) : remainder
-            guard RowJSON.isDecimalThreshold(numericPart) else { return nil }
-            return (op, remainder)
+            // Peel a boolean token too: `<on` is a mistaken threshold, and the app rejects it
+            // with "on/off values only support == and !=". `<none>` is neither numeric nor a
+            // token, so it stays a literal value.
+            if RowJSON.isDecimalThreshold(numericPart) || RowJSON.isBooleanToken(remainder) {
+                return (op, remainder)
+            }
+            return nil
         }
         return nil
+    }
+
+    /// On/off words that are never a valid operand for an ordered comparison.
+    static func isBooleanToken(_ value: String) -> Bool {
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "on", "off", "true", "false": return true
+        default: return false
+        }
     }
 
     /// Parses one `--action-json` / `--condition-json` value into the row dict the

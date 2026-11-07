@@ -171,4 +171,17 @@ final class ConditionComparisonTests: XCTestCase {
         XCTAssertTrue(ConditionComparison.isDecimalThreshold("-4.5"))
         XCTAssertTrue(ConditionComparison.isDecimalThreshold("+7"))
     }
+
+    func testBooleanTokensAfterAnOperatorStillSplit() {
+        // `<on` is a mistaken threshold, not a string value. Peeling it lets the caller hear
+        // "on/off values only support == and !=" instead of silently comparing against "<on".
+        XCTAssertEqual(ConditionComparison.splitValuePrefix("<on")?.comparison, .lessThan)
+        XCTAssertEqual(ConditionComparison.splitValuePrefix("<on")?.value, "on")
+        XCTAssertEqual(ConditionComparison.splitValuePrefix(">= OFF")?.value, "OFF")
+        XCTAssertEqual(ConditionComparison.splitValuePrefix(">false")?.comparison, .greaterThan)
+        XCTAssertNotNil(
+            ConditionComparison.booleanTokenRejection(.lessThan, value: "on", property: "power"))
+        // ...while a non-token string is still left alone.
+        XCTAssertNil(ConditionComparison.splitValuePrefix("<none>"))
+    }
 }

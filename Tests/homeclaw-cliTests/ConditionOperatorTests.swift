@@ -166,4 +166,18 @@ struct ConditionOperatorTests {
         #expect(row["value"] == "<inf")
         #expect(row["operator"] == nil)
     }
+
+    @Test("a boolean token after an operator still splits so the app can refuse it")
+    func booleanTokenAfterOperatorSplits() throws {
+        #expect(RowJSON.splitComparisonPrefix("<on")?.op == "<")
+        #expect(RowJSON.splitComparisonPrefix("<on")?.value == "on")
+        #expect(RowJSON.splitComparisonPrefix(">= OFF")?.value == "OFF")
+        #expect(RowJSON.isBooleanToken("true") == true)
+        #expect(RowJSON.isBooleanToken("<none>") == false)
+
+        // `<none>` is not a token, so it stays a literal value.
+        let row = try CreateAutomation.parseConditionRow("Door:status:<none>")
+        #expect(row["value"] == "<none>")
+        #expect(row["operator"] == nil)
+    }
 }

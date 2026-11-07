@@ -117,8 +117,14 @@ enum ConditionComparison: String, CaseIterable, Sendable {
             let remainder = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
             if remainder.isEmpty { return (comparison, remainder) }
             let numericPart = remainder.hasSuffix("%") ? String(remainder.dropLast()) : remainder
-            guard isDecimalThreshold(numericPart) else { return nil }
-            return (comparison, remainder)
+            // A boolean token after an operator is a mistaken threshold (`"<on"`), not a string
+            // value: peel it so the caller gets "on/off values only support == and !=" instead of
+            // a silent equality against the literal text. `"<none>"` is not a token and stays
+            // literal, which is the case the numeric rule exists to protect.
+            if Self.isDecimalThreshold(numericPart) || Self.isBooleanToken(remainder) {
+                return (comparison, remainder)
+            }
+            return nil
         }
         return nil
     }
