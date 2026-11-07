@@ -83,11 +83,17 @@ export async function checkConditionOperators() {
     `CLI prefix table (${cliPrefixes.join(', ')}) differs from the app's (${appPrefixes.join(', ')}); the two copies must list the same operators in the same order`
   );
 
-  // 6. The CLI splitter must gate prefix peeling on the decimal rule. Without this the CLI
-  //    peels `inf`, `nan` and hex text that the app leaves literal, which is how the two
-  //    drifted apart before.
+  // 6. The CLI splitter must gate prefix peeling on the decimal rule. Scope this to the
+  //    splitter's own body and match the call rather than an exact argument name: a renamed
+  //    local variable is a harmless edit and must not fail CI, but dropping the call is the
+  //    regression that let `inf`/`nan`/hex text be peeled.
+  const splitterStart = rowJSON.indexOf('static func splitComparisonPrefix');
+  assert.ok(splitterStart !== -1, 'could not locate RowJSON.splitComparisonPrefix');
+  const splitterRest = rowJSON.slice(splitterStart);
+  const splitterEnd = splitterRest.indexOf('\n    }');
+  const splitterBody = splitterEnd === -1 ? splitterRest : splitterRest.slice(0, splitterEnd);
   assert.ok(
-    /isDecimalThreshold\(numericPart\)/.test(rowJSON),
+    /isDecimalThreshold\s*\(/.test(splitterBody),
     'RowJSON.splitComparisonPrefix must gate prefix peeling on isDecimalThreshold so `inf`/`nan`/hex text stays literal'
   );
 
