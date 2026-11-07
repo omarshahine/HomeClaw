@@ -98,11 +98,14 @@ enum ConditionComparison: String, CaseIterable, Sendable {
     ///
     /// Longest prefix wins, so `"<=30"` never parses as `<` followed by `"=30"`.
     ///
-    /// A prefix is only peeled when what follows is a number, because the prefix exists for
-    /// numeric thresholds. A string characteristic can legitimately hold a value that starts
-    /// with a comparison character (`"<none>"`, `"!=x"`); splitting those would silently
-    /// rewrite an existing equality condition into a comparison, and naming `==` explicitly
-    /// would then be rejected as a conflict, leaving the value inexpressible.
+    /// A prefix is only peeled when what follows is a number or an on/off token, because the
+    /// prefix exists for numeric thresholds. A string characteristic can legitimately hold a
+    /// value that starts with a comparison character (`"<none>"`, `"!=x"`); splitting those
+    /// would silently rewrite an existing equality condition into a comparison, and naming `==`
+    /// explicitly would then be rejected as a conflict, leaving the value inexpressible.
+    /// A boolean token is the exception: `"<on"` is a mistaken threshold, so it peels and the
+    /// caller gets "on/off values only support == and !=" rather than a silent equality
+    /// against the literal text.
     ///
     /// A bare operator with nothing after it still splits, with an empty remainder, so callers
     /// keep reporting "operator but no value" instead of treating `"<"` as a literal string.
