@@ -463,7 +463,7 @@ enum ToolHandlers {
                   },
                   "property": {
                     "type": "string",
-                    "description": "Characteristic name (e.g., contact_state, occupancy_detected, power)"
+                    "description": "Characteristic name (e.g., contact_state, occupancy_detected, power, current_light_level)"
                   },
                   "characteristic": {
                     "type": "string",
@@ -471,7 +471,27 @@ enum ToolHandlers {
                   },
                   "value": {
                     "type": "string",
-                    "description": "Required value as string (e.g., \"true\", \"0\", \"50\"). Uses exact match (==)."
+                    "description": "Required value as string (e.g., \"true\", \"0\", \"50\"), compared using `operator`. A symbolic prefix (\"<30\") is also accepted and sets the operator for you."
+                  },
+                  "operator": {
+                    "type": "string",
+                    "enum": [
+                      "==",
+                      "!=",
+                      "<",
+                      "<=",
+                      ">",
+                      ">=",
+                      "eq",
+                      "ne",
+                      "lt",
+                      "lte",
+                      "le",
+                      "gt",
+                      "gte",
+                      "ge"
+                    ],
+                    "description": "Comparison applied to the value. Defaults to \"==\". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, le, gt, gte, ge) are accepted."
                   },
                   "room": {
                     "type": "string",
@@ -507,7 +527,7 @@ enum ToolHandlers {
                   }
                 ]
               },
-              "description": "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. On edit, conditions replaces every characteristic condition of the automation and [] removes them; time and unrecognized conditions are kept. (create / create_time / edit actions) Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates."
+              "description": "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition compares one characteristic against a value (equality by default; ordered comparisons via `operator`) in the home. On edit, conditions replaces every characteristic condition of the automation and [] removes them; time and unrecognized conditions are kept. (create / create_time / edit actions) Optional service_name / service_id / service_index pick one service when the property exists on several (e.g. the gangs of a dual relay); scenes get and automations get emit them on exactly those rows. Without one, an ambiguous row uses the first service and the response carries a `warnings` entry naming the candidates."
             },
             "time_after": {
               "type": "array",
@@ -542,7 +562,7 @@ enum ToolHandlers {
                 },
                 "property": {
                   "type": "string",
-                  "description": "Characteristic name (e.g., contact_state, occupancy_detected, power)"
+                  "description": "Characteristic name (e.g., contact_state, occupancy_detected, power, current_light_level)"
                 },
                 "characteristic": {
                   "type": "string",
@@ -550,7 +570,27 @@ enum ToolHandlers {
                 },
                 "value": {
                   "type": "string",
-                  "description": "Required value as string (e.g., \"true\", \"0\", \"50\"). Uses exact match (==)."
+                  "description": "Required value as string (e.g., \"true\", \"0\", \"50\"), compared using `operator`. A symbolic prefix (\"<30\") is also accepted and sets the operator for you."
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    "==",
+                    "!=",
+                    "<",
+                    "<=",
+                    ">",
+                    ">=",
+                    "eq",
+                    "ne",
+                    "lt",
+                    "lte",
+                    "le",
+                    "gt",
+                    "gte",
+                    "ge"
+                  ],
+                  "description": "Comparison applied to the value. Defaults to \"==\". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed — e.g. current_light_level \"<\" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, le, gt, gte, ge) are accepted."
                 },
                 "room": {
                   "type": "string",
@@ -807,6 +847,24 @@ enum ToolHandlers {
         }
     }
 
+    /// The `operator` of an `add_condition` condition: nil when absent or JSON null
+    /// (as in the Node handler), otherwise a known operator or an error.
+    static func addConditionComparison(_ condition: [String: Any]) throws -> ConditionComparison? {
+        switch ConditionComparison.parseOperatorArg(condition["operator"]) {
+        case .absent:
+            return nil
+        case .comparison(let comparison):
+            return comparison
+        case .notString, .empty:
+            throw HomeKitManager.ControlError.invalidArgument("condition.operator must be a non-empty string when provided")
+        case .unknown(let operatorString):
+            throw HomeKitManager.ControlError.invalidArgument(
+                "Unknown condition.operator '\(operatorString)'. Allowed: "
+                    + ConditionComparison.allowedOperatorsDescription + "."
+            )
+        }
+    }
+
     @MainActor private static func automations(_ args: [String: Any], hk: HomeKitManager) async throws -> Any {
         let action = string(args, "action") ?? "list"
         let home = string(args, "home_id"), dry = bool(args, "dry_run")
@@ -821,7 +879,12 @@ enum ToolHandlers {
             for key in HomeKitManager.RowServiceSelector.keys {
                 if let selectorValue = try SocketServer.normalizeServiceSelector(condition[key], key: key, label: "condition.\(key)") { serviceSelector[key] = selectorValue }
             }
-            return try await hk.addAutomationCondition(id: id, accessoryID: accessory, conditionRoom: condition["room"] as? String, property: property, value: value, serviceSelector: serviceSelector, homeID: home, dryRun: dry)
+            // Same comparison vocabulary as the socket and the CLI. This key used to be
+            // dropped here while `create`/`edit` honored it, which silently wrote an
+            // equality rule for a threshold request — the failure this feature exists
+            // to prevent.
+            let comparison = try addConditionComparison(condition)
+            return try await hk.addAutomationCondition(id: id, accessoryID: accessory, conditionRoom: condition["room"] as? String, property: property, value: value, comparison: comparison, serviceSelector: serviceSelector, homeID: home, dryRun: dry)
         case "edit":
             guard let id = string(args, "id") else { throw HomeKitManager.ControlError.invalidArgument("id is required") }
             // Presence decides what changes: an empty weekdays/conditions array clears,

@@ -17398,16 +17398,17 @@ var tools = [
             type: "object",
             properties: {
               accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
-              property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
+              property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power, current_light_level)" },
               characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
-              value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
+              value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"), compared using `operator`. A symbolic prefix ("<30") is also accepted and sets the operator for you.' },
+              operator: { type: "string", enum: ["==", "!=", "<", "<=", ">", ">=", "eq", "ne", "lt", "lte", "le", "gt", "gte", "ge"], description: 'Comparison applied to the value. Defaults to "==". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed \u2014 e.g. current_light_level "<" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, le, gt, gte, ge) are accepted.' },
               room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" },
               ...rowServiceSelectors
             },
             required: ["accessory", "value"],
             anyOf: [{ required: ["property"] }, { required: ["characteristic"] }]
           },
-          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition is a (characteristic == value) match against any accessory in the home. On edit, conditions replaces every characteristic condition of the automation and [] removes them; time and unrecognized conditions are kept. (create / create_time / edit actions)" + rowServiceSelectorNote
+          description: "Extra characteristic predicates ANDed into the trigger predicate. The trigger fires only when the trigger event happens AND every condition holds. Example: porch motion (or sunset, on create_time) that only triggers when the front door is closed AND nobody is home. Each condition compares one characteristic against a value (equality by default; ordered comparisons via `operator`) in the home. On edit, conditions replaces every characteristic condition of the automation and [] removes them; time and unrecognized conditions are kept. (create / create_time / edit actions)" + rowServiceSelectorNote
         },
         time_after: {
           type: "array",
@@ -17433,9 +17434,10 @@ var tools = [
           type: "object",
           properties: {
             accessory: { type: "string", description: "Condition accessory UUID (preferred) or name" },
-            property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power)" },
+            property: { type: "string", description: "Characteristic name (e.g., contact_state, occupancy_detected, power, current_light_level)" },
             characteristic: { type: "string", description: 'Alias for "property" \u2014 provide one or the other' },
-            value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"). Uses exact match (==).' },
+            value: { type: "string", description: 'Required value as string (e.g., "true", "0", "50"), compared using `operator`. A symbolic prefix ("<30") is also accepted and sets the operator for you.' },
+            operator: { type: "string", enum: ["==", "!=", "<", "<=", ">", ">=", "eq", "ne", "lt", "lte", "le", "gt", "gte", "ge"], description: 'Comparison applied to the value. Defaults to "==". Ordered comparisons (<, <=, >, >=) need a numeric characteristic and a numeric value; on/off, string and other non-numeric characteristics only support == and !=. This is how a numeric gate is expressed \u2014 e.g. current_light_level "<" 30 fires only when the room is darker than 30 lux. Mnemonics (eq, ne, lt, lte, le, gt, gte, ge) are accepted.' },
             room: { type: "string", description: "Room name for accessory disambiguation when multiple accessories share a name (optional)" },
             ...rowServiceSelectors
           },
@@ -17851,12 +17853,17 @@ async function handleAutomations(args, send = sendCommand) {
       if (room != null && (typeof room !== "string" || room.trim() === "")) {
         throw new Error("condition.room must be a non-empty string when provided");
       }
+      const conditionOperator = args.condition.operator;
+      if (conditionOperator != null && (typeof conditionOperator !== "string" || conditionOperator.trim() === "")) {
+        throw new Error("condition.operator must be a non-empty string when provided");
+      }
       const socketArgs = {
         id: args.id,
         accessory,
         property,
         value
       };
+      if (conditionOperator) socketArgs.operator = conditionOperator.trim();
       if (room) socketArgs.room = room;
       for (const key of ["service_name", "service_id", "service_index"]) {
         if (Object.prototype.hasOwnProperty.call(args.condition, key)) socketArgs[key] = args.condition[key];
