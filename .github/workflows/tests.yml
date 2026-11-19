@@ -129,6 +129,11 @@ jobs:
           python3 scripts/test-ci-evidence.py -v
           python3 scripts/test-integration-settings.py -v
 
+      - name: Test home selection layout offscreen
+        env:
+          HOME_SELECTION_EVIDENCE_DIR: ${{ runner.temp }}/home-selection-layout
+        run: bash scripts/test-home-selection-layout.sh
+
       - name: Verify generated HomeKit entitlement
         run: |
           python3 - <<'PY'
@@ -161,6 +166,8 @@ jobs:
             ${{ runner.temp }}/catalyst-test-evidence/summary.json
             ${{ runner.temp }}/catalyst-test-evidence/tests.json
             ${{ runner.temp }}/catalyst-test-evidence/HomeClawTests.xcresult
+            ${{ runner.temp }}/home-selection-layout/results.txt
+            ${{ runner.temp }}/home-selection-layout/*.png
 
   version-check:
     name: Version Consistency

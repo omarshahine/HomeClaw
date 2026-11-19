@@ -10,15 +10,8 @@ struct OnboardingFlowView: View {
 
     @State private var step = 0
     @State private var homeCount = 0
-    @State private var homes: [HomeInfo] = []
+    @State private var homes: [HomeSelectionView.HomeInfo] = []
     @State private var selectedHomeID = ""
-
-    struct HomeInfo: Identifiable {
-        let id: String
-        let name: String
-        let accessoryCount: Int
-        let roomCount: Int
-    }
 
     private struct Feature: Identifiable {
         let id = UUID()
@@ -66,7 +59,12 @@ struct OnboardingFlowView: View {
                     step += 1
                 }
             case 2 where hasHomeSelection:
-                homeSelectionScreen
+                HomeSelectionView(homes: homes, selectedHomeID: $selectedHomeID) {
+                    if !selectedHomeID.isEmpty {
+                        HomeClawConfig.shared.defaultHomeID = selectedHomeID
+                    }
+                    step += 1
+                }
             case _ where step == (hasHomeSelection ? 3 : 2):
                 IntegrationSetupView {
                     step += 1
@@ -136,87 +134,6 @@ struct OnboardingFlowView: View {
         .padding(.horizontal, 48)
     }
 
-    // MARK: - Home Selection Screen
-
-    @ViewBuilder
-    private var homeSelectionScreen: some View {
-        VStack(spacing: 32) {
-            Spacer()
-
-            Image(systemName: "house.2.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.blue)
-                .symbolRenderingMode(.hierarchical)
-
-            VStack(spacing: 12) {
-                Text("Choose Your Home")
-                    .font(.largeTitle.bold())
-
-                Text("You have multiple HomeKit homes. Select the one HomeClaw should use by default.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
-            }
-
-            VStack(spacing: 8) {
-                ForEach(homes) { home in
-                    Button {
-                        selectedHomeID = home.id
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(home.name)
-                                    .font(.headline)
-                                Text("\(home.accessoryCount) accessories, \(home.roomCount) rooms")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            if selectedHomeID == home.id {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.blue)
-                                    .font(.title3)
-                            } else {
-                                Image(systemName: "circle")
-                                    .foregroundStyle(.tertiary)
-                                    .font(.title3)
-                            }
-                        }
-                        .padding()
-                        .background(
-                            selectedHomeID == home.id ? Color.blue.opacity(0.1) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 12)
-                        )
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .frame(maxWidth: 440)
-
-            Spacer()
-
-            Button {
-                if !selectedHomeID.isEmpty {
-                    HomeClawConfig.shared.defaultHomeID = selectedHomeID
-                }
-                step += 1
-            } label: {
-                Text("Continue")
-                    .font(.headline)
-                    .frame(maxWidth: 280)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(selectedHomeID.isEmpty)
-            .padding(.bottom, 40)
-        }
-        .padding(.horizontal, 40)
-    }
-
     // MARK: - Completion Screen
 
     @ViewBuilder
@@ -262,7 +179,7 @@ struct OnboardingFlowView: View {
             homeCount = hk.homeCount
             let homesList = await hk.listHomes()
             homes = homesList.map { dict in
-                HomeInfo(
+                HomeSelectionView.HomeInfo(
                     id: dict["id"] as? String ?? UUID().uuidString,
                     name: dict["name"] as? String ?? "Unknown",
                     accessoryCount: dict["accessory_count"] as? Int ?? 0,
