@@ -7,6 +7,7 @@ New
 - Reachability events: HomeClaw now records when an accessory stops responding and when it comes back. Webhook triggers can opt in to these.
 
 Fixed
+- Multi-channel accessory discovery includes channel names and service selectors in JSON list, search, rooms and device-map results. Search matches channel names and Display As categories; per-channel values are marked last-known.
 - Onboarding keeps Continue visible when choosing among many homes.
 - Menu scenes remain visible when their room has no displayed accessories. Selected Only disables scenes that include excluded or unresolved accessories, and blank scene names have a readable label.
 - Invalid and non-finite numeric comparison values are rejected before an automation is changed.
