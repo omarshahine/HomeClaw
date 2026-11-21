@@ -131,6 +131,7 @@ jobs:
         run: |
           python3 scripts/test-ci-evidence.py -v
           python3 scripts/test-integration-settings.py -v
+          python3 scripts/verify-onboarding-schemes.py
 
       - name: Test home selection layout offscreen
         env:

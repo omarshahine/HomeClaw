@@ -78,7 +78,7 @@ targets:
       configs:
         DebugUI:
           HOMECLAW_APP_BUNDLE_IDENTIFIER: com.shahine.homeclaw.ui-regression
-          CODE_SIGN_ENTITLEMENTS: ""
+          CODE_SIGN_ENTITLEMENTS: Resources/UIRegression.entitlements
           ENABLE_APP_SANDBOX: NO
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG"
         Debug:
@@ -88,12 +88,9 @@ targets:
           ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
           ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APP_STORE"
-    entitlements:
-      path: Resources/HomeClaw.entitlements
-      properties:
-        com.apple.developer.homekit: true
-        com.apple.security.application-groups:
-          - group.com.shahine.homeclaw
+    # The tracked entitlement files are canonical. XcodeGen's `entitlements`
+    # generator overwrites CODE_SIGN_ENTITLEMENTS in every configuration,
+    # which would give the isolated UI-test identity production capabilities.
     dependencies:
       - target: macOSBridge
         platformFilter: maccatalyst

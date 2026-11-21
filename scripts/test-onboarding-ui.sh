@@ -14,5 +14,5 @@ xcodebuild test -project HomeClaw.xcodeproj -scheme HomeClawOnboardingTests \
   -test-timeouts-enabled YES -default-test-execution-time-allowance 120 \
   -maximum-test-execution-time-allowance 180 \
   CODE_SIGNING_ALLOWED=YES "CODE_SIGN_IDENTITY=${HOMECLAW_UI_SIGNING_IDENTITY:-Apple Development}" \
-  CODE_SIGN_ENTITLEMENTS= CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER= \
+  CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER= \
   2>&1 | tee "$evidence/xcodebuild.log"
