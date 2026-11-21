@@ -104,7 +104,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     @objc func triggerScene(id: String) {
         Task { @MainActor in
             do {
-                _ = try await HomeKitManager.shared.triggerScene(id: id)
+                _ = try await HomeKitManager.shared.triggerScene(id: id, fromMenu: true)
             } catch {
                 AppLogger.app.error("Menu scene trigger failed: \(error.localizedDescription)")
                 macOSController?.flashError()

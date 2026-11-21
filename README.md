@@ -740,6 +740,8 @@ View connection status, browse your homes, and select which home is active for a
 
 Control which accessories are exposed to MCP clients and the CLI. Switch between **All Accessories** (everything visible) and **Selected Only** (allowlist mode). Accessories are grouped by room with a search filter and room-level toggles for quick bulk selection.
 
+Menu scenes remain visible when their room has no displayed accessories. In **Selected Only**, a scene can run from the menu only when every action resolves to a selected accessory; excluded or unresolved actions and unavailable selections produce a disabled entry with an explanation. CLI/MCP scene execution continues to run the complete action set.
+
 <p align="center"><img src="docs/images/settings-devices.png" width="500" alt="Devices settings tab"></p>
 
 ### Integrations

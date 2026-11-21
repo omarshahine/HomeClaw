@@ -536,6 +536,7 @@ final class HomeKitManager: NSObject, Observable {
         /// other HMTrigger subclass (e.g. a timer automation from the Home app).
         case unsupportedTriggerType(String)
         case sceneNotFound(String)
+        case sceneUnavailableFromMenu(String)
         case serviceNotFound(String)
         /// Service selectors matched more than one service. Payload: pre-rendered detail.
         case ambiguousService(String)
@@ -575,6 +576,7 @@ final class HomeKitManager: NSObject, Observable {
                 """
             case .unsupportedTriggerType(let detail): detail
             case .sceneNotFound(let id): "Scene not found: \(id)"
+            case .sceneUnavailableFromMenu(let reason): "Scene unavailable from menu: \(reason)"
             case .serviceNotFound(let detail): "Service not found: \(detail)"
             case .ambiguousService(let detail): "Ambiguous: \(detail)"
             case .invalidArgument(let detail): "Invalid argument: \(detail)"
@@ -865,7 +867,7 @@ final class HomeKitManager: NSObject, Observable {
         }
     }
 
-    func triggerScene(id: String, homeID: String? = nil) async throws -> [String: Any] {
+    func triggerScene(id: String, homeID: String? = nil, fromMenu: Bool = false) async throws -> [String: Any] {
         await waitForReady()
         if Self.isDemoMode {
             guard let scene = DemoFixtures.sceneSummaries.first(where: {
@@ -888,6 +890,9 @@ final class HomeKitManager: NSObject, Observable {
                         ? actionSet.uniqueIdentifier.uuidString.caseInsensitiveCompare(id) == .orderedSame
                         : actionSet.name.localizedCaseInsensitiveCompare(id) == .orderedSame
                     guard matched else { continue }
+                    if fromMenu, let reason = menuSceneDisabledReason(actionSet, in: home) {
+                        throw ControlError.sceneUnavailableFromMenu(reason)
+                    }
                     try await home.executeActionSet(actionSet)
                     AppLogger.homekit.info("[\(home.name)] Triggered scene: \(actionSet.name)")
                     HomeEventLogger.shared.logSceneTriggered(
@@ -4841,6 +4846,22 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Menu Data
 
+    /// Kept separate from CLI/MCP policy. Rechecked on a menu invocation as well
+    /// as in the snapshot so changing device selection cannot use a stale item.
+    private func menuSceneDisabledReason(_ actionSet: HMActionSet, in home: HMHome) -> String? {
+        let config = HomeClawConfig.shared
+        guard config.filterMode == "allowlist" else { return nil }
+        let knownIDs = Set(home.accessories.map { $0.uniqueIdentifier.uuidString })
+        let targets: [String?] = actionSet.actions.map { action in
+            guard let write = action as? HMCharacteristicWriteAction<NSCopying>,
+                  let accessory = write.characteristic.service?.accessory,
+                  knownIDs.contains(accessory.uniqueIdentifier.uuidString)
+            else { return nil }
+            return accessory.uniqueIdentifier.uuidString
+        }
+        return MenuScenePolicy.disabledReason(actionAccessoryIDs: targets, allowedIDs: config.allowedIDs)
+    }
+
     /// Builds a complete snapshot of the current home's rooms, accessories, and scenes
     /// for the menu bar. Reads only from the in-memory cache — no async I/O.
     func buildMenuData() -> [String: Any] {
@@ -4862,7 +4883,13 @@ final class HomeKitManager: NSObject, Observable {
         }
 
         let scenesList: [[String: Any]] = selectedHome.actionSets
-            .map { AccessoryModel.sceneSummary($0) }
+            .map { scene in
+                var summary = AccessoryModel.sceneSummary(scene)
+                if let reason = menuSceneDisabledReason(scene, in: selectedHome) {
+                    summary["menu_disabled_reason"] = reason
+                }
+                return summary
+            }
             .sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }
 
         // Category priority: controllable items first, then status-only
