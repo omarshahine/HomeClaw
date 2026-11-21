@@ -4605,6 +4605,11 @@ final class HomeKitManager: NSObject, Observable {
             return "Operator '\(comparison.apiValue)' needs a numeric value, but '\(property)' resolved "
                 + "'\(number)' to a boolean. On/off characteristics only support == and !=; " + advice
         }
+        // The legacy parser also accepts NaN, infinities and overflowing decimals.
+        // Reject them for thresholds while leaving equality's early return unchanged.
+        if let number = parsed as? NSNumber, !number.doubleValue.isFinite {
+            return "Operator '\(comparison.apiValue)' needs a finite numeric value for '\(property)'."
+        }
         return nil
     }
 

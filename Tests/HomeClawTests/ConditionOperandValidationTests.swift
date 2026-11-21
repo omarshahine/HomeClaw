@@ -78,6 +78,44 @@ final class ConditionOperandValidationTests: XCTestCase {
         XCTAssertTrue(message.contains("boolean"), message)
     }
 
+    func testOrderedComparisonsRejectParsedNonFiniteValues() throws {
+        for raw in ["nan", "inf", "-inf", "infinity", "-infinity", "1e9999", "-1e9999"] {
+            let value = try XCTUnwrap(Double(raw), raw)
+            XCTAssertFalse(value.isFinite, raw)
+            let parsed = NSNumber(value: value)
+            for comparison in ConditionComparison.allCases where comparison.requiresNumericOperand {
+                for format in [HMCharacteristicMetadataFormatFloat, HMCharacteristicMetadataFormatInt, nil] {
+                    let message = try XCTUnwrap(HomeKitManager.conditionOperandRejection(
+                        comparison, parsed: parsed, property: "current_light_level", format: format), raw)
+                    XCTAssertTrue(message.contains("finite numeric value"), message)
+                }
+            }
+        }
+    }
+
+    func testOrderedComparisonsStillAcceptFiniteValues() {
+        for value in [-Double.greatestFiniteMagnitude, -1, 0, 1, 30.5, Double.greatestFiniteMagnitude] {
+            for comparison in ConditionComparison.allCases where comparison.requiresNumericOperand {
+                for format in [HMCharacteristicMetadataFormatFloat, nil] {
+                    XCTAssertNil(HomeKitManager.conditionOperandRejection(
+                        comparison, parsed: NSNumber(value: value), property: "current_light_level", format: format))
+                }
+            }
+        }
+    }
+
+    func testEqualityAndInequalityKeepLegacyNonFiniteOperands() {
+        for value in [Double.nan, Double.infinity, -Double.infinity] {
+            for comparison in [ConditionComparison.equal, .notEqual] {
+                for format in [HMCharacteristicMetadataFormatFloat, HMCharacteristicMetadataFormatBool,
+                               HMCharacteristicMetadataFormatString, nil] {
+                    XCTAssertNil(HomeKitManager.conditionOperandRejection(
+                        comparison, parsed: NSNumber(value: value), property: "current_light_level", format: format))
+                }
+            }
+        }
+    }
+
     func testEqualityAndInequalityAreAllowedOnEveryFormat() {
         for format in [HMCharacteristicMetadataFormatBool, HMCharacteristicMetadataFormatString, nil] {
             for comparison in [ConditionComparison.equal, .notEqual] {
