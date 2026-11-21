@@ -382,7 +382,7 @@ final class HomeKitManager: NSObject, Observable {
 
     func listHomes() async -> [[String: Any]] {
         await waitForReady()
-        if Self.isDemoMode { return [DemoFixtures.homeSummary()] }
+        if Self.isDemoMode { return DemoFixtures.homeSummaries() }
         let activeHomes = filteredHomes(homeID: nil)
         let activeID = activeHomes.first?.uniqueIdentifier
         return homes.map { home in

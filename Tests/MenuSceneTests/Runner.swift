@@ -65,12 +65,30 @@ import Foundation
             let items = menu.items.filter { ($0.representedObject as? String).map(sceneIDs.contains) == true }
             try require(items.count == scenes.count, "\(name): a scene vanished or was duplicated")
             try require(wantedIDs.isSubset(of: Set(items.compactMap { $0.representedObject as? String })), "\(name): fewer than eight wanted scenes")
+            let rooms = snapshot["rooms"] as! [[String: Any]]
+            let roomNames = Set(rooms.compactMap { $0["name"] as? String })
+            func homeLevel(_ scene: [String: Any]) -> Bool {
+                let scope = scene["rooms"] as? [String] ?? []
+                return scene["type"] as? String != "user_defined" || scope.count != 1 || !roomNames.contains(scope[0])
+            }
+            let ordered = scenes.filter(homeLevel) + rooms.flatMap { room in
+                scenes.filter { !homeLevel($0) && ($0["rooms"] as? [String])?.first == room["name"] as? String }
+            }
+            try require(items.compactMap { $0.representedObject as? String } == ordered.compactMap { $0["id"] as? String }, "\(name): scene order changed")
+            var section = ""
+            for item in menu.items {
+                if item.title == "Scenes" || roomNames.contains(item.title) { section = item.title }
+                if let id = item.representedObject as? String, let scene = scenes.first(where: { $0["id"] as? String == id }) {
+                    let expected = homeLevel(scene) ? "Scenes" : (scene["rooms"] as! [String])[0]
+                    try require(section == expected, "\(name): wrong section for \(item.title)")
+                }
+            }
             var labels: [[String: Any]] = []
             for item in items {
                 let id = item.representedObject as! String
                 let input = scenes.first { $0["id"] as? String == id }!
                 let rawName = input["name"] as? String ?? "?"
-                let expectedName = rawName.isEmpty ? "Unnamed Scene" : rawName
+                let expectedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Unnamed Scene" : rawName
                 let enabled = !disabled.contains(UUID(uuidString: id)!)
                 try require(item.title == expectedName, "\(name): wrong scene label")
                 try require(item.isEnabled == enabled, "\(name): wrong enabled state for \(item.title)")
@@ -115,6 +133,11 @@ import Foundation
         try require(home.executions == [wanted[4].uniqueIdentifier], "Allowed menu scene was blocked")
         home.executions = []
 
+        HomeClawConfig.shared.allowedIDs = selectedAll
+        try inspect("selected-only-excluded-to-allowed-refresh", manager.buildMenuData())
+        _ = try await manager.triggerScene(id: wanted[6].uniqueIdentifier.uuidString, fromMenu: true)
+        try require(home.executions == [wanted[6].uniqueIdentifier], "Refreshed allowed scene remained blocked")
+        home.executions = []
         HomeClawConfig.shared.allowedIDs = [targetLamp.uniqueIdentifier.uuidString, unscoped.uniqueIdentifier.uuidString]
         try inspect("selected-only-other-room-excluded", manager.buildMenuData(), disabled: Set(wanted[2...5].map(\.uniqueIdentifier)))
         HomeClawConfig.shared.allowedIDs = nil
@@ -155,6 +178,10 @@ import Foundation
         home.actionSets = wanted + [zeroBuiltin, builtinControl]
         zeroBuiltin.name = ""
         try inspect("literal-empty-name-fallback", manager.buildMenuData())
+        zeroBuiltin.name = " \n\t"
+        try inspect("whitespace-only-name-fallback", manager.buildMenuData())
+        zeroBuiltin.name = "  Named Scene  "
+        try inspect("nonblank-name-preserves-spacing", manager.buildMenuData())
         zeroBuiltin.name = "Good Morning"
         try inspect("named-zero-action-built-in-unchanged", manager.buildMenuData())
         var missingName = base
@@ -167,8 +194,8 @@ import Foundation
 
         try require(bridge.calls.isEmpty && !NSApplication.shared.isActive, "Fixture invoked UI/bridge actions")
         let result: [String: Any] = ["cases": cases, "bridge_calls": bridge.calls,
-                                   "menu_execution_checks": 9, "unchanged_cli_execution_checks": 3]
+                                   "menu_execution_checks": 10, "unchanged_cli_execution_checks": 3]
         try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: output.appendingPathComponent("results.json"))
-        print("PASS \(cases.count) actual NSMenu cases, 9 menu execution checks and 3 unchanged CLI/MCP checks; only in-memory fake execution")
+        print("PASS \(cases.count) actual NSMenu cases, 10 menu execution checks and 3 unchanged CLI/MCP checks; only in-memory fake execution")
     }
 }

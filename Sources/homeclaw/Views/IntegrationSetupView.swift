@@ -111,6 +111,7 @@ struct IntegrationSetupView: View {
                 }
             }
             .frame(maxWidth: 440)
+            .disabled(UIRegressionEnvironment.enabled)
 
             if let message = feedbackMessage {
                 Label(
@@ -184,6 +185,7 @@ struct IntegrationSetupView: View {
     // MARK: - Status Checking
 
     private func refreshStatuses() {
+        guard !UIRegressionEnvironment.enabled else { return }
         nodeAvailable = nodeJSPath() != nil
         claudeDesktopInstalled = checkClaudeDesktopInstalled()
         claudeCodeInstalled = checkClaudeCodeInstalled()

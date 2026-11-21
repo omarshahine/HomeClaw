@@ -36,7 +36,8 @@ struct HomeSelectionLayoutTests {
         }
         try verify(count: 7, size: CGSize(width: 466, height: 600), output: output)
         try verify(count: 7, size: CGSize(width: 700, height: 400), output: output)
-        print("PASS all 7 home-selection layout scenarios")
+        try verify(count: 20, size: CGSize(width: 466, height: 400), output: output)
+        print("PASS all 8 home-selection layout scenarios")
     }
 
     @MainActor

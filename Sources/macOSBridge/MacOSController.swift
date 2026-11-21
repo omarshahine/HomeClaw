@@ -326,7 +326,7 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         let type = scene["type"] as? String ?? "user_defined"
         let disabledReason = scene["menu_disabled_reason"] as? String
         let item = NSMenuItem(
-            title: name.isEmpty ? "Unnamed Scene" : name,
+            title: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Unnamed Scene" : name,
             action: disabledReason == nil ? #selector(triggerScene(_:)) : nil, keyEquivalent: "")
         item.target = self
         item.isEnabled = disabledReason == nil

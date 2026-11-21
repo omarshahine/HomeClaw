@@ -9,6 +9,7 @@ struct OnboardingFlowView: View {
     let onComplete: () -> Void
 
     @State private var step = 0
+    @State private var isLoadingHomes = false
     @State private var homeCount = 0
     @State private var homes: [HomeSelectionView.HomeInfo] = []
     @State private var selectedHomeID = ""
@@ -55,9 +56,16 @@ struct OnboardingFlowView: View {
                 welcomeScreen
             case 1:
                 HomeKitSetupView {
-                    loadHomes()
-                    step += 1
+                    guard !isLoadingHomes else { return }
+                    isLoadingHomes = true
+                    Task {
+                        // Skip for Now must remain immediate when HomeKit isn't ready.
+                        if HomeKitManager.shared.isReady { await loadHomes() }
+                        step = 2
+                        isLoadingHomes = false
+                    }
                 }
+                .allowsHitTesting(!isLoadingHomes)
             case 2 where hasHomeSelection:
                 HomeSelectionView(homes: homes, selectedHomeID: $selectedHomeID) {
                     if !selectedHomeID.isEmpty {
@@ -74,6 +82,13 @@ struct OnboardingFlowView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: step)
+        .task {
+            if UIRegressionEnvironment.enabled,
+               ProcessInfo.processInfo.arguments.contains("--ui-test-home-selection") {
+                await loadHomes()
+                step = 2
+            }
+        }
     }
 
     // MARK: - Welcome Screen
@@ -173,26 +188,26 @@ struct OnboardingFlowView: View {
 
     // MARK: - Data Loading
 
-    private func loadHomes() {
-        Task { @MainActor in
-            let hk = HomeKitManager.shared
-            homeCount = hk.homeCount
-            let homesList = await hk.listHomes()
-            homes = homesList.map { dict in
-                HomeSelectionView.HomeInfo(
-                    id: dict["id"] as? String ?? UUID().uuidString,
-                    name: dict["name"] as? String ?? "Unknown",
-                    accessoryCount: dict["accessory_count"] as? Int ?? 0,
-                    roomCount: dict["room_count"] as? Int ?? 0
-                )
-            }
+    @MainActor
+    private func loadHomes() async {
+        let hk = HomeKitManager.shared
+        let homesList = await hk.listHomes()
+        homes = homesList.map { dict in
+            HomeSelectionView.HomeInfo(
+                id: dict["id"] as? String ?? UUID().uuidString,
+                name: dict["name"] as? String ?? "Unknown",
+                accessoryCount: dict["accessory_count"] as? Int ?? 0,
+                roomCount: dict["room_count"] as? Int ?? 0
+            )
+        }
 
-            // Pre-select default or first home
-            if let defaultID = HomeClawConfig.shared.defaultHomeID, !defaultID.isEmpty {
-                selectedHomeID = defaultID
-            } else if let first = homes.first {
-                selectedHomeID = first.id
-            }
+        homeCount = homes.count
+
+        // Pre-select a default that still belongs to the available homes.
+        if let defaultID = HomeClawConfig.shared.defaultHomeID, homes.contains(where: { $0.id == defaultID }) {
+            selectedHomeID = defaultID
+        } else if let first = homes.first {
+            selectedHomeID = first.id
         }
     }
 }

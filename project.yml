@@ -12,6 +12,7 @@ options:
 
 settings:
   base:
+    HOMECLAW_APP_BUNDLE_IDENTIFIER: com.shahine.homeclaw
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     DEAD_CODE_STRIPPING: YES
@@ -57,7 +58,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
+        PRODUCT_BUNDLE_IDENTIFIER: "$(HOMECLAW_APP_BUNDLE_IDENTIFIER)"
         PRODUCT_NAME: HomeClaw
         TARGETED_DEVICE_FAMILY: "6"
         SUPPORTS_MACCATALYST: YES

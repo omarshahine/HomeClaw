@@ -21,5 +21,15 @@ private func verifyUnitTestLaunchPolicy() throws {
 #else
 final class AppLaunchPolicyTests: XCTestCase {
     func testUnitTestHostDetection() throws { try verifyUnitTestLaunchPolicy() }
+
+    func testIsolatedUIRequiresSeparateIdentityAndBothFlags() {
+        let flags = ["--ui-test-demo", "--ui-test-isolated"]
+        XCTAssertTrue(UIRegressionEnvironment.isEnabled(bundleIdentifier: "com.shahine.homeclaw.ui-regression", arguments: flags))
+        XCTAssertFalse(UIRegressionEnvironment.isEnabled(bundleIdentifier: "com.shahine.homeclaw", arguments: flags))
+        XCTAssertFalse(UIRegressionEnvironment.isEnabled(bundleIdentifier: nil, arguments: flags))
+        for arguments in [[], ["--ui-test-demo"], ["--ui-test-isolated"]] {
+            XCTAssertFalse(UIRegressionEnvironment.isEnabled(bundleIdentifier: "com.shahine.homeclaw.ui-regression", arguments: arguments))
+        }
+    }
 }
 #endif

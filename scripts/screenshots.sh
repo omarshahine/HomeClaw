@@ -96,7 +96,7 @@ for language in "${LANGUAGES[@]}"; do
     -project "$REPO_ROOT/$PROJECT" \
     -scheme "$SCHEME" \
     -destination "$DESTINATION" \
-    -only-testing:"$UI_TEST_TARGET" \
+    -only-testing:"$UI_TEST_TARGET/ScreenshotTests" \
     -resultBundlePath "$result" \
     -enableCodeCoverage NO \
     DEVELOPMENT_TEAM="$team" -allowProvisioningUpdates \
