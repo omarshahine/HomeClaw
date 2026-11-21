@@ -151,3 +151,29 @@ test('edit forwards conditions rows with an operator intact', async () => {
   assert.equal(calls[0][0], 'edit_automation');
   assert.equal(calls[0][1].conditions[0].operator, '<=');
 });
+
+const append = { action: 'append_event', id: 'Rule', accessory_id: 'PIR', characteristic: 'motion_detected', trigger_value: 'true' };
+test('append_event previews by default and preserves explicit value', async () => {
+  const {calls,send} = fakeSend();
+  await handleAutomations(append, send);
+  assert.deepEqual(calls, [['append_automation_event', {id:'Rule', accessory_id:'PIR', characteristic:'motion_detected', trigger_value:'true', apply:false}]]);
+});
+test('append_event applies only with boolean consent and fresh fingerprint', async () => {
+  const {calls,send} = fakeSend();
+  await handleAutomations({...append, apply:true, fingerprint:'fresh', service_name:'Presence', service_id:'id', service_index:2, home_id:'home'}, send);
+  assert.equal(calls[0][1].apply,true);
+  assert.equal(calls[0][1].fingerprint,'fresh');
+  assert.equal(calls[0][1].service_index,2);
+});
+test('append_event rejects missing value, malformed consent and conflicting preview without sending', async () => {
+  for (const patch of [{trigger_value:undefined},{trigger_value:''},{trigger_value:null},{apply:true},{apply:'true'},{apply:1},{apply:true,fingerprint:'ok',dry_run:true},{fingerprint:null}]) {
+    const {calls,send} = fakeSend();
+    await assert.rejects(handleAutomations({...append,...patch},send));
+    assert.equal(calls.length,0);
+  }
+});
+test('append_event forwards malformed service index for strict shared server rejection', async () => {
+  const {calls,send} = fakeSend();
+  await handleAutomations({...append,service_index:null},send);
+  assert.equal(calls[0][1].service_index,null);
+});

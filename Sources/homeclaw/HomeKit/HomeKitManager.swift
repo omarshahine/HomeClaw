@@ -3553,6 +3553,165 @@ final class HomeKitManager: NSObject, Observable {
         ] as [String: Any]
     }
 
+    // MARK: - Append one characteristic trigger event (issue #173)
+
+    private static let eventAppendSession = UUID().uuidString
+
+    /// Preview by default. Appends one OR alternative without rebuilding any
+    /// existing event, predicate, action-set link or scheduling property.
+    func appendAutomationEvent(
+        id: String, accessoryID: String, characteristic: String, value: String,
+        serviceName: String? = nil, serviceID: String? = nil, serviceIndex: Int? = nil,
+        homeID: String? = nil, apply: Bool = false, fingerprint: String? = nil
+    ) async throws -> [String: Any] {
+        await waitForReady()
+        guard !Self.isDemoMode else {
+            throw ControlError.invalidArgument("append-event is not available through demo state; use the synthetic transaction tests")
+        }
+        let candidates: [HMHome]
+        if let homeID {
+            candidates = homes.filter { $0.uniqueIdentifier.uuidString.caseInsensitiveCompare(homeID) == .orderedSame
+                || $0.name.localizedCaseInsensitiveCompare(homeID) == .orderedSame }
+        } else { candidates = filteredHomes(homeID: nil) }
+        guard candidates.count == 1, let home = candidates.first else {
+            throw ControlError.invalidArgument("append-event requires one unambiguous home; pass its UUID")
+        }
+        let trigger = try resolveEventTrigger(id: id, in: home, operation: "append-event")
+        guard let accessory = try findAccessory(id: accessoryID, homeID: home.uniqueIdentifier.uuidString) else {
+            throw ControlError.accessoryNotFound(accessoryID)
+        }
+        guard isAccessoryAllowed(accessory), HomeClawConfig.shared.filterMode != "allowlist"
+                || HomeClawConfig.shared.allowedIDs?.contains(accessory.uniqueIdentifier.uuidString) == true else {
+            throw ControlError.invalidArgument("The trigger accessory is excluded or its selection is unavailable under Selected Only")
+        }
+        guard let type = CharacteristicMapper.characteristicType(forName: characteristic) else {
+            throw ControlError.characteristicNotFound("Unknown characteristic: '\(characteristic)'")
+        }
+        let service = try selectService(on: accessory, from: accessory.services.filter {
+            $0.characteristics.contains { $0.characteristicType == type }
+        }, purpose: "carrying \(characteristic)", type: nil, name: serviceName, id: serviceID, index: serviceIndex)
+        let matches = service.characteristics.filter { $0.characteristicType == type }
+        guard matches.count == 1, let target = matches.first else {
+            throw ControlError.invalidArgument("The service must have exactly one matching characteristic")
+        }
+        // Apple's initializer throws an Objective-C exception for a characteristic
+        // without notification support, so validate BEFORE constructing the event.
+        guard target.properties.contains(HMCharacteristicPropertySupportsEventNotification) else {
+            throw ControlError.invalidArgument("The characteristic does not support event notifications")
+        }
+        guard let metadata = target.metadata,
+              let typed = CharacteristicEventAppend.value(value, format: metadata.format,
+                  minimum: metadata.minimumValue?.doubleValue, maximum: metadata.maximumValue?.doubleValue,
+                  valid: metadata.validValues?.map(\.doubleValue)) else {
+            throw ControlError.invalidArgument("An explicit finite boolean/numeric trigger value matching the characteristic's format, bounds and valid values is required")
+        }
+        let originalObjects = trigger.events
+        let before = Self.eventAppendSnapshot(trigger, home: home)
+        let event = HMCharacteristicEvent<NSCopying>(characteristic: target, triggerValue: typed)
+        let addition = Self.eventAppendEvent(event).event
+        let outcome = try await CharacteristicEventAppend.run(
+            before: before, addition: addition, originalObjects: originalObjects, newObject: event as HMEvent,
+            apply: apply, expectedFingerprint: fingerprint,
+            reread: {
+                guard let currentHome = self.homeManager?.homes.first(where: { $0.uniqueIdentifier == home.uniqueIdentifier }),
+                      let current = currentHome.triggers.first(where: { $0.uniqueIdentifier == trigger.uniqueIdentifier }) as? HMEventTrigger else {
+                    throw ControlError.triggerNotFound(trigger.uniqueIdentifier.uuidString)
+                }
+                return Self.eventAppendSnapshot(current, home: currentHome)
+            },
+            write: { events in
+                try await CharacteristicEventAppend.awaitCallback(
+                    begin: { trigger.updateEvents(events, completionHandler: $0) },
+                    scheduleTimeout: { fire in DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 15, execute: fire) })
+            })
+        var result = outcome.dictionary
+        result["id"] = trigger.uniqueIdentifier.uuidString
+        result["home_id"] = home.uniqueIdentifier.uuidString
+        result["event"] = ["accessory_id": accessory.uniqueIdentifier.uuidString,
+                           "service_id": service.uniqueIdentifier.uuidString,
+                           "characteristic": characteristic, "characteristic_id": target.uniqueIdentifier.uuidString,
+                           "value": typed.stringValue]
+        result["existing_event_ids"] = before.events.map(\.id)
+        result["verification_scope"] = "Re-enumerated current HomeKit objects after the callback; not independent iCloud confirmation. Unknown event/action payloads are refused. Opaque predicates are retained by identity, never decoded or rebuilt."
+        return result
+    }
+
+    private static func eventAppendValue(_ value: Any?, format: String? = nil) -> String? {
+        guard let value else { return "any_change" }
+        if let number = value as? NSNumber {
+            return CharacteristicEventAppend.canonicalNumber(number, format: format)
+        }
+        if let string = value as? String { return "string:" + string }
+        return nil
+    }
+
+    private static func eventAppendComponents(_ components: DateComponents?) -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        return (try? encoder.encode(components)).map { String(decoding: $0, as: UTF8.self) } ?? "unencodable"
+    }
+
+    private static func eventAppendEvent(_ event: HMEvent) -> (event: CharacteristicEventAppend.Event, unsupported: Bool) {
+        let id = event.uniqueIdentifier.uuidString
+        if let characteristic = event as? HMCharacteristicEvent<NSCopying>,
+           let value = eventAppendValue(characteristic.triggerValue, format: characteristic.characteristic.metadata?.format) {
+            return (.init(id: id, signature: "characteristic", characteristicID: characteristic.characteristic.uniqueIdentifier.uuidString, value: value), false)
+        }
+        let signature: String
+        let unsupported: Bool
+        switch event {
+        case let calendar as HMCalendarEvent:
+            signature = "calendar:" + eventAppendComponents(calendar.fireDateComponents); unsupported = false
+        case let sun as HMSignificantTimeEvent:
+            signature = "significant:" + sun.significantEvent.rawValue + ":" + eventAppendComponents(sun.offset); unsupported = false
+        case let duration as HMDurationEvent:
+            signature = "duration:\(duration.duration)"; unsupported = !duration.duration.isFinite
+        default:
+            signature = String(describing: type(of: event)); unsupported = true
+        }
+        return (.init(id: id, signature: signature, characteristicID: nil, value: nil), unsupported)
+    }
+
+    private static func eventAppendSnapshot(_ trigger: HMEventTrigger, home: HMHome) -> CharacteristicEventAppend.Snapshot {
+        let events = trigger.events.map(eventAppendEvent)
+        let ends = trigger.endEvents.map(eventAppendEvent)
+        var unsupported = (events + ends).filter(\.unsupported).map { "unsupported event \($0.event.signature)" }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let endsJSON = (try? encoder.encode(ends.map(\.event))).map { String(decoding: $0, as: UTF8.self) } ?? "unencodable"
+        let recurrenceJSON = (try? encoder.encode(trigger.recurrences)).map { String(decoding: $0, as: UTF8.self) } ?? "unencodable"
+        var actionRows: [String] = []
+        for set in trigger.actionSets {
+            var rows: [String] = []
+            for action in set.actions {
+                guard let write = action as? HMCharacteristicWriteAction<NSCopying>,
+                      let value = eventAppendValue(write.targetValue, format: write.characteristic.metadata?.format) else {
+                    unsupported.append("unsupported action in \(set.uniqueIdentifier.uuidString)"); continue
+                }
+                rows.append("\(write.uniqueIdentifier.uuidString):\(write.characteristic.uniqueIdentifier.uuidString):\(value)")
+                if HomeClawConfig.shared.filterMode == "allowlist" {
+                    guard let accessory = write.characteristic.service?.accessory,
+                          home.accessories.contains(where: { $0.uniqueIdentifier == accessory.uniqueIdentifier }),
+                          HomeClawConfig.shared.allowedIDs?.contains(accessory.uniqueIdentifier.uuidString) == true else {
+                        unsupported.append("linked scene has an excluded or unresolved accessory under Selected Only"); continue
+                    }
+                }
+            }
+            let rowJSON = (try? encoder.encode(rows)).map { String(decoding: $0, as: UTF8.self) } ?? "unencodable"
+            actionRows.append("\(set.uniqueIdentifier.uuidString):\(set.name):\(set.actionSetType):\(rowJSON)")
+        }
+        let actionJSON = (try? encoder.encode(actionRows)).map { String(decoding: $0, as: UTF8.self) } ?? "unencodable"
+        var guards = ["session": eventAppendSession, "name": trigger.name,
+                      "enabled": String(trigger.isEnabled), "execute_once": String(trigger.executeOnce),
+                      "recurrences": recurrenceJSON, "end_events": endsJSON, "action_sets": actionJSON,
+                      "filter": HomeClawConfig.shared.filterMode,
+                      "allowed_ids": (HomeClawConfig.shared.allowedIDs ?? []).sorted().joined(separator: ",")]
+        if let predicate = trigger.predicate {
+            guards["predicate_format"] = predicate.predicateFormat
+            guards["predicate_identity"] = String(describing: ObjectIdentifier(predicate))
+        } else { guards["predicate_format"] = "nil" }
+        return .init(homeID: home.uniqueIdentifier.uuidString, triggerID: trigger.uniqueIdentifier.uuidString,
+                     events: events.map(\.event), guards: guards, unsupported: unsupported.sorted())
+    }
+
     // MARK: - Accessory replacement across automations (issue #120)
 
     /// Plan, and with `apply` perform, moving the write actions an accessory

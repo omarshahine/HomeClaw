@@ -24,6 +24,23 @@ branches; (2) a standalone harness drives the `DemoFixtures` model through 47
 read/CRUD/not-found/reset/JSON-serializability checks — all pass. This unlocks **P3**
 (the end-to-end harness that boots the demo app and drives the CLI over the socket).
 
+## Characteristic event append coverage (issue #173)
+
+The append-only `CharacteristicEventAppend` transaction runs without HomeKit.
+`CharacteristicEventAppendTests` covers preview/no-write, preserving original object
+identity/order and opaque guards, binding consent to the exact proposal, stale and
+concurrent changes, duplicate and any-change overlap, malformed explicit values,
+callback failure, readback failure/mismatch, and no retry/rollback. CLI and Node
+routing have separate fixture tests, and native/Node descriptors remain in the schema
+parity fixture. HTTP policy tests reject the new mutation action.
+
+The production adapter resolves public HomeKit objects and calls `updateEvents` once.
+These tests do not qualify real sensor notification support, HomeKit daemon acceptance,
+opaque predicate proxy identity stability, or iCloud propagation. Unknown event/action
+payloads are refused. Demo-app event editing is deliberately unavailable. Retargeting
+is deferred. A callback/readback mismatch stays failed/unverified and never causes an
+old event array to be restored over another client's edit.
+
 ## 1. Why this exists
 
 Recent PRs added CLI features fast and tests did not keep pace. Today:
