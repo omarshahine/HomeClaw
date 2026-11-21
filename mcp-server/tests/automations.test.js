@@ -37,6 +37,44 @@ test('add_condition omits selector keys that are absent', async () => {
   }
 });
 
+// Ordered comparisons (#condition-operators): the operator rides the same wire as the
+// value so SocketServer parses and validates it against one canonical list. Forwarded
+// verbatim (trimmed) rather than pre-mapped here, so a new spelling only has to be added
+// in one place.
+test('add_condition forwards a comparison operator', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({
+    ...base,
+    condition: { accessory: 'Lux Sensor', property: 'current_light_level', value: '30', operator: ' lt ' },
+  }, send);
+  assert.equal(calls[0][0], 'add_automation_condition');
+  assert.equal(calls[0][1].operator, 'lt');
+  assert.equal(calls[0][1].value, '30');
+});
+
+test('add_condition omits operator when the condition does not set one', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations(base, send);
+  assert.ok(!Object.prototype.hasOwnProperty.call(calls[0][1], 'operator'));
+});
+
+// null means "not provided" here, in SocketServer and in the app's native handler alike.
+test('add_condition treats a null operator as absent', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({ ...base, condition: { ...base.condition, operator: null } }, send);
+  assert.ok(!Object.prototype.hasOwnProperty.call(calls[0][1], 'operator'));
+});
+
+test('add_condition rejects a non-string or empty operator', async () => {
+  for (const operator of ['', '   ', 5, {}]) {
+    const { send } = fakeSend();
+    await assert.rejects(
+      () => handleAutomations({ ...base, condition: { ...base.condition, operator } }, send),
+      /operator/,
+    );
+  }
+});
+
 test('create forwards action and condition rows untouched, selectors included', async () => {
   const { calls, send } = fakeSend();
   const actions = [
@@ -82,4 +120,34 @@ test('edit rejects a call without changes, and duration together with clear_dura
     /either duration_seconds or clear_duration/,
   );
   await assert.rejects(handleAutomations({ action: 'edit', id: '  ', new_name: 'x' }, send), /id is required/);
+});
+
+// create/edit carry the operator on the conditions array itself, so a threshold gate is
+// expressible through the batch form and not only through add_condition.
+test('create forwards conditions rows with an operator intact', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({
+    action: 'create',
+    name: 'Guest Bath Motion Lights',
+    accessory_id: 'A1B2C3D4-0000-0000-0000-000000000001',
+    characteristic: 'occupancy_detected',
+    trigger_value: 'true',
+    actions: [{ accessory: 'Guest Bath Vanity', property: 'power', value: 'true' }],
+    conditions: [{ accessory: 'Lux Sensor', property: 'current_light_level', value: '30', operator: 'lt' }],
+  }, send);
+  assert.equal(calls[0][0], 'create_automation');
+  assert.deepEqual(calls[0][1].conditions, [
+    { accessory: 'Lux Sensor', property: 'current_light_level', value: '30', operator: 'lt' },
+  ]);
+});
+
+test('edit forwards conditions rows with an operator intact', async () => {
+  const { calls, send } = fakeSend();
+  await handleAutomations({
+    action: 'edit',
+    id: 'Guest Bath Motion Lights',
+    conditions: [{ accessory: 'Lux Sensor', property: 'current_light_level', value: '30', operator: '<=' }],
+  }, send);
+  assert.equal(calls[0][0], 'edit_automation');
+  assert.equal(calls[0][1].conditions[0].operator, '<=');
 });

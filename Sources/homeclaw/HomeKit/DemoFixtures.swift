@@ -792,6 +792,7 @@ enum DemoFixtures {
         room: String?,
         property: String,
         value: String,
+        comparison: ConditionComparison = .equal,
         serviceSelector: [String: String] = [:],
         dryRun: Bool
     ) throws -> AutomationConditionResult {
@@ -809,6 +810,7 @@ enum DemoFixtures {
             "accessory": acc.name,
             "property": property,
             "value": value,
+            "operator": comparison.apiValue,
             "condition_count_after": countAfter,
         ]
         // Echo the room only when a name-based room hint was supplied (mirrors the
@@ -819,7 +821,8 @@ enum DemoFixtures {
         for (key, selectorValue) in serviceSelector { result[key] = selectorValue }
         if !dryRun {
             automations[aIdx].conditions.append(
-                ["accessory": acc.name, "property": property, "value": value].merging(serviceSelector) { current, _ in current })
+                ["accessory": acc.name, "property": property, "value": value,
+                 "operator": comparison.apiValue].merging(serviceSelector) { current, _ in current })
         }
         return .ok(result)
     }

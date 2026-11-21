@@ -238,10 +238,10 @@ struct CreateAutomation: ParsableCommand {
     @Option(name: .long, help: "Comma-separated weekdays the automation may fire on: mon,tue,wed,thu,fri,sat,sun (or numeric 1-7 where 1=Sun). When omitted, the automation fires every day.")
     var days: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:contact_state:0'. Note: accessory names containing colons are not supported via --condition; use --condition-json instead.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:contact_state:0'. A leading comparison in the value makes it a threshold: 'Lux Sensor:current_light_level:<30'. Note: accessory names containing colons are not supported via --condition; use --condition-json instead.")
     var condition: [String] = []
 
-    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Condition as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"true\",\"service_name\":\"Table Light\"}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Condition as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"true\",\"service_name\":\"Table Light\"}'. Keys: accessory, property (or characteristic), value, operator (==, !=, <, <=, >, >= or eq/ne/lt/lte/gt/gte), room, service_name, service_id, service_index.")
     var conditionJSON: [String] = []
 
     @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires after the given time. Format: 'HH:MM' (zero-padded, e.g. '07:00') or '<sunrise|sunset>[±N]' where N is minutes (e.g. 'sunset-30'). Offsets >1440 (24h) are rejected. Implies weekday auto-fill if --days is omitted.")
@@ -532,15 +532,30 @@ struct CreateAutomation: ParsableCommand {
         }
         let accessoryPart = parts[0].trimmingCharacters(in: .whitespaces)
         let propertyPart = parts[1].trimmingCharacters(in: .whitespaces)
-        let valuePart = parts[2].trimmingCharacters(in: .whitespaces)
-        guard !accessoryPart.isEmpty, !propertyPart.isEmpty, !valuePart.isEmpty else {
+        let rawValuePart = parts[2].trimmingCharacters(in: .whitespaces)
+        guard !accessoryPart.isEmpty, !propertyPart.isEmpty, !rawValuePart.isEmpty else {
             throw ValidationError("Invalid --condition '\(raw)'. Each of accessory/property/value must be non-empty.")
         }
-        return [
+        // A leading comparison makes the row an ordered condition:
+        // 'Lux:current_light_level:<30'. Split it here so the value the socket
+        // receives is always a bare value plus an explicit `operator` key, and a
+        // prefix with nothing after it fails at the CLI instead of deep in HomeKit.
+        var row = [
             "accessory": accessoryPart,
             "property": propertyPart,
-            "value": valuePart,
         ]
+        if let split = RowJSON.splitComparisonPrefix(rawValuePart) {
+            guard !split.value.isEmpty else {
+                throw ValidationError(
+                    "Invalid --condition '\(raw)'. Comparison '\(split.op)' has no value; write e.g. 'Lux:current_light_level:<30'."
+                )
+            }
+            row["value"] = split.value
+            row["operator"] = split.op
+        } else {
+            row["value"] = rawValuePart
+        }
+        return row
     }
 
     /// Parse a `--action` row string in `accessory:property:value` shape into the
@@ -588,7 +603,10 @@ struct CreateAutomation: ParsableCommand {
                 let acc = RowJSON.targetLabel(c)
                 let prop = c["property"] ?? "?"
                 let val = c["value"] ?? "?"
-                print("    \(acc): \(prop) = \(val)")
+                // Same rendering as `edit`'s planned summary: equality keeps the
+                // pre-existing `= value` form, only a real comparison shows its operator.
+                let op = c["operator"] ?? "=="
+                print("    \(acc): \(prop) \(op == "==" ? "=" : op) \(val)")
             }
         }
         if let timeAfter = result["time_after"] as? [String], !timeAfter.isEmpty {
@@ -686,10 +704,10 @@ struct CreateTimeAutomation: ParsableCommand {
     @Option(name: .long, help: "Comma-separated weekdays the automation may fire on: mon,tue,wed,thu,fri,sat,sun (or numeric 1-7 where 1=Sun). When omitted, all 7 days are auto-filled — iOS 15+ requires weekday gating on time-conditional automations.")
     var days: String?
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:occupancy_detected:true'. Note: accessory names containing colons are not supported via --condition; use --condition-json instead.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Extra characteristic predicate ANDed into the trigger as 'accessory:property:value' (repeatable). Example: 'Front Door:occupancy_detected:true'. A leading comparison in the value makes it a threshold: 'Lux Sensor:current_light_level:<30'. Note: accessory names containing colons are not supported via --condition; use --condition-json instead.")
     var condition: [String] = []
 
-    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Condition as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"true\",\"service_name\":\"Table Light\"}'. Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Condition as a JSON object (repeatable), for rows the positional form can't express, e.g. one gang of a multi-gang accessory: '{\"accessory\":\"Covelight\",\"property\":\"power\",\"value\":\"true\",\"service_name\":\"Table Light\"}'. Keys: accessory, property (or characteristic), value, operator (==, !=, <, <=, >, >= or eq/ne/lt/lte/gt/gte), room, service_name, service_id, service_index.")
     var conditionJSON: [String] = []
 
     @Option(name: .long, parsing: .upToNextOption, help: "Time predicate (repeatable): trigger only fires after the given time. Format: 'HH:MM' or '<sunrise|sunset>[±N]' where N is minutes. Composes with --time (e.g. --time 06:30 --time-after sunrise means '06:30, but only after sunrise').")
@@ -1053,8 +1071,11 @@ struct AddAutomationCondition: ParsableCommand {
     @Option(name: .long, help: "Characteristic name (e.g., contact_state, occupancy_detected, power)")
     var property: String
 
-    @Option(name: .long, help: "Required value as string (e.g., 'true', '0', '50'); uses exact match (==)")
+    @Option(name: .long, help: "Required value as string (e.g., 'true', '0', '50'); compared with --operator (default ==)")
     var value: String
+
+    @Option(name: .customLong("operator"), help: "Comparison for the condition: ==, !=, <, <=, >, >= (or eq, ne, lt, lte, gt, gte). Defaults to ==. A '<30'-style prefix on --value is accepted too.")
+    var comparisonOperator: String?
 
     @Option(name: .long, help: "Room name for accessory disambiguation when multiple accessories share a name (optional)")
     var room: String?
@@ -1094,6 +1115,27 @@ struct AddAutomationCondition: ParsableCommand {
         if value.trimmingCharacters(in: .whitespaces).isEmpty {
             throw ValidationError("--value must be non-empty")
         }
+        if let comparisonOperator {
+            let trimmed = comparisonOperator.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                throw ValidationError("--operator must be non-empty when provided")
+            }
+            guard let normalized = RowJSON.normalizedComparisonOperator(trimmed) else {
+                throw ValidationError(
+                    "Unknown --operator '\(trimmed)'. Allowed: "
+                        + RowJSON.comparisonOperators.joined(separator: ", ")
+                        + " (or eq, ne, lt, lte, gt, gte)."
+                )
+            }
+            // Same contradiction `--condition-json` refuses before the round trip. Catching it
+            // here too means the mistake reads the same whether the app is running or not,
+            // instead of surfacing as a connection error when it is not.
+            if let split = RowJSON.splitComparisonPrefix(value) {
+                throw ValidationError(
+                    "Invalid --operator: operator '\(normalized)' was given but --value '\(value)' "
+                        + "also starts with '\(split.op)'. Pass the bare value (for example '\(split.value)').")
+            }
+        }
         if let room, room.trimmingCharacters(in: .whitespaces).isEmpty {
             throw ValidationError("--room must be non-empty when provided")
         }
@@ -1116,6 +1158,12 @@ struct AddAutomationCondition: ParsableCommand {
             "value": value,
             "dry_run": dryRun,
         ]
+        if let comparisonOperator {
+            // Normalized to the canonical spelling so the socket validator and the
+            // response echo report one form regardless of how the user wrote it.
+            args["operator"] = RowJSON.normalizedComparisonOperator(comparisonOperator)
+                ?? comparisonOperator
+        }
         if let room { args["room"] = room }
         if let serviceName { args["service_name"] = serviceName }
         if let serviceID { args["service_id"] = serviceID }
@@ -1143,6 +1191,11 @@ struct AddAutomationCondition: ParsableCommand {
         let propertyName = result["property"] as? String ?? property
         let valueStr = result["value"] as? String ?? value
         let count = result["condition_count_after"] as? Int
+        // Report only what the app confirmed. An app that predates ordered comparisons
+        // ignores the key and writes equality, so echoing the *requested* operator would
+        // describe a rule that was never written.
+        let confirmedOperator = result["operator"] as? String
+        let conditionOperator = confirmedOperator ?? "=="
         // Only echo the room when HomeKitManager included it in the result —
         // it does so only when the room hint actually scoped the lookup (the
         // name-based path was taken). UUID lookups omit it because the room
@@ -1156,12 +1209,22 @@ struct AddAutomationCondition: ParsableCommand {
 
         let serviceSuffix = (result["service_name"] as? String).map { " [\($0)]" } ?? ""
         if isDryRun {
-            print("DRY RUN — would add condition to '\(autoName)': \(accessoryName)\(serviceSuffix)\(roomSuffix).\(propertyName) = \(valueStr)")
+            print("DRY RUN — would add condition to '\(autoName)': \(accessoryName)\(serviceSuffix)\(roomSuffix).\(propertyName) \(conditionOperator) \(valueStr)")
         } else {
-            print("Added condition to '\(autoName)': \(accessoryName)\(serviceSuffix)\(roomSuffix).\(propertyName) = \(valueStr)")
+            print("Added condition to '\(autoName)': \(accessoryName)\(serviceSuffix)\(roomSuffix).\(propertyName) \(conditionOperator) \(valueStr)")
         }
         if let count {
             print("  Trigger now has \(count) condition(s)")
+        }
+        // An app that predates ordered comparisons ignores the operator key *and* the
+        // symbolic prefix, so either spelling can produce an equality rule. Warn whenever a
+        // comparison was sent and the app did not confirm one.
+        let requestedComparison = comparisonOperator.flatMap { RowJSON.normalizedComparisonOperator($0) }
+            ?? RowJSON.splitComparisonPrefix(value)?.op
+        if confirmedOperator == nil, let requestedComparison, requestedComparison != "==" {
+            print("  Warning: the running HomeClaw app did not confirm the operator "
+                + "('\(requestedComparison)') and wrote an equality condition instead. "
+                + "Update the app to use ordered comparisons.")
         }
         RowJSON.printWarnings(result)
     }
@@ -1220,10 +1283,10 @@ struct EditAutomation: ParsableCommand {
     @Flag(name: .customLong("every-day"), help: "Remove the weekday gate (time-based automations get all 7 days auto-filled)")
     var everyDay = false
 
-    @Option(name: .long, parsing: .upToNextOption, help: "Replacement characteristic condition as 'accessory:property:value' (repeatable). Replaces all existing characteristic conditions.")
+    @Option(name: .long, parsing: .upToNextOption, help: "Replacement characteristic condition as 'accessory:property:value' (repeatable). Replaces all existing characteristic conditions. A leading comparison makes it a threshold: 'Lux Sensor:current_light_level:<30'.")
     var condition: [String] = []
 
-    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Replacement condition as a JSON object (repeatable). Keys: accessory, property (or characteristic), value, room, service_name, service_id, service_index.")
+    @Option(name: .customLong("condition-json"), parsing: .singleValue, help: "Replacement condition as a JSON object (repeatable). Keys: accessory, property (or characteristic), value, operator (==, !=, <, <=, >, >= or eq/ne/lt/lte/gt/gte), room, service_name, service_id, service_index.")
     var conditionJSON: [String] = []
 
     @Flag(name: .customLong("clear-conditions"), help: "Remove all characteristic conditions")
@@ -1362,7 +1425,15 @@ struct EditAutomation: ParsableCommand {
                 lines.append("  Conditions:")
                 for c in conditions {
                     if let accessory = c["accessory"] as? String, let property = c["property"] as? String {
-                        lines.append("    \(accessory): \(property) = \(c["value"].map { "\($0)" } ?? "?")")
+                        // Equality keeps the pre-existing `= value` rendering so existing
+                        // summaries stay byte-identical; only a real comparison is shown as
+                        // one, which is the case a reader must not mistake for equality.
+                        let plannedOperator = (c["operator"] as? String) ?? "=="
+                        let renderedValue = c["value"].map { "\($0)" } ?? "?"
+                        let comparisonText = plannedOperator == "=="
+                            ? "= \(renderedValue)"
+                            : "\(plannedOperator) \(renderedValue)"
+                        lines.append("    \(accessory): \(property) \(comparisonText)")
                     } else {
                         lines.append("    \(c["summary"] as? String ?? "unsupported condition")")
                     }

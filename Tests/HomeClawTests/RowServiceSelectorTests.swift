@@ -114,6 +114,65 @@ final class RowServiceSelectorTests: XCTestCase {
         XCTAssertNil(try SocketServer.parseSceneActionRowsArg(nil))
     }
 
+    // MARK: - Socket-layer operator parsing
+
+    func testConditionRowsNormaliseOperatorMnemonics() throws {
+        let expected = ["lt": "<", "lte": "<=", "gt": ">", "gte": ">=", " LT ": "<", "!=": "!="]
+        for (raw, canonical) in expected {
+            let rows = try SocketServer.parseAccessoryRowsArg([
+                ["accessory": "Lux", "property": "current_light_level", "value": "30", "operator": raw],
+            ] as [Any], fieldName: "conditions")
+            XCTAssertEqual(rows?[0]["operator"], canonical, "operator '\(raw)'")
+        }
+    }
+
+    func testConditionRowsTreatAbsentAndNullOperatorAlike() throws {
+        let rows = try SocketServer.parseAccessoryRowsArg([
+            ["accessory": "Lux", "property": "current_light_level", "value": "30"],
+            ["accessory": "Lux", "property": "current_light_level", "value": "30", "operator": NSNull()],
+        ] as [Any], fieldName: "conditions")
+        XCTAssertNil(rows?[0]["operator"])
+        XCTAssertNil(rows?[1]["operator"])
+    }
+
+    func testConditionRowsRejectNonStringEmptyOrUnknownOperator() {
+        for bad: Any in [NSNumber(value: 5), NSNumber(value: true), "", "   ", "ltt"] {
+            XCTAssertThrowsError(try SocketServer.parseAccessoryRowsArg([
+                ["accessory": "Lux", "property": "current_light_level", "value": "30", "operator": bad],
+            ] as [Any], fieldName: "conditions"), "\(bad)") { error in
+                XCTAssertTrue(error.localizedDescription.contains("'conditions'[0].operator"), error.localizedDescription)
+            }
+        }
+    }
+
+    func testActionRowsRejectOperator() {
+        XCTAssertThrowsError(try SocketServer.parseAccessoryRowsArg([
+            ["accessory": "Lamp", "property": "power", "value": "true", "operator": "<"],
+        ] as [Any], fieldName: "actions")) { error in
+            XCTAssertTrue(error.localizedDescription.contains("'actions'[0].operator is not supported"),
+                          error.localizedDescription)
+        }
+        // JSON null is "not provided", so it does not trip the refusal.
+        XCTAssertNoThrow(try SocketServer.parseAccessoryRowsArg([
+            ["accessory": "Lamp", "property": "power", "value": "true", "operator": NSNull()],
+        ] as [Any], fieldName: "actions"))
+    }
+
+    /// `importScene` never reads `operator`, so a scene row carrying one is refused
+    /// rather than silently dropped.
+    func testSceneRowsRejectOperator() throws {
+        XCTAssertThrowsError(try SocketServer.parseSceneActionRowsArg([
+            ["accessory": "Lamp", "property": "power", "value": "true", "operator": "=="],
+        ] as [Any])) { error in
+            XCTAssertTrue(error.localizedDescription.contains("'actions'[0].operator is not supported"),
+                          error.localizedDescription)
+        }
+        let rows = try SocketServer.parseSceneActionRowsArg([
+            ["accessory": "Lamp", "property": "power", "value": "true", "operator": NSNull()],
+        ] as [Any])
+        XCTAssertNil(rows?[0]["operator"])
+    }
+
     // MARK: - Resolution
 
     /// A row selector resolves to exactly the named gang, by each selector kind.

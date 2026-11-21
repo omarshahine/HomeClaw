@@ -392,6 +392,70 @@ homeclaw-cli automations add-condition "Porch Lights" \
 - Two actions on the same accessory and property are allowed when they target different services. The same service twice is rejected.
 - `get-scene`, `automations get`, and dry-run previews emit `service_name`, `service_id`, and `service_index` on rows whose accessory has more than one service carrying that property, so their JSON round-trips through `import-scene` / `update-scene` without collapsing gangs. Rows on single-service accessories are unchanged.
 
+### Numeric and Ordered Conditions
+
+A condition row has always meant "this characteristic equals this value". The HomeKit
+trigger predicate factory takes `.equalTo`, `.notEqualTo`, `.lessThan`,
+`.lessThanOrEqualTo`, `.greaterThan` and `.greaterThanOrEqualTo`, but HomeClaw only ever
+wrote equality, so a threshold condition like "only when the room is darker than 30 lux"
+could not be expressed. It can now. Ordered comparisons are limited to numeric
+characteristics: an on/off, string or unknown-format characteristic only accepts `==` and
+`!=`, and the write is refused with an explanation rather than producing a gate that can
+never match.
+
+| Operator | Mnemonics | Meaning |
+|----------|-----------|---------|
+| `==` | `eq` | equal (the default, and what every existing row produces) |
+| `!=` | `ne` | not equal |
+| `<` | `lt` | less than |
+| `<=` | `lte`, `le` | less than or equal |
+| `>` | `gt` | greater than |
+| `>=` | `gte`, `ge` | greater than or equal |
+
+Three interchangeable spellings, all normalized to the symbol:
+
+```bash
+# 1. Symbolic prefix on the positional row
+homeclaw-cli automations create --name "Guest Bath Motion Lights" \
+  --accessory "Presence Sensor FP2-1" --characteristic occupancy_detected \
+  --trigger-value true \
+  --action-json '{"accessory":"Guest Bath Vanity","property":"power","value":"true"}' \
+  --condition "Lux Sensor:current_light_level:<30"
+
+# 2. Explicit operator in a JSON row
+--condition-json '{"accessory":"Lux Sensor","property":"current_light_level","value":"30","operator":"lt"}'
+
+# 3. Flag on add-condition
+homeclaw-cli automations add-condition "Guest Bath Motion Lights" \
+  --accessory "Lux Sensor" --property current_light_level --value 30 --operator lt
+```
+
+Over MCP, `conditions[].operator` (or `condition.operator` on `add_condition`) carries the
+same values — symbols or mnemonics, since the published schema lists both. Details worth knowing:
+
+- **Omitted operator means `==`.** Every automation written before this existed behaves
+  identically; nothing needs rewriting.
+- **The prefix form is longest-match,** so `<30` and `<=30` never collapse into each other.
+  A bare operator with no value (`:current_light_level:<`) is rejected rather than passed
+  through as a literal.
+- **An unknown operator is an error, not a fallback.** `--operator ltt` fails loudly, and so
+  does the same typo inside `--condition-json`, before anything reaches the app. Silently
+  treating a typo as equality would ship a rule that fires when you asked for a gate, which
+  is the whole failure mode this feature exists to prevent.
+- **Naming an operator and leaving a prefix is an error.** `--operator ==` with
+  `--value "<30"` is contradictory, not something to guess at: it fails with a message
+  asking for the bare value.
+- **Readback reports the operator.** `automations get` emits `"operator": "<"` for a decoded
+  condition, so a `get` → edit → write cycle preserves the comparison. Conditions you did
+  not touch are never rewritten.
+- **Multiple conditions AND together.** `occupancy_detected == 1` plus
+  `current_light_level < 30` fires only when both hold — one condition alone cannot express
+  "occupied and dark".
+- **Ordered comparisons need a numeric operand.** `power < 1` would resolve `1` to a
+  boolean and produce a predicate HomeKit accepts but never satisfies, so the write is
+  refused with an explanation. On/off characteristics only support `==` and `!=`; point a
+  threshold at a numeric characteristic such as `current_light_level`.
+
 ### Editing an Automation in Place
 
 `automations edit` changes an existing automation without deleting it, so its UUID stays the same and button bindings, Siri references and integrations keep working. Only the options you pass change:

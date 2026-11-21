@@ -147,8 +147,16 @@ final class SocketServer: @unchecked Sendable {
             guard let dict = element as? [String: Any] else {
                 throw AccessoryRowsArgError(message: "'actions'[\(index)] must be a dict")
             }
+            // `importScene` reads only property/value/selectors, so an `operator` copied
+            // through here would be silently dropped. Same refusal as automation actions.
+            if ConditionComparison.parseOperatorArg(dict["operator"]) != .absent {
+                throw AccessoryRowsArgError(
+                    message: "'actions'[\(index)].operator is not supported; an action has no comparison. "
+                        + "Remove it, or express the comparison as a condition.")
+            }
             var row: [String: String] = [:]
             for (key, value) in dict {
+                if key == "operator" { continue }  // JSON null only; anything else was refused above
                 if HomeKitManager.RowServiceSelector.keys.contains(key) {
                     row[key] = try normalizeServiceSelector(value, key: key, label: "'actions'[\(index)].\(key)")
                     continue
@@ -226,6 +234,31 @@ final class SocketServer: @unchecked Sendable {
                     throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].room must be a non-empty string when provided")
                 }
                 row["room"] = trimmed
+            }
+            // Optional comparison operator for condition rows (`<`, `<=`, `>`, `>=`,
+            // `==`, `!=`, or the lt/lte/gt/gte/eq/ne mnemonics). Absent and JSON null both
+            // mean "no operator", matching the Node handler, which means equality — what
+            // every pre-existing row gets, so a payload that does not know about operators
+            // is bit-identical to before. Gated to condition rows: an action has no
+            // predicate to compare, so an `operator` there is a mistake the caller should
+            // hear about rather than have silently dropped.
+            let operatorArg = ConditionComparison.parseOperatorArg(dict["operator"])
+            if fieldName != "conditions", operatorArg != .absent {
+                throw AccessoryRowsArgError(
+                    message: "'\(fieldName)'[\(index)].operator is not supported; an action has no comparison. "
+                        + "Remove it, or express the comparison as a condition.")
+            }
+            switch operatorArg {
+            case .absent:
+                break
+            case .comparison(let comparison):
+                row["operator"] = comparison.apiValue
+            case .notString, .empty:
+                throw AccessoryRowsArgError(message: "'\(fieldName)'[\(index)].operator must be a non-empty string when provided")
+            case .unknown(let trimmedOperator):
+                throw AccessoryRowsArgError(
+                    message: "'\(fieldName)'[\(index)].operator '\(trimmedOperator)' is not a supported comparison; allowed: "
+                        + ConditionComparison.allowedOperatorsDescription)
             }
             // Optional service selectors (#87): pick one service when the
             // characteristic exists on several (the gangs of a dual relay).
@@ -1603,6 +1636,29 @@ final class SocketServer: @unchecked Sendable {
                 guard !value.isEmpty else {
                     return encodeResponse(success: false, error: "'value' argument must be non-empty (after trimming whitespace)")
                 }
+                // Optional comparison operator (`"<"`, `"lte"`, …). Absent means
+                // equality, which is exactly what this command wrote before ordered
+                // comparisons existed. It is passed through as nil rather than `.equal`
+                // so the manager can still tell "no operator given" (split a symbolic
+                // prefix off the value) from "caller explicitly asked for ==" (which
+                // contradicts a prefix and must fail).
+                // JSON null counts as absent, matching the Node handler.
+                let comparison: ConditionComparison?
+                switch ConditionComparison.parseOperatorArg(args["operator"]) {
+                case .absent:
+                    comparison = nil
+                case .comparison(let parsedOperator):
+                    comparison = parsedOperator
+                case .notString:
+                    return encodeResponse(success: false, error: "'operator' must be a string when provided")
+                case .empty:
+                    return encodeResponse(success: false, error: "'operator' must be non-empty when provided")
+                case .unknown(let trimmedOperator):
+                    return encodeResponse(
+                        success: false,
+                        error: "'operator' '\(trimmedOperator)' is not a supported comparison; allowed: "
+                            + ConditionComparison.allowedOperatorsDescription)
+                }
                 // Optional room disambiguator — mirrors the `condition.room` field
                 // accepted by `create`/`create-time`. Forwarded to HomeKitManager so
                 // accessory name lookup can scope by room when multiple accessories
@@ -1641,6 +1697,7 @@ final class SocketServer: @unchecked Sendable {
                     conditionRoom: conditionRoom,
                     property: property,
                     value: value,
+                    comparison: comparison,
                     serviceSelector: serviceSelector,
                     homeID: args["home_id"] as? String,
                     dryRun: parseBool(args, key: "dry_run")
