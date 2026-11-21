@@ -1506,6 +1506,13 @@ final class SocketServer: @unchecked Sendable {
                     homeID: args["home_id"] as? String
                 )
 
+            case "append_automation_event":
+                let request = try CharacteristicEventAppend.Request(args)
+                result = try await hk.appendAutomationEvent(
+                    id: request.id, accessoryID: request.accessoryID, characteristic: request.characteristic, value: request.value,
+                    serviceName: request.serviceName, serviceID: request.serviceID, serviceIndex: request.serviceIndex,
+                    homeID: request.homeID, apply: request.apply, fingerprint: request.fingerprint)
+
             case "edit_automation":
                 // Modify-in-place verb (preserves the trigger UUID). Every field is
                 // optional; presence decides what changes, so absent and empty differ:
