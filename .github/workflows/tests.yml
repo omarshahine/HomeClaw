@@ -129,6 +129,11 @@ jobs:
           python3 scripts/test-ci-evidence.py -v
           python3 scripts/test-integration-settings.py -v
 
+      - name: Test scene menus offscreen
+        env:
+          MENU_SCENE_EVIDENCE_DIR: ${{ runner.temp }}/menu-scenes
+        run: bash scripts/test-menu-scenes.sh
+
       - name: Verify generated HomeKit entitlement
         run: |
           python3 - <<'PY'
@@ -161,6 +166,9 @@ jobs:
             ${{ runner.temp }}/catalyst-test-evidence/summary.json
             ${{ runner.temp }}/catalyst-test-evidence/tests.json
             ${{ runner.temp }}/catalyst-test-evidence/HomeClawTests.xcresult
+            ${{ runner.temp }}/menu-scenes/results.txt
+            ${{ runner.temp }}/menu-scenes/results.json
+            ${{ runner.temp }}/menu-scenes/source-hashes.json
 
   version-check:
     name: Version Consistency

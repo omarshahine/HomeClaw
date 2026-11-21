@@ -1,0 +1,10 @@
+    static let isDemoMode = false
+    var homesReady = true
+    let homes: [HMHome]
+    let cache = FixtureCache()
+    init(home: HMHome) { homes = [home] }
+    func filteredHomes(homeID: String?) -> [HMHome] { homes }
+    func waitForReady() async {}
+    enum ControlError: Error {
+        case accessoryNotFound(String), sceneNotFound(String), sceneUnavailableFromMenu(String)
+    }

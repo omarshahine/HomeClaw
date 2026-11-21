@@ -231,14 +231,15 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
 
         // Classify scenes by room scope.
         // - Built-ins (wake_up/sleep/leave/arrive) → always home-level (Apple intent)
-        // - Multi-room or unscoped scenes → home-level
+        // - Multi-room, unscoped, or missing-room scenes → home-level
         // - Single-room scenes → nested under that room's section
         var homeLevelScenes: [[String: Any]] = []
         var roomScenes: [String: [[String: Any]]] = [:]
+        let roomNames = Set(rooms.compactMap { $0["name"] as? String })
         for scene in scenes {
             let type = scene["type"] as? String ?? "user_defined"
             let sceneRooms = scene["rooms"] as? [String] ?? []
-            if type != "user_defined" || sceneRooms.count != 1 {
+            if type != "user_defined" || sceneRooms.count != 1 || !roomNames.contains(sceneRooms[0]) {
                 homeLevelScenes.append(scene)
             } else {
                 let room = sceneRooms[0]
@@ -323,9 +324,13 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
         let name = scene["name"] as? String ?? "?"
         let id = scene["id"] as? String ?? ""
         let type = scene["type"] as? String ?? "user_defined"
+        let disabledReason = scene["menu_disabled_reason"] as? String
         let item = NSMenuItem(
-            title: name, action: #selector(triggerScene(_:)), keyEquivalent: "")
+            title: name.isEmpty ? "Unnamed Scene" : name,
+            action: disabledReason == nil ? #selector(triggerScene(_:)) : nil, keyEquivalent: "")
         item.target = self
+        item.isEnabled = disabledReason == nil
+        item.toolTip = disabledReason
         item.representedObject = id
         item.image = NSImage(
             systemSymbolName: symbolForSceneType(type),
