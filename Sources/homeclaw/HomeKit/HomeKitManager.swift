@@ -4763,8 +4763,10 @@ final class HomeKitManager: NSObject, Observable {
         // Filter by category if specified
         if let category {
             results = results.filter {
-                CharacteristicMapper.inferredCategoryName(for: $0)
-                    .localizedCaseInsensitiveCompare(category) == .orderedSame
+                ServiceDiscovery.matchesCategory(
+                    category, accessoryCategory: CharacteristicMapper.inferredCategoryName(for: $0),
+                    services: AccessoryModel.discoveryServices(of: $0)
+                )
             }
         }
 

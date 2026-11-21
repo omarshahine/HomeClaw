@@ -113,7 +113,35 @@ enum AccessoryModel {
             dict["state"] = state
         }
 
+        let channels = ServiceDiscovery.summaries(discoveryServices(of: accessory))
+        if !channels.isEmpty { dict["services"] = channels }
         return dict
+    }
+
+    /// Extract only existing metadata and last-known values. This performs no
+    /// characteristic reads and cannot copy one gang's collapsed cached power
+    /// onto another gang. Supplementary/unknown services aren't control targets.
+    static func discoveryServices(of accessory: HMAccessory) -> [ServiceDiscovery.Service] {
+        accessory.services.map { service in
+            var state: [String: String] = [:]
+            for characteristic in service.characteristics {
+                let name = CharacteristicMapper.name(for: characteristic.characteristicType)
+                if isInterestingState(name), let value = characteristic.value {
+                    state[name] = CharacteristicMapper.formatValue(value, for: characteristic.characteristicType)
+                }
+            }
+            return ServiceDiscovery.Service(
+                id: service.uniqueIdentifier.uuidString, name: service.name,
+                category: CharacteristicMapper.serviceCategory(for: service.serviceType),
+                displayAs: displayAs(of: service), index: serviceLabelIndex(of: service),
+                controllable: service.characteristics.contains {
+                    $0.characteristicType != HMCharacteristicTypeIdentify
+                        && CharacteristicMapper.isWritable($0.characteristicType)
+                        && $0.properties.contains(HMCharacteristicPropertyWritable)
+                },
+                state: state
+            )
+        }
     }
 
     /// Full detail of an accessory (for get views).

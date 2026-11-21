@@ -114,7 +114,7 @@ enum DeviceMap {
         let name = accessory.name.lowercased()
         let room = accessory.room?.name.lowercased() ?? ""
 
-        var aliases: [String] = []
+        var aliases = ServiceDiscovery.aliases(AccessoryModel.discoveryServices(of: accessory))
 
         if !room.isEmpty {
             aliases.append("\(room) \(name)")
@@ -144,7 +144,8 @@ enum DeviceMap {
             }
         }
 
-        return aliases
+        var seen = Set<String>()
+        return aliases.filter { seen.insert($0).inserted }
     }
 
     // MARK: - State Summary
@@ -345,6 +346,8 @@ enum DeviceMap {
                             "reachable": accessory.isReachable,
                         ]
 
+                        let channels = ServiceDiscovery.summaries(AccessoryModel.discoveryServices(of: accessory))
+                        if !channels.isEmpty { device["services"] = channels }
                         if displayName != accessory.name {
                             device["display_name"] = displayName
                         }

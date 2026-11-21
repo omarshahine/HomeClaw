@@ -392,6 +392,33 @@ homeclaw-cli automations add-condition "Porch Lights" \
 - Two actions on the same accessory and property are allowed when they target different services. The same service twice is rejected.
 - `get-scene`, `automations get`, and dry-run previews emit `service_name`, `service_id`, and `service_index` on rows whose accessory has more than one service carrying that property, so their JSON round-trips through `import-scene` / `update-scene` without collapsing gangs. Rows on single-service accessories are unchanged.
 
+### Discovering Multi-Channel Accessories
+
+JSON results from `list`, `search`, `rooms` and `device-map` include a compact
+`services` array when an accessory has multiple known controllable services.
+Each channel includes its `id`, `name` and `category`, plus `index` and
+`display_as` when available. A service must expose a supported writable control
+characteristic; Identify-only, read-only and supplementary services do not count.
+
+Search also matches these service names, even when a channel name refers to a
+different room. Category filtering accepts the accessory category, service
+category or the service's Display As category (`light` maps to `lightbulb`).
+Device-map aliases include the service names. The accessory's own name and
+category stay unchanged, and Selected Only still filters whole accessories.
+
+```bash
+homeclaw-cli search "厨房灯" --category lightbulb --json
+# Use the result's accessory id and the desired services[].id to target a gang:
+homeclaw-cli set "ACCESSORY-UUID" power false --service-id "SERVICE-UUID" --dry-run
+```
+
+Channel `state` is explicitly marked `state_source: "last_known"`. It comes from
+that service's existing characteristic values, never the collapsed accessory-wide
+cache, and performs no live reads. Missing values are omitted. It can be stale;
+use a normal refreshed `get` for fresh per-characteristic read results. This
+change does not relax freshness validation or change write verification timing.
+Single-channel accessory summaries retain their existing compact shape.
+
 ### Numeric and Ordered Conditions
 
 A condition row has always meant "this characteristic equals this value". The HomeKit
