@@ -4,7 +4,9 @@ normal, narrow, short and combined narrow/short layouts, scrolling, selection,
 and Continue before/after scrolling, without foreground UI or HomeKit.
 
 For the actual Catalyst onboarding flow, generate the project, install npm
-workspaces, then run `bash scripts/test-onboarding-ui.sh`. Select an existing
+workspaces, then run `bash scripts/test-onboarding-ui.sh`, or test the `HomeClawOnboardingTests`
+scheme in Xcode (its `DebugUI` configuration sets the isolated app identity).
+The `HomeClawUITests` scheme selects screenshot tests only. Select an existing
 Xcode with `DEVELOPER_DIR` and, if needed, an existing development identity with
 `HOMECLAW_UI_SIGNING_IDENTITY`. The script builds a distinct Debug app identity,
 uses UUID-scoped temporary configuration, disables live services/integration

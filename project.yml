@@ -10,6 +10,11 @@ options:
   generateEmptyDirectories: true
   groupSortPosition: top
 
+configs:
+  Debug: debug
+  DebugUI: debug
+  Release: release
+
 settings:
   base:
     HOMECLAW_APP_BUNDLE_IDENTIFIER: com.shahine.homeclaw
@@ -71,6 +76,11 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
       configs:
+        DebugUI:
+          HOMECLAW_APP_BUNDLE_IDENTIFIER: com.shahine.homeclaw.ui-regression
+          CODE_SIGN_ENTITLEMENTS: ""
+          ENABLE_APP_SANDBOX: NO
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG"
         Debug:
           ENABLE_APP_SANDBOX: NO
         Release:
@@ -338,7 +348,27 @@ schemes:
     test:
       config: Debug
       targets:
-        - HomeClawUITests
+        - name: HomeClawUITests
+          selectedTests: [ScreenshotTests]
     run:
       config: Debug
       executable: HomeClaw
+
+  HomeClawOnboardingTests:
+    build:
+      targets:
+        HomeClaw: all
+        macOSBridge: all
+        homeclaw-cli: all
+        HomeClawUITests: [test]
+    test:
+      config: DebugUI
+      targets:
+        - name: HomeClawUITests
+          selectedTests: [OnboardingRegressionTests]
+    run:
+      config: DebugUI
+      executable: HomeClaw
+      commandLineArguments:
+        "--ui-test-demo": true
+        "--ui-test-isolated": true
