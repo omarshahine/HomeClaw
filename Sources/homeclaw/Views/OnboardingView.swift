@@ -10,6 +10,7 @@ struct OnboardingFlowView: View {
 
     @State private var step = 0
     @State private var isLoadingHomes = false
+    @State private var didSeedUIHomes = false
     @State private var homeCount = 0
     @State private var homes: [HomeSelectionView.HomeInfo] = []
     @State private var selectedHomeID = ""
@@ -83,8 +84,9 @@ struct OnboardingFlowView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: step)
         .task {
-            if UIRegressionEnvironment.enabled,
+            if UIRegressionEnvironment.enabled, !didSeedUIHomes,
                ProcessInfo.processInfo.arguments.contains("--ui-test-home-selection") {
+                didSeedUIHomes = true
                 await loadHomes()
                 step = 2
             }
