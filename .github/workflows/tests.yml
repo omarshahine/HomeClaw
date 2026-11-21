@@ -131,6 +131,17 @@ jobs:
         run: |
           python3 scripts/test-ci-evidence.py -v
           python3 scripts/test-integration-settings.py -v
+          python3 scripts/verify-onboarding-schemes.py
+
+      - name: Test home selection layout offscreen
+        env:
+          HOME_SELECTION_EVIDENCE_DIR: ${{ runner.temp }}/home-selection-layout
+        run: bash scripts/test-home-selection-layout.sh
+
+      - name: Test scene menus offscreen
+        env:
+          MENU_SCENE_EVIDENCE_DIR: ${{ runner.temp }}/menu-scenes
+        run: bash scripts/test-menu-scenes.sh
 
       - name: Verify generated HomeKit entitlement
         run: |
@@ -164,6 +175,12 @@ jobs:
             ${{ runner.temp }}/catalyst-test-evidence/summary.json
             ${{ runner.temp }}/catalyst-test-evidence/tests.json
             ${{ runner.temp }}/catalyst-test-evidence/HomeClawTests.xcresult
+            ${{ runner.temp }}/home-selection-layout/results.txt
+            ${{ runner.temp }}/home-selection-layout/*.png
+
+            ${{ runner.temp }}/menu-scenes/results.txt
+            ${{ runner.temp }}/menu-scenes/results.json
+            ${{ runner.temp }}/menu-scenes/source-hashes.json
 
   version-check:
     name: Version Consistency

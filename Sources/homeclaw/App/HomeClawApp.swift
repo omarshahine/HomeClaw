@@ -104,7 +104,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     @objc func triggerScene(id: String) {
         Task { @MainActor in
             do {
-                _ = try await HomeKitManager.shared.triggerScene(id: id)
+                _ = try await HomeKitManager.shared.triggerScene(id: id, fromMenu: true)
             } catch {
                 AppLogger.app.error("Menu scene trigger failed: \(error.localizedDescription)")
                 macOSController?.flashError()
@@ -136,7 +136,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     @objc func quitApp() {
-        guard !AppLaunchPolicy.suppressLiveServices else { return }
+        guard !AppLaunchPolicy.suppressLiveServices, !UIRegressionEnvironment.enabled else { return }
         guard terminationTask == nil else { return }
         let shutdown = beginServerShutdown()
         terminationTask = Task { @MainActor in
@@ -180,6 +180,10 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
         guard !AppLaunchPolicy.suppressLiveServices else { return true }
+        if UIRegressionEnvironment.enabled {
+            // No sockets, HTTP, menu bar, HomeKit or integration observers.
+            return true
+        }
         AppLogger.app.info("HomeClaw starting (unified Catalyst)...")
         // A write to a socket or pipe whose reader has gone must fail that one
         // write, never kill the menu bar app (#128). SocketServer also sets
@@ -322,7 +326,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        guard !AppLaunchPolicy.suppressLiveServices else { return }
+        guard !AppLaunchPolicy.suppressLiveServices, !UIRegressionEnvironment.enabled else { return }
         AppLogger.app.info("HomeClaw shutting down...")
         // UIKit cannot defer this callback. Stop the legacy socket synchronously;
         // HTTP is best-effort here, but explicit Quit awaits it before terminate.
@@ -348,6 +352,12 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         if AppLaunchPolicy.suppressLiveServices {
             // No scene delegate means no restored settings/onboarding or HomeKit.
             return UISceneConfiguration(name: "Unit Tests", sessionRole: connectingSceneSession.role)
+        }
+        if UIRegressionEnvironment.enabled {
+            HomeClawApp.onboardingRequested = true
+            let config = UISceneConfiguration(name: "UI Regression", sessionRole: connectingSceneSession.role)
+            config.delegateClass = OnboardingSceneDelegate.self
+            return config
         }
         // Settings window — triggered by openSettings() via macOSBridge menu
         if options.userActivities.first?.activityType == "com.shahine.homeclaw.settings" {
@@ -633,6 +643,10 @@ class OnboardingSceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
 
+        if UIRegressionEnvironment.enabled,
+           ProcessInfo.processInfo.environment["HOMECLAW_UI_NOT_READY"] != "1" {
+            HomeKitManager.shared.start()
+        }
         let onboardingView = OnboardingFlowView {
             NotificationCenter.default.post(name: .onboardingDidComplete, object: nil)
         }
@@ -647,7 +661,13 @@ class OnboardingSceneDelegate: UIResponder, UIWindowSceneDelegate {
         // Demo mode: lock to exactly 1440×900 → 2880×1800 at 2× Retina,
         // a valid Mac App Store screenshot dimension. Production keeps a
         // fixed welcome size.
-        if HomeKitManager.isDemoMode {
+        if UIRegressionEnvironment.enabled {
+            let size = CGSize(
+                width: UIRegressionEnvironment.integer("HOMECLAW_UI_WIDTH", default: 700, range: 400...1440),
+                height: UIRegressionEnvironment.integer("HOMECLAW_UI_HEIGHT", default: 600, range: 350...900))
+            windowScene.sizeRestrictions?.minimumSize = size
+            windowScene.sizeRestrictions?.maximumSize = size
+        } else if HomeKitManager.isDemoMode {
             windowScene.sizeRestrictions?.minimumSize = CGSize(width: 1440, height: 900)
             windowScene.sizeRestrictions?.maximumSize = CGSize(width: 1440, height: 900)
         } else {

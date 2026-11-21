@@ -1254,5 +1254,19 @@ enum DemoFixtures {
 
     @MainActor
     static var demoAccessoryCount: Int { accessories.count }
-    static var demoHomeCount: Int { 1 }
+    static var demoHomeCount: Int {
+        UIRegressionEnvironment.integer("HOMECLAW_UI_HOME_COUNT", default: 1, range: 1...50)
+    }
+
+    @MainActor static func homeSummaries() -> [[String: Any]] {
+        (1...demoHomeCount).map { index in
+            var home = homeSummary()
+            if index > 1 {
+                home["id"] = String(format: "00000000-0000-4000-8000-%012d", index)
+                home["name"] = "Demo Home \(index)"
+                home["is_primary"] = false
+            }
+            return home
+        }
+    }
 }

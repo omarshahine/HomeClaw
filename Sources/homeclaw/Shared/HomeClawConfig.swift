@@ -85,6 +85,7 @@ final class HomeClawConfig: @unchecked Sendable {
 
     /// Sandbox-safe config directory under Application Support.
     static var configDirectory: URL {
+        if let isolated = UIRegressionEnvironment.configDirectory { return isolated }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
         return appSupport.appendingPathComponent("HomeClaw")
@@ -95,7 +96,7 @@ final class HomeClawConfig: @unchecked Sendable {
         configFile = configDir.appendingPathComponent("config.json")
 
         // Migrate from legacy path if needed
-        Self.migrateIfNeeded(to: configDir)
+        if !UIRegressionEnvironment.enabled { Self.migrateIfNeeded(to: configDir) }
 
         // Load existing config or start with defaults
         if let data = try? Data(contentsOf: configFile),

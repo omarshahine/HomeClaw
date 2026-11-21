@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>HomeClaw</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.shahine.homeclaw</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleName</key>
 	<string>HomeClaw</string>
 	<key>CFBundlePackageType</key>
@@ -17,7 +17,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>1.0.16</string>
 	<key>CFBundleVersion</key>
-	<string>203</string>
+	<string>204</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>

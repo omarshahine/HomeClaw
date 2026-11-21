@@ -10,8 +10,14 @@ options:
   generateEmptyDirectories: true
   groupSortPosition: top
 
+configs:
+  Debug: debug
+  DebugUI: debug
+  Release: release
+
 settings:
   base:
+    HOMECLAW_APP_BUNDLE_IDENTIFIER: com.shahine.homeclaw
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     DEAD_CODE_STRIPPING: YES
@@ -57,7 +63,7 @@ targets:
         buildPhase: resources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.shahine.homeclaw
+        PRODUCT_BUNDLE_IDENTIFIER: "$(HOMECLAW_APP_BUNDLE_IDENTIFIER)"
         PRODUCT_NAME: HomeClaw
         TARGETED_DEVICE_FAMILY: "6"
         SUPPORTS_MACCATALYST: YES
@@ -70,6 +76,11 @@ targets:
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
         ENABLE_USER_SCRIPT_SANDBOXING: NO
       configs:
+        DebugUI:
+          HOMECLAW_APP_BUNDLE_IDENTIFIER: com.shahine.homeclaw.ui-regression
+          CODE_SIGN_ENTITLEMENTS: Resources/UIRegression.entitlements
+          ENABLE_APP_SANDBOX: NO
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) DEBUG"
         Debug:
           ENABLE_APP_SANDBOX: NO
         Release:
@@ -77,12 +88,9 @@ targets:
           ENABLE_INCOMING_NETWORK_CONNECTIONS: YES
           ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APP_STORE"
-    entitlements:
-      path: Resources/HomeClaw.entitlements
-      properties:
-        com.apple.developer.homekit: true
-        com.apple.security.application-groups:
-          - group.com.shahine.homeclaw
+    # The tracked entitlement files are canonical. XcodeGen's `entitlements`
+    # generator overwrites CODE_SIGN_ENTITLEMENTS in every configuration,
+    # which would give the isolated UI-test identity production capabilities.
     dependencies:
       - target: macOSBridge
         platformFilter: maccatalyst
@@ -337,7 +345,27 @@ schemes:
     test:
       config: Debug
       targets:
-        - HomeClawUITests
+        - name: HomeClawUITests
+          selectedTests: [ScreenshotTests]
     run:
       config: Debug
       executable: HomeClaw
+
+  HomeClawOnboardingTests:
+    build:
+      targets:
+        HomeClaw: all
+        macOSBridge: all
+        homeclaw-cli: all
+        HomeClawUITests: [test]
+    test:
+      config: DebugUI
+      targets:
+        - name: HomeClawUITests
+          selectedTests: [OnboardingRegressionTests]
+    run:
+      config: DebugUI
+      executable: HomeClaw
+      commandLineArguments:
+        "--ui-test-demo": true
+        "--ui-test-isolated": true
