@@ -415,8 +415,17 @@ homeclaw-cli set "ACCESSORY-UUID" power false --service-id "SERVICE-UUID" --dry-
 Channel `state` is explicitly marked `state_source: "last_known"`. It comes from
 that service's existing characteristic values, never the collapsed accessory-wide
 cache, and performs no live reads. Missing values are omitted. It can be stale;
-use a normal refreshed `get` for fresh per-characteristic read results. This
-change does not relax freshness validation or change write verification timing.
+use a normal refreshed `get` for fresh per-characteristic read results.
+Live `get` (CLI and MCP) requires at least one supported readable characteristic
+and a successful read of every such characteristic. This includes mapped types
+and standard HomeKit UUIDs, even if HomeClaw doesn't have a name for them.
+Unmapped vendor UUIDs (for example, a bridge's firmware-update service) are not
+live-read: their rows and existing values remain, labeled
+`value_source: "last_known"`, with no `read` timestamp. The optional
+`read_skipped_unmapped` count reports those readable rows separately from
+`read_attempted` and `read_succeeded`. Use `--no-refresh` (MCP `no_refresh: true`)
+for static and last-known values only, including on vendor-only devices.
+Write verification timing is unchanged.
 Single-channel accessory summaries retain their existing compact shape.
 
 ### Numeric and Ordered Conditions
