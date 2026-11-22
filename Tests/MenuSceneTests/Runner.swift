@@ -81,6 +81,12 @@ import Foundation
         let wantedIDs = Set(wanted.map { $0.uniqueIdentifier.uuidString })
         let selectedAll = Set(home.accessories.map { $0.uniqueIdentifier.uuidString })
         let base = manager.buildMenuData()
+        for menu in [controller.fixtureMenu(base), controller.fixtureMenu(nil, ready: true), controller.fixtureMenu(nil)] {
+            for title in ["Launch at Login", "Settings…", "Star HomeClaw on GitHub"] {
+                try require(menu.items.filter { $0.title == title }.count == 1,
+                            "Expected one \(title) command in each menu state")
+            }
+        }
         let starMenu = controller.fixtureMenu(base)
         let starItem = starMenu.items.first { $0.title == "Star HomeClaw on GitHub" }
         try require(starItem?.action != nil, "Star menu command is missing")

@@ -18,8 +18,9 @@ final class GitHubStarPromptTests: XCTestCase {
             for _ in 0..<4 { prompt.record(.sceneExecution) }
             for _ in 0..<10 {
                 prompt.record(.accessoryControl(verified: false))
-                prompt.record(.webhookDelivery(httpStatus: 302))
-                prompt.record(.webhookDelivery(httpStatus: 500))
+                prompt.record(.webhookDelivery(httpStatus: 302, isTest: false))
+                prompt.record(.webhookDelivery(httpStatus: 500, isTest: false))
+                prompt.record(.webhookDelivery(httpStatus: 204, isTest: true))
             }
             XCTAssertFalse(prompt.pending)
             XCTAssertFalse(prompt.visible)
@@ -33,7 +34,7 @@ final class GitHubStarPromptTests: XCTestCase {
             XCTAssertFalse(reopened.pending)
             XCTAssertFalse(GitHubStarPrompt(defaults: defaults).pending, "Already recorded before showing")
             reopened.dismiss()
-            for _ in 0..<10 { reopened.record(.webhookDelivery(httpStatus: 204)) }
+            for _ in 0..<10 { reopened.record(.webhookDelivery(httpStatus: 204, isTest: false)) }
             reopened.showIfPending()
             XCTAssertFalse(reopened.visible)
         }
@@ -47,6 +48,17 @@ final class GitHubStarPromptTests: XCTestCase {
         XCTAssertFalse(Use.socket(command: "control", result: ["verification_skipped": "read_failed"])?.qualifies ?? true)
         XCTAssertTrue(Use.socket(command: "control", result: ["verified": true])?.qualifies ?? false)
         XCTAssertTrue(Use.socket(command: "trigger_scene", result: [:] as [String: Any])?.qualifies ?? false)
+    }
+
+    func testNativeRegistryQualifiesOnlySuccessfulControlsAndTriggers() {
+        typealias Use = GitHubStarUse
+        let tool = "homekit_accessories"
+        XCTAssertTrue(Use.nativeMCP(tool: tool, action: "control", result: ["verified": true])?.qualifies ?? false)
+        XCTAssertNil(Use.nativeMCP(tool: tool, action: "control", result: ["dry_run": true]))
+        XCTAssertNil(Use.nativeMCP(tool: tool, action: "get", result: ["verified": true]))
+        XCTAssertTrue(Use.nativeMCP(tool: "homekit_scenes", action: "trigger", result: [:] as [String: Any])?.qualifies ?? false)
+        XCTAssertFalse(HTTPToolPolicy.readOnly.allowsCall(name: tool, arguments: ["action": "control"]))
+        XCTAssertFalse(HTTPToolPolicy.readOnly.allowsCall(name: "homekit_scenes", arguments: ["action": "trigger"]))
     }
 
     func testExistingLocalStarSuppressesAskAndUnknownRefreshDoesNotEraseIt() async throws {

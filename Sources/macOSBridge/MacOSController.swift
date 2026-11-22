@@ -139,25 +139,29 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     private func rebuildMenu() {
         guard let menu else { return }
         menu.removeAllItems()
+        populateMenu(menu, data: menuData, ready: currentReady)
+    }
 
-        // Use full menu data if available, otherwise show basic status
-        if let menuData, menuData["ready"] as? Bool == true {
-            buildInteractiveMenu(from: menuData, into: menu)
-        } else if currentReady {
+    private func populateMenu(_ menu: NSMenu, data: [String: Any]?, ready: Bool) {
+        // Use full menu data if available, otherwise show basic status.
+        if let data, data["ready"] as? Bool == true {
+            buildInteractiveMenu(from: data, into: menu)
+        } else if ready {
             let statusText = currentHomeNames.isEmpty
                 ? "Connected"
                 : currentHomeNames.joined(separator: ", ")
             let item = NSMenuItem(title: statusText, action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "house.fill", accessibilityDescription: nil)
             menu.addItem(item)
+            addAppItems(to: menu)
         } else {
             let item = NSMenuItem(
                 title: "Waiting for HomeKit\u{2026}", action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "house", accessibilityDescription: nil)
             menu.addItem(item)
+            addAppItems(to: menu)
         }
 
-        addAppItems(to: menu)
         addStandardItems(to: menu)
     }
 

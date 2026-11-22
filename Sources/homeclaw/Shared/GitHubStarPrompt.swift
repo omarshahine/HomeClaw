@@ -5,13 +5,21 @@ import Combine
 enum GitHubStarUse {
     case accessoryControl(verified: Bool)
     case sceneExecution
-    case webhookDelivery(httpStatus: Int)
+    case webhookDelivery(httpStatus: Int, isTest: Bool)
 
     var qualifies: Bool {
         switch self {
         case .accessoryControl(let verified): verified
         case .sceneExecution: true
-        case .webhookDelivery(let status): (200..<300).contains(status)
+        case .webhookDelivery(let status, let isTest): !isTest && (200..<300).contains(status)
+        }
+    }
+
+    static func nativeMCP(tool: String, action: String?, result: Any) -> Self? {
+        switch (tool, action) {
+        case ("homekit_accessories", "control"): return socket(command: "control", result: result)
+        case ("homekit_scenes", "trigger"): return .sceneExecution
+        default: return nil
         }
     }
 

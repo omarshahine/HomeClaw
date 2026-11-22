@@ -431,7 +431,7 @@ final class HomeEventLogger {
             let mode = trigger.wakeMode ?? "next-heartbeat"
             let payload: [String: Any] = ["text": "[\(trigger.label)] \(text)", "mode": mode]
             sendWebhookPayload(
-                payload, to: url, token: webhook.token,
+                payload, to: url, token: webhook.token, isTest: false,
                 isCritical: isCritical, trigger: trigger,
                 accessoryName: accessoryName, characteristic: characteristic,
                 value: value, previousValue: previousValue
@@ -529,12 +529,12 @@ final class HomeEventLogger {
               !config.url.isEmpty,
               let url = URL(string: config.url + HomeClawConfig.shared.effectiveEndpoint)
         else { return ["sent": false, "error": "Webhook is not configured"] }
-        sendWebhookPayload(["type": "test", "source": "homeclaw"], to: url, token: config.token)
+        sendWebhookPayload(["type": "test", "source": "homeclaw"], to: url, token: config.token, isTest: true)
         return ["sent": true, "endpoint": url.path]
     }
 
     private func sendWebhookPayload(
-        _ payload: [String: Any], to url: URL, token: String,
+        _ payload: [String: Any], to url: URL, token: String, isTest: Bool,
         timeout: TimeInterval = 10, isCritical: Bool = false,
         trigger: HomeClawConfig.WebhookTrigger? = nil,
         accessoryName: String? = nil, characteristic: String? = nil,
@@ -591,7 +591,7 @@ final class HomeEventLogger {
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 200
                     await WebhookCircuitBreaker.shared.recordSuccess(httpStatus: status)
                     if let http = response as? HTTPURLResponse {
-                        await GitHubStarPrompt.shared.record(.webhookDelivery(httpStatus: http.statusCode))
+                        await GitHubStarPrompt.shared.record(.webhookDelivery(httpStatus: http.statusCode, isTest: isTest))
                     }
                     await webhookLog.log(
                         outcome: .delivered,

@@ -42,12 +42,10 @@ assert bridge.count(call) == 1
 bridge = bridge.replace(call, "        // Offscreen fixture: do not create a status item.\n")
 bridge += """
 extension MacOSController {
-    func fixtureMenu(_ data: [String: Any]) -> NSMenu {
+    func fixtureMenu(_ data: [String: Any]?, ready: Bool = false) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        buildInteractiveMenu(from: data, into: menu)
-        addAppItems(to: menu)
-        addStandardItems(to: menu)
+        populateMenu(menu, data: data, ready: ready)
         menu.update()
         return menu
     }
