@@ -154,3 +154,19 @@ for (const [name, respond, error] of [
     assert.equal(legacy.requests.length, 0);
   });
 }
+
+test('preserves a write outcome code without replaying the write', async t => {
+  const { paths, listen, send } = fixture(t);
+  const preferred = await listen(paths[0], () => ({
+    success: false,
+    error: 'Write unconfirmed: readback did not match',
+    error_code: 'write_unconfirmed',
+  }));
+  const legacy = await listen(paths[1]);
+  await assert.rejects(send('control', { value: 'true' }), {
+    message: 'Write unconfirmed: readback did not match',
+    homeclawCode: 'write_unconfirmed',
+  });
+  assert.equal(preferred.requests.length, 1);
+  assert.equal(legacy.requests.length, 0);
+});

@@ -45,6 +45,12 @@ enum SocketClient {
         let success: Bool
         let data: AnyCodable?
         let error: String?
+        let errorCode: String?
+
+        enum CodingKeys: String, CodingKey {
+            case success, data, error
+            case errorCode = "error_code"
+        }
     }
 
     enum ClientError: Error, LocalizedError {

@@ -176,6 +176,7 @@ export const TOOLS: ToolDef[] = [
 	{
 		name: 'homekit_set',
 		optional: true,
+		reportOnFailure: true,
 		description:
 			'Control a HomeKit accessory. Set power, brightness, temperature, lock state, blind position, etc. Use UUID for disambiguation when names collide. Use dry_run to validate without actuating.',
 		parameters: Type.Object({
@@ -216,7 +217,7 @@ export const TOOLS: ToolDef[] = [
 			verify: Type.Optional(
 				Type.Boolean({
 					description:
-						'Default true. After writing, the value is read back and a write the device did not apply comes back as an error rather than a success. Set false only for accessories whose readback is unreliable.',
+						'Default true. After writing, a live targeted read must confirm the value or the tool returns write_unconfirmed. Check the current state before issuing another write. Set false only for accessories whose readback is unreliable.',
 				})
 			),
 			dry_run: Type.Optional(

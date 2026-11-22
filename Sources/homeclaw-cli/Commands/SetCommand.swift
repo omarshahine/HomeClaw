@@ -65,7 +65,11 @@ struct Set: ParsableCommand {
         )
 
         guard response.success else {
-            throw CommandFailure(response.error ?? "Unknown error")
+            let message = response.error ?? "Unknown error"
+            if shouldOutputJSON(json), let code = response.errorCode {
+                printJSON(["success": false, "error": message, "error_code": code])
+            }
+            throw CommandFailure(message)
         }
 
         if shouldOutputJSON(json) {
