@@ -125,7 +125,8 @@ struct Get: ParsableCommand {
                     let charName = char["name"] as? String ?? "?"
                     let value = char["value"] as? String ?? "nil"
                     let writable = (char["writable"] as? Bool ?? false) ? " (writable)" : ""
-                    print("    \(charName): \(value)\(writable)")
+                    let source = char["value_source"] as? String == "last_known" ? " (last known; not live-read)" : ""
+                    print("    \(charName): \(value)\(writable)\(source)")
                 }
             }
         }

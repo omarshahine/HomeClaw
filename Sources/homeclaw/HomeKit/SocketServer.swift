@@ -1736,6 +1736,8 @@ final class SocketServer: @unchecked Sendable {
             }
 
             return encodeResponse(success: true, data: result)
+        } catch let error as AccessoryWriteFailure {
+            return encodeResponse(success: false, error: error.localizedDescription, errorCode: error.code)
         } catch {
             return encodeResponse(success: false, error: error.localizedDescription)
         }
@@ -1767,10 +1769,11 @@ final class SocketServer: @unchecked Sendable {
 
     // MARK: - Response Encoding
 
-    private func encodeResponse(success: Bool, data: Any? = nil, error: String? = nil) -> String {
+    private func encodeResponse(success: Bool, data: Any? = nil, error: String? = nil, errorCode: String? = nil) -> String {
         var dict: [String: Any] = ["success": success]
         if let data { dict["data"] = data }
         if let error { dict["error"] = error }
+        if let errorCode { dict["error_code"] = errorCode }
 
         guard let jsonData = SafeJSON.data(withJSONObject: dict, options: [.sortedKeys]),
               let string = String(data: jsonData, encoding: .utf8)
