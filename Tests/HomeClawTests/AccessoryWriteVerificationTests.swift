@@ -37,11 +37,20 @@ private func verifyReadback() async throws {
         try expect(result.0 == .confirmed(value: "true") && result.1.last == .seconds(delay), "Delayed bridge did not confirm at \(delay)s")
     }
 
+    let lateBridge = await poll { time, _ in
+        (.zero, time >= .milliseconds(4700) ? .matches("true") : .differs("false"))
+    }
+    try expect(lateBridge.0 == .confirmed(value: "true") && lateBridge.1.last == .milliseconds(4800),
+               "Catch a bridge reporting success in the final polling window")
+    try expect(lateBridge.2.last == 0.2, "Final bridge read must fit the same five-second budget")
+
     let direct = await poll(bridged: false) { _, _ in (.zero, .differs("true")) }
     try expect(direct.1 == [.zero, .milliseconds(250), .milliseconds(500)], "Direct accessory must retain schedule")
 
     let noMatch = await poll { _, _ in (.zero, .differs("true")) }
-    try expect(noMatch.0 == .unconfirmed(lastRead: "true") && noMatch.1.count == 10, "Mismatch must stay unconfirmed")
+    try expect(noMatch.0 == .unconfirmed(lastRead: "true")
+               && noMatch.1 == (0...9).map { Duration.milliseconds($0 * 500) } + [.milliseconds(4800)]
+               && noMatch.2.last == 0.2, "Mismatch must stay unconfirmed without extra late attempts")
 
     // Failed reads must not attest a matching notification/cache value. The
     // adapter reports unavailable, not the cached value, on a failed read.

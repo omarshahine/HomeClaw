@@ -55,15 +55,23 @@ enum AccessoryWriteVerification {
     ) async -> Outcome {
         let budget: Duration = .seconds(bridged ? 5 : 3)
         let interval: Duration = .milliseconds(bridged ? 500 : 250)
-        let attempts = bridged ? 10 : 3
+        // At the fast cadence, ordinary bridge polls end at 4.5 s. Reserve
+        // one late read with 200 ms of the original budget still available.
+        let bridgeFinalStart: Duration = .milliseconds(4800)
+        let attempts = bridged ? 11 : 3
         var lastRead: String?
         for index in 0..<attempts {
-            guard !Task.isCancelled, elapsed() < budget else { break }
+            let now = elapsed()
+            guard !Task.isCancelled, now < budget else { break }
             if index > 0 {
-                do { try await sleep(min(interval, budget - elapsed())) }
-                catch { break }
+                let nextRead = min(now + interval, bridged ? bridgeFinalStart : budget)
+                if nextRead > now {
+                    do { try await sleep(nextRead - now) }
+                    catch { break }
+                }
             }
-            let remaining = budget - elapsed()
+            let started = elapsed()
+            let remaining = budget - started
             guard !Task.isCancelled, remaining > .zero else { break }
             let parts = remaining.components
             let timeout = min(1.5, Double(parts.seconds) + Double(parts.attoseconds) / 1e18)
@@ -74,6 +82,9 @@ enum AccessoryWriteVerification {
             case .differs(let value): lastRead = value
             case .unavailable: break
             }
+            // A slow preceding read can push us past the target start time.
+            // Use its remaining budget once; never spin through late reads.
+            if bridged && started >= bridgeFinalStart { break }
         }
         return .unconfirmed(lastRead: lastRead)
     }
