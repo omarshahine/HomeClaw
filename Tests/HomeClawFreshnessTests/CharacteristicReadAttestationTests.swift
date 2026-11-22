@@ -44,6 +44,85 @@ struct CharacteristicReadAttestationTests {
         #expect(stale["read_succeeded"] as? Int == 0)
     }
 
+    @Test("Only valid unmapped vendor UUIDs are outside the required read scope")
+    func supportedReadScope() {
+        let vendor = "2E03020C-1234-4321-9999-123456789ABC"
+        #expect(!AccessoryReadReport.requiresLiveRead(characteristicType: vendor, isMapped: false))
+        #expect(AccessoryReadReport.requiresLiveRead(characteristicType: vendor, isMapped: true))
+        #expect(AccessoryReadReport.requiresLiveRead(
+            characteristicType: "000000cb-0000-1000-8000-0026bb765291", isMapped: false
+        ))
+        #expect(AccessoryReadReport.requiresLiveRead(characteristicType: "unknown-type", isMapped: false))
+    }
+
+    @Test("Two fresh channel reads survive skipped vendor rows; failure of either channel does not")
+    func mixedReadReport() {
+        let vendorA = UUID()
+        let vendorB = UUID()
+        var report = AccessoryReadReport()
+        report.record(characteristicID: first, attestation: .completed(succeeded: true, at: date))
+        report.record(characteristicID: second, attestation: .completed(succeeded: true, at: date))
+        report.skipUnmapped(characteristicID: vendorA)
+        report.skipUnmapped(characteristicID: vendorB)
+
+        func payload(_ report: AccessoryReadReport) -> [String: Any] {
+            let firstChannel = report.attesting(["name": "power", "value": "true"], characteristicID: first)
+            let secondChannel = report.attesting(["name": "power", "value": "false"], characteristicID: second)
+            let vendorService = [vendorA, vendorB].map {
+                report.attesting(["name": "vendor", "value": "cached"], characteristicID: $0)
+            }
+            return report.applyingFreshness(to: ["services": [
+                ["characteristics": [firstChannel]],
+                ["characteristics": [secondChannel]],
+                ["characteristics": vendorService],
+            ]])
+        }
+
+        let result = payload(report)
+        #expect(result["refreshed"] as? Bool == true)
+        #expect(result["read_attempted"] as? Int == 2)
+        #expect(result["read_succeeded"] as? Int == 2)
+        #expect(result["read_skipped_unmapped"] as? Int == 2)
+        #expect(AccessoryFreshnessContract.violation(in: result, allowStale: false) == nil)
+
+        let services = result["services"] as? [[String: [[String: Any]]]]
+        let vendorRows = services?.last?["characteristics"] ?? []
+        #expect(vendorRows.count == 2)
+        for row in vendorRows {
+            #expect(row["value"] as? String == "cached")
+            #expect(row["value_source"] as? String == "last_known")
+            #expect(row["read"] == nil)
+        }
+
+        for failedID in [first, second] {
+            var partial = report
+            partial.record(characteristicID: failedID, attestation: .completed(succeeded: false, at: date))
+            let failed = payload(partial)
+            #expect(failed["read_attempted"] as? Int == 2)
+            #expect(failed["read_succeeded"] as? Int == 1)
+            #expect(failed["refreshed"] as? Bool == false)
+            #expect(AccessoryFreshnessContract.violation(in: failed, allowStale: false)?
+                .contains("1 of 2 characteristic reads succeeded") == true)
+        }
+    }
+
+    @Test("Vendor-only rows cannot be attested fresh; explicit no-refresh is unchanged")
+    func vendorOnly() {
+        var report = AccessoryReadReport()
+        report.skipUnmapped(characteristicID: first)
+        let result = report.applyingFreshness(to: [:])
+        #expect(result["refreshed"] as? Bool == false)
+        #expect(result["read_attempted"] as? Int == 0)
+        #expect(result["read_skipped_unmapped"] as? Int == 1)
+        #expect(AccessoryFreshnessContract.violation(in: result, allowStale: false) != nil)
+
+        let data = ["services": [["characteristics": [["name": "vendor", "value": "cached"]]]]]
+        let stale = AccessoryReadReport.applyingNoRefresh(to: data)
+        #expect(stale["read_skipped_unmapped"] == nil)
+        #expect(AccessoryFreshnessContract.violation(in: stale, allowStale: false) != nil)
+        #expect(AccessoryFreshnessContract.violation(in: stale, allowStale: true) == nil)
+    }
+
     @Test("Only a non-empty all-success report is fresh")
     func aggregateContract() {
         var report = AccessoryReadReport()
