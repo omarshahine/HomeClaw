@@ -29,6 +29,27 @@ test('accepts only an internally consistent fresh payload', () => {
     assert.throws(() => validateFreshAccessoryPayload(payload));
   }
 });
+test('default MCP get keeps last-known vendor rows alongside attested channel values', async () => {
+  const payload = freshPayload({
+    read_attempted: 2,
+    read_succeeded: 2,
+    read_skipped_unmapped: 2,
+    services: [
+      { characteristics: [{ name: 'power', value: 'true', read: { succeeded: true, observed_at: '2026-09-10T14:00:00.125Z' } }] },
+      { characteristics: [{ name: 'power', value: 'false', read: { succeeded: true, observed_at: '2026-09-10T14:00:00.126Z' } }] },
+      { characteristics: ['2E03020C', '2E03020A'].map((name) => ({ name, value: 'cached', value_source: 'last_known' })) },
+    ],
+  });
+  assert.deepEqual(await handleAccessories({ action: 'get', accessory_id: 'switch' }, async () => payload), payload);
+
+  const partial = { ...payload, refreshed: false, read_succeeded: 1 };
+  await assert.rejects(
+    handleAccessories({ action: 'get', accessory_id: 'switch' }, async () => partial),
+    /1 of 2 characteristic reads succeeded/,
+  );
+  const vendorOnly = { ...payload, refreshed: false, read_succeeded: 0, read_attempted: 0, services: payload.services.slice(2) };
+  assert.throws(() => validateFreshAccessoryPayload(vendorOnly), /live refresh failed/);
+});
 test('default MCP get rejects a failed live refresh', async () => {
   const send = async () => freshPayload({ refreshed: false, read_succeeded: 0 });
   await assert.rejects(

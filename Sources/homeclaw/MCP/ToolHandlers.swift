@@ -82,7 +82,7 @@ enum ToolHandlers {
             },
             "verify": {
               "type": "boolean",
-              "description": "Default true (control action). After writing, the value is read back and a write the device did not apply is returned as an error rather than a success. Set false only for accessories whose readback is unreliable; the response then carries verification_skipped: \"disabled\"."
+              "description": "Default true (control action). After writing, a fresh targeted read must confirm the value or the result is write_unconfirmed. A HomeKit write error is write_failed. Check current state before issuing another write. Set false only for accessories whose readback is unreliable; the response then carries verification_skipped: \"disabled\"."
             },
             "no_refresh": {
               "type": "boolean",
@@ -797,6 +797,8 @@ enum ToolHandlers {
                 GitHubStarPrompt.shared.record(use)
             }
             return json(result)
+        } catch let error as AccessoryWriteFailure {
+            return json(["error": error.localizedDescription, "error_code": error.code])
         } catch {
             return Self.error(error.localizedDescription)
         }

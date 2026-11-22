@@ -17121,7 +17121,7 @@ var tools = [
         },
         verify: {
           type: "boolean",
-          description: 'Default true (control action). After writing, the value is read back and a write the device did not apply is returned as an error rather than a success. Set false only for accessories whose readback is unreliable; the response then carries verification_skipped: "disabled".'
+          description: 'Default true (control action). After writing, a fresh targeted read must confirm the value or the result is write_unconfirmed. A HomeKit write error is write_failed. Check current state before issuing another write. Set false only for accessories whose readback is unreliable; the response then carries verification_skipped: "disabled".'
         },
         no_refresh: {
           type: "boolean",
@@ -17586,7 +17586,9 @@ function createSocketClient(socketPaths, timeoutMs = TIMEOUT_MS, uid = process.g
           try {
             const parsed = JSON.parse(data);
             if (!parsed.success) {
-              reject(new Error(parsed.error || "Unknown error from HomeClaw"));
+              const error2 = new Error(parsed.error || "Unknown error from HomeClaw");
+              if (typeof parsed.error_code === "string") error2.homeclawCode = parsed.error_code;
+              reject(error2);
             } else {
               resolve(parsed.data);
             }
@@ -18213,7 +18215,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } catch (error2) {
     return {
       content: [{ type: "text", text: error2.message }],
-      isError: true
+      isError: true,
+      ...error2.homeclawCode && {
+        structuredContent: { error: error2.message, error_code: error2.homeclawCode }
+      }
     };
   }
 });

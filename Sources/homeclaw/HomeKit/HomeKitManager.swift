@@ -470,8 +470,9 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
-    /// - Parameter refresh: when `true` (default) live-reads dynamic
-    ///   characteristics before serializing. Pass `false` to skip all live reads
+    /// - Parameter refresh: when `true` (default) live-reads supported
+    ///   readable characteristics before serializing. Unmapped vendor UUIDs
+    ///   retain their last-known values. Pass `false` to skip all live reads
     ///   and return last-known + static values only. Static metadata (serial
     ///   number, model, firmware, manufacturer) never needs a live read, so a
     ///   non-refreshing get is instant — the right choice for whole-home metadata
@@ -483,7 +484,7 @@ final class HomeKitManager: NSObject, Observable {
         guard isAccessoryAllowed(accessory) else { return nil }
         let readReport: AccessoryReadReport?
         if refresh {
-            let report = await readAllValues(for: accessory)
+            let report = await readSupportedValues(for: accessory)
             readReport = report
             updateCacheFromAccessory(accessory, readReport: report)
         } else {
@@ -541,7 +542,6 @@ final class HomeKitManager: NSObject, Observable {
         /// Service selectors matched more than one service. Payload: pre-rendered detail.
         case ambiguousService(String)
         case invalidArgument(String)
-        case writeNotApplied(String)
 
         var errorDescription: String? {
             switch self {
@@ -580,8 +580,6 @@ final class HomeKitManager: NSObject, Observable {
             case .serviceNotFound(let detail): "Service not found: \(detail)"
             case .ambiguousService(let detail): "Ambiguous: \(detail)"
             case .invalidArgument(let detail): "Invalid argument: \(detail)"
-            case .writeNotApplied(let detail):
-                "Write not applied: \(detail). Pass verify=false to accept unconfirmed writes."
             }
         }
     }
@@ -702,27 +700,24 @@ final class HomeKitManager: NSObject, Observable {
                 homeID: home?.uniqueIdentifier.uuidString
             )
         } catch {
-            throw ControlError.writeFailed("\(error.localizedDescription)")
+            throw AccessoryWriteFailure.failed("\(error.localizedDescription)")
         }
 
-        // Refresh the accessory, then confirm the written characteristic last so its
-        // outcome is the authoritative one behind `verified`. The explicit read is
-        // needed on top of `readInterestingValues` because that only refreshes the
-        // subset it considers interesting, and it discards whether a read succeeded.
-        await readInterestingValues(for: accessory)
+        // Confirm only the written characteristic. An unrelated serial refresh
+        // can delay this read until after the client's request times out.
         let isReadable = hmCharacteristic.properties.contains(HMCharacteristicPropertyReadable)
         let verification = verify && isReadable
-            ? await confirmWrite(of: parsedValue, on: hmCharacteristic)
+            ? await confirmWrite(of: parsedValue, on: hmCharacteristic, bridged: accessory.isBridged)
             : nil
-        updateCacheFromAccessory(accessory)
 
-        // The whole point of issue #85: HomeKit accepted the write and the device did
-        // not change. Returning success here is what made the failure silent for every
-        // automation built on top, so this is an error, not a note in the payload.
-        if case .mismatched(let actual) = verification {
-            throw ControlError.writeNotApplied(
-                "\(accessory.name).\(targetService.name).\(characteristic) still reads \(actual) after writing \(value)"
-            )
+        // A HomeKit write callback is not proof that the device changed.
+        // Keep the command failed when requested readback cannot confirm it.
+        if case .unconfirmed(let lastRead) = verification {
+            let target = "\(accessory.name).\(targetService.name).\(characteristic)"
+            let detail = lastRead.map {
+                "\(target) last read \($0), not the requested \(value)"
+            } ?? "\(target) did not return a fresh value"
+            throw AccessoryWriteFailure.unconfirmed(detail)
         }
 
         let bridgeMetadata = BridgeMetadata(
@@ -741,71 +736,50 @@ final class HomeKitManager: NSObject, Observable {
         // readback explicitly.
         result["characteristic"] = characteristic
         result["service"] = targetService.dictionary
-        if let current = hmCharacteristic.value {
-            result["value"] = CharacteristicMapper.formatValue(
-                current, for: hmCharacteristic.characteristicType
-            )
+        let confirmedValue: String?
+        if case .confirmed(let observedValue) = verification {
+            confirmedValue = observedValue
+            let name = CharacteristicMapper.name(for: hmCharacteristic.characteristicType)
+            // The cache is keyed by name, so do not assign one channel's fresh
+            // value to a flattened entry shared by more than one channel.
+            if AccessoryModel.isInterestingState(name),
+               accessory.services.lazy.flatMap(\.characteristics).filter({
+                   CharacteristicMapper.name(for: $0.characteristicType) == name
+               }).prefix(2).count == 1 {
+                cache.mergeValues(for: accessory.uniqueIdentifier.uuidString, state: [name: observedValue])
+                cache.save()
+            }
+        } else {
+            confirmedValue = nil
         }
-        // A mismatch already threw above, so the only outcomes left are "confirmed" and
-        // "couldn't tell". Never report the second as the first: a write-only
-        // characteristic, a failed read, or an explicit opt-out says so by name.
-        switch verification {
-        case .matched:
-            result["verified"] = true
-        case .unreadable:
-            result["verification_skipped"] = "read_failed"
-        default:
-            result["verification_skipped"] = verify ? "not_readable" : "disabled"
-        }
+        result.merge(AccessoryWriteVerification.successFields(
+            confirmedValue: confirmedValue,
+            verificationRequested: verify,
+            lastKnownValue: hmCharacteristic.value.map {
+                CharacteristicMapper.formatValue($0, for: hmCharacteristic.characteristicType)
+            }
+        )) { _, current in current }
         return result
     }
 
-    /// Outcome of reading a characteristic back after writing it.
-    private enum WriteVerification {
-        case matched
-        case mismatched(String)
-        /// No fresh read came back, so nothing can be concluded.
-        case unreadable
-    }
-
-    /// How many times to re-read before declaring a write unapplied. Some accessories
-    /// acknowledge a write and only publish the new value a moment later, so a single
-    /// immediate read would report a false failure.
-    private static let verifyAttempts = 3
-    private static let verifyRetryDelay: Duration = .milliseconds(250)
-    /// Verification runs on top of a full `readInterestingValues` refresh, inside a
-    /// control call that clients give ~30s. Retrying at the 6s `readTimeout` used for
-    /// normal reads could blow that budget and turn an applied write into a request
-    /// timeout — the failure mode of issue #66 — so verification reads get a much
-    /// tighter per-read ceiling and an overall wall-clock cap on top of it.
-    private static let verifyReadTimeout: TimeInterval = 1.5
-    private static let verifyBudget: Duration = .seconds(3)
-
     private func confirmWrite(
-        of parsedValue: Any, on characteristic: HMCharacteristic
-    ) async -> WriteVerification {
+        of parsedValue: Any, on characteristic: HMCharacteristic, bridged: Bool
+    ) async -> AccessoryWriteVerification.Outcome {
         let step = characteristic.metadata?.stepValue?.doubleValue
-        let deadline = ContinuousClock.now + Self.verifyBudget
-        var anyReadSucceeded = false
-        for attempt in 0..<Self.verifyAttempts {
-            if attempt > 0 {
-                guard ContinuousClock.now < deadline else { break }
-                try? await Task.sleep(for: Self.verifyRetryDelay)
+        let start = ContinuousClock.now
+        return await AccessoryWriteVerification.confirm(
+            bridged: bridged,
+            elapsed: { start.duration(to: ContinuousClock.now) },
+            sleep: { try await Task.sleep(for: $0) },
+            read: { timeout in
+                let read = await self.readValueWithTimeout(characteristic, timeout: timeout)
+                return AccessoryWriteVerification.observe(
+                    succeeded: read.succeeded, value: characteristic.value,
+                    matches: { Self.valuesMatch($0, parsedValue, step: step) },
+                    format: { CharacteristicMapper.formatValue($0, for: characteristic.characteristicType) }
+                )
             }
-            let read = await readValueWithTimeout(
-                characteristic, timeout: Self.verifyReadTimeout
-            )
-            anyReadSucceeded = anyReadSucceeded || read.succeeded
-            if read.succeeded, Self.valuesMatch(characteristic.value, parsedValue, step: step) {
-                return .matched
-            }
-            guard ContinuousClock.now < deadline else { break }
-        }
-        guard anyReadSucceeded else { return .unreadable }
-        let actual = characteristic.value.map {
-            CharacteristicMapper.formatValue($0, for: characteristic.characteristicType)
-        } ?? "unknown"
-        return .mismatched(actual)
+        )
     }
 
     /// Compares a post-write readback against the value we asked HomeKit to write.
@@ -5250,38 +5224,27 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Value Reading
 
-    /// Reads current values for "interesting" state characteristics on an accessory.
-    /// Call before AccessoryModel.accessorySummary() so cached values are populated.
-    private func readInterestingValues(for accessory: HMAccessory) async {
-        guard accessory.isReachable else { return }
+    /// Refreshes supported readable values before serializing accessory detail.
+    /// Skip unmapped vendor UUIDs so an unrelated vendor read cannot fail
+    /// the sweep. Their rows are kept, without a live-read attestation.
+    private func readSupportedValues(for accessory: HMAccessory) async -> AccessoryReadReport {
+        var report = AccessoryReadReport()
         for service in accessory.services {
             for characteristic in service.characteristics {
-                let name = CharacteristicMapper.name(for: characteristic.characteristicType)
-                if AccessoryModel.isInterestingState(name) {
-                    _ = await readValueWithTimeout(characteristic)
+                guard characteristic.properties.contains(HMCharacteristicPropertyReadable) else { continue }
+                let id = characteristic.uniqueIdentifier
+                let type = characteristic.characteristicType
+                let mapped = CharacteristicMapper.name(for: type) != type
+                guard AccessoryReadReport.requiresLiveRead(characteristicType: type, isMapped: mapped) else {
+                    report.skipUnmapped(characteristicID: id)
+                    continue
                 }
-            }
-        }
-    }
-
-    /// Reads all readable characteristic values for a single accessory.
-    /// Call before AccessoryModel.accessoryDetail() so cached values are populated.
-    private func readAllValues(for accessory: HMAccessory) async -> AccessoryReadReport {
-        var report = AccessoryReadReport()
-        services: for service in accessory.services {
-            for characteristic in service.characteristics {
-                // A cancelled caller (e.g. an HTTP client that disconnected)
-                // gets no benefit from the rest of the sweep.
-                if Task.isCancelled { break services }
-                if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
-                    let attestation = accessory.isReachable
-                        ? await readValueWithTimeout(characteristic)
-                        : .completed(succeeded: false)
-                    report.record(
-                        characteristicID: characteristic.uniqueIdentifier,
-                        attestation: attestation
-                    )
-                }
+                // Don't start additional reads after cancellation. Still record
+                // every required row so a partial sweep can't appear complete.
+                let attestation = !Task.isCancelled && accessory.isReachable
+                    ? await readValueWithTimeout(characteristic)
+                    : .completed(succeeded: false)
+                report.record(characteristicID: id, attestation: attestation)
             }
         }
         return report
@@ -5316,7 +5279,7 @@ final class HomeKitManager: NSObject, Observable {
         return await withCheckedContinuation {
             (continuation: CheckedContinuation<CharacteristicReadAttestation, Never>) in
             // Cancellable timer leg: when HomeKit responds before the deadline we
-            // cancel it, so a large readAllValues loop (50–100+ characteristics)
+            // cancel it, so a large readSupportedValues loop (50–100+ characteristics)
             // doesn't leave a burst of no-op main-thread wakeups draining 6s later.
             let timerWork = DispatchWorkItem {
                 guard guardBox.claim() else { return }
