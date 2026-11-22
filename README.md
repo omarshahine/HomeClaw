@@ -1440,24 +1440,35 @@ actual HomeClaw data folder for your installation.
 2. Pause connected AI clients and OpenClaw integrations. In **Settings → Integrations**,
    turn off **Enable Streamable HTTP MCP** if enabled. Turn off **Launch at Login** if enabled,
    then choose **Quit HomeClaw** in the menu bar.
-3. In Finder, move only `config.json` and, if present, `cache.json` out of the data
-   folder into a private backup folder. If `~/.config/homeclaw/config.json` from an
-   older install exists, also move that file and its companion `cache.json`, if
-   present, to a **separate** backup folder. Otherwise HomeClaw may copy that older
-   configuration back into place. Backups may contain a webhook token or private device
-   details; don't share them.
-4. Reopen HomeClaw. Set the active home, review **Settings → Devices**, and set up
-   any needed webhook configuration before reconnecting clients. The default device
-   filter is **All Accessories**; restore **Selected Only** and its selection if you used it.
-   To roll back, quit again and move the backed-up files to their original locations,
-   setting aside the new files first. If you turned off Launch at Login or HTTP MCP,
-   those toggles stay off until you enable them again.
+3. In Finder, move `config.json`, `cache.json` (if present), and the entire event log
+   family (`events.jsonl` and every numbered backup such as `events.jsonl.1`) out of
+   the data folder into a private backup folder. Keep the log files together. On
+   reset, logging defaults to on with a 50 MB rotation threshold and three backups;
+   leaving old logs in place can cause some history to be overwritten. Moving them
+   aside before reopening keeps the originals intact. If
+   `~/.config/homeclaw/config.json` from an older install exists, also move it and
+   its companion `cache.json` (if present) into a **separate** private backup folder.
+   Otherwise HomeClaw may copy that older configuration back into place. Backups
+   can contain private device details or a webhook token; don't share them.
+4. Reopen HomeClaw. Old logs stay in your backup folder and won't appear in the
+   app. New logs go to the original folder, accessible again via
+   **Settings → Event Log → Show in Finder**. Adjust logging there if needed.
+   Set the active home, review **Settings → Devices**, and set up any needed webhook
+   configuration before reconnecting clients. The default device filter is
+   **All Accessories**; restore **Selected Only** and its selection if you used it.
+5. To roll back, pause clients and quit again. Set aside the newly created
+   `config.json`, `cache.json` and all new event log files in a different folder,
+   then restore the original files to their original locations. Don't combine
+   the old and new log files in the live folder. Keep a separate copy of the old
+   logs if you want to preserve them beyond the restored retention limit.
+   If you turned off Launch at Login or HTTP MCP, those toggles stay off until
+   you enable them again.
 
 This resets the active home selection, device filter, webhook and log settings stored
-in `config.json`; it doesn't erase existing event logs, clear the separate onboarding
-completion preference, or reset macOS HomeKit permission. HomeClaw does not currently
-offer a full factory reset. Leave the app-group folder used for the CLI socket,
-macOS privacy settings, and Apple Home data alone.
+in `config.json`. It doesn't clear the separate onboarding completion preference
+or reset macOS HomeKit permission. HomeClaw does not currently offer a full factory
+reset. Leave the app-group folder used for the CLI socket, macOS privacy settings,
+and Apple Home data alone.
 
 **Uninstall:** Turn off **Launch at Login**, quit HomeClaw, and move
 `HomeClaw.app` to the Trash ([Apple’s uninstall instructions](https://support.apple.com/guide/app-store/install-and-uninstall-purchased-apps-fir0fb69db23/mac)).
