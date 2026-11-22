@@ -156,7 +156,7 @@ enum CharacteristicEventAppend {
             switch self {
             case .duplicate: "That characteristic/value event already exists; nothing was written."
             case .unsupported(let reasons): "Cannot safely fingerprint this automation: \(reasons.joined(separator: ", ")). Nothing was written."
-            case .fingerprintRequired: "Apply requires the fingerprint returned by a fresh append-event preview."
+            case .fingerprintRequired: "Apply requires the fingerprint returned by a fresh preview of the same event edit."
             case .invalidEventID: "event_id must be a current event UUID from automations get."
             case .unexpectedEventID: "event_id is accepted only for retarget-event. Nothing was written."
             case .eventNotUnique: "event_id did not identify exactly one current trigger event. Run automations get again. Nothing was written."
