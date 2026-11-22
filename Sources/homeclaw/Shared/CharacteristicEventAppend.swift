@@ -249,6 +249,16 @@ enum CharacteristicEventAppend {
             }
         } else {
             guard let parsed = Double(text), parsed.isFinite else { return nil }
+            if parsed == 0 {
+                // Double also returns zero for nonzero inputs below its range.
+                // Inspect the significand, not the exponent, to distinguish true zero.
+                let unsigned = text.drop(while: { $0 == "+" || $0 == "-" })
+                let isHex = unsigned.lowercased().hasPrefix("0x")
+                let digits = unsigned.dropFirst(isHex ? 2 : 0)
+                let delimiters = isHex ? "pP" : "eE"
+                let significand = digits.prefix(while: { !delimiters.contains($0) })
+                guard significand.allSatisfy({ $0 == "0" || $0 == "." }) else { return nil }
+            }
             number = parsed
             switch format {
             case "uint8": guard (0...255).contains(number) && number.rounded() == number else { return nil }
