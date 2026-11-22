@@ -17,6 +17,7 @@ struct Automations: ParsableCommand {
             AddAutomationCondition.self,
             EditAutomation.self,
             AppendAutomationEvent.self,
+            RetargetAutomationEvent.self,
             MigrateAutomationActions.self,
         ],
         defaultSubcommand: ListAutomations.self

@@ -2,7 +2,7 @@ import CoreFoundation
 import CryptoKit
 import Foundation
 
-/// One-shot append transaction. No HomeKit dependency: adapters supply the current
+/// One-shot characteristic event edit transaction. No HomeKit dependency: adapters supply the current
 /// snapshot, original event objects and the one public updateEvents operation.
 enum CharacteristicEventAppend {
     struct CallbackTimeout: Error, LocalizedError {
@@ -41,17 +41,28 @@ enum CharacteristicEventAppend {
         let id: String, accessoryID: String, characteristic: String, value: String
         let serviceName: String?, serviceID: String?, serviceIndex: Int?, homeID: String?, fingerprint: String?
         let apply: Bool
+        let replacedEventID: UUID?
 
-        init(_ args: [String: Any]) throws {
+        init(_ args: [String: Any], retarget: Bool = false) throws {
+            let verb = retarget ? "retarget-event" : "append-event"
             func text(_ key: String, required: Bool = false) throws -> String? {
                 guard let raw = args[key] else {
-                    if required { throw NSError(domain: "append-event", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(key) is required"]) }
+                    if required { throw NSError(domain: verb, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(key) is required"]) }
                     return nil
                 }
                 guard let string = raw as? String, !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    throw NSError(domain: "append-event", code: 1, userInfo: [NSLocalizedDescriptionKey: "\(key) must be a non-empty string"])
+                    throw NSError(domain: verb, code: 1, userInfo: [NSLocalizedDescriptionKey: "\(key) must be a non-empty string"])
                 }
                 return string.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            if retarget {
+                guard let raw = try text("event_id", required: true), let uuid = UUID(uuidString: raw) else {
+                    throw Invalid.invalidEventID
+                }
+                replacedEventID = uuid
+            } else {
+                guard args["event_id"] == nil else { throw Invalid.unexpectedEventID }
+                replacedEventID = nil
             }
             id = try text("id", required: true)!
             accessoryID = try text("accessory_id", required: true)!
@@ -61,7 +72,7 @@ enum CharacteristicEventAppend {
             homeID = try text("home_id"); fingerprint = try text("fingerprint")
             if let raw = args["apply"] {
                 guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
-                    throw NSError(domain: "append-event", code: 1, userInfo: [NSLocalizedDescriptionKey: "apply must be a JSON boolean"])
+                    throw NSError(domain: verb, code: 1, userInfo: [NSLocalizedDescriptionKey: "apply must be a JSON boolean"])
                 }
                 apply = number.boolValue
             } else { apply = false }
@@ -73,15 +84,15 @@ enum CharacteristicEventAppend {
                 } else if let text = raw as? String { integer = Int(text) }
                 else { integer = nil }
                 guard let integer, integer > 0 else {
-                    throw NSError(domain: "append-event", code: 1, userInfo: [NSLocalizedDescriptionKey: "service_index must be a positive integer"])
+                    throw NSError(domain: verb, code: 1, userInfo: [NSLocalizedDescriptionKey: "service_index must be a positive integer"])
                 }
                 serviceIndex = integer
             } else { serviceIndex = nil }
             if let raw = args["dry_run"] {
                 guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
-                    throw NSError(domain: "append-event", code: 1, userInfo: [NSLocalizedDescriptionKey: "dry_run must be a JSON boolean"])
+                    throw NSError(domain: verb, code: 1, userInfo: [NSLocalizedDescriptionKey: "dry_run must be a JSON boolean"])
                 }
-                if apply && number.boolValue { throw NSError(domain: "append-event", code: 1, userInfo: [NSLocalizedDescriptionKey: "apply and dry_run cannot both be true"]) }
+                if apply && number.boolValue { throw NSError(domain: verb, code: 1, userInfo: [NSLocalizedDescriptionKey: "apply and dry_run cannot both be true"]) }
             }
             if apply, fingerprint == nil { throw Invalid.fingerprintRequired }
         }
@@ -121,7 +132,7 @@ enum CharacteristicEventAppend {
         let guards: [String: String]
         let unsupported: [String]
 
-        func fingerprint(adding event: Event? = nil) -> String {
+        func fingerprint(adding event: Event? = nil, replacing eventID: UUID? = nil) -> String {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             // All stored fields are strings/arrays; encoding cannot fail.
@@ -131,17 +142,26 @@ enum CharacteristicEventAppend {
                 // random UUID of a freshly constructed, not-yet-added event.
                 data.append(try! encoder.encode([event.signature, event.characteristicID ?? "", event.value ?? ""]))
             }
+            // Existing append fingerprints stay compatible. A retarget token is
+            // distinct from append and from every other source event in this rule.
+            if let eventID { data.append(try! encoder.encode(["retarget", eventID.uuidString])) }
             return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         }
     }
 
     enum Invalid: Error, LocalizedError {
         case duplicate, unsupported([String]), fingerprintRequired, stale
+        case invalidEventID, unexpectedEventID, eventNotUnique, unsupportedSource, unchangedRetarget
         var errorDescription: String? {
             switch self {
             case .duplicate: "That characteristic/value event already exists; nothing was written."
             case .unsupported(let reasons): "Cannot safely fingerprint this automation: \(reasons.joined(separator: ", ")). Nothing was written."
-            case .fingerprintRequired: "Apply requires the fingerprint returned by a fresh append-event preview."
+            case .fingerprintRequired: "Apply requires the fingerprint returned by a fresh preview of the same event edit."
+            case .invalidEventID: "event_id must be a current event UUID from automations get."
+            case .unexpectedEventID: "event_id is accepted only for retarget-event. Nothing was written."
+            case .eventNotUnique: "event_id did not identify exactly one current trigger event. Run automations get again. Nothing was written."
+            case .unsupportedSource: "Retargeting requires one explicit boolean/numeric characteristic trigger, not an any-change, non-characteristic, or duplicate trigger. Nothing was written."
+            case .unchangedRetarget: "The replacement already matches the selected event. Nothing was written."
             case .stale: "The automation or device selection changed since preview. Preview again; nothing was written."
             }
         }
@@ -168,24 +188,38 @@ enum CharacteristicEventAppend {
     @MainActor
     static func run<Token>(
         before: Snapshot, addition: Event, originalObjects: [Token], newObject: Token,
-        apply: Bool, expectedFingerprint: String?,
+        apply: Bool, expectedFingerprint: String?, replacing eventID: UUID? = nil,
         unchangedReadbackRechecks: Int = 0,
         pauseReadback: @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) },
         reread: @MainActor () throws -> Snapshot,
         write: @MainActor ([Token]) async throws -> Void
     ) async throws -> Outcome {
         guard originalObjects.count == before.events.count else { throw Invalid.unsupported(["inconsistent event snapshot"]) }
-        guard !before.events.contains(where: {
-            $0.characteristicID == addition.characteristicID && ($0.value == addition.value || $0.value == "any_change")
+        var planned = before.events
+        var plannedObjects = originalObjects
+        let sourceIndex = try eventID.map { try replacementIndex(in: before.events, id: $0) }
+        if let sourceIndex, EventMeaning(before.events[sourceIndex]) == EventMeaning(addition) {
+            throw Invalid.unchangedRetarget
+        }
+        guard !before.events.enumerated().contains(where: { index, event in
+            index != sourceIndex && event.characteristicID == addition.characteristicID
+                && (event.value == addition.value || event.value == "any_change")
         }) else { throw Invalid.duplicate }
         guard before.unsupported.isEmpty else { throw Invalid.unsupported(before.unsupported) }
-        let fingerprint = before.fingerprint(adding: addition)
+        if let sourceIndex {
+            planned[sourceIndex] = addition
+            plannedObjects[sourceIndex] = newObject
+        } else {
+            planned.append(addition)
+            plannedObjects.append(newObject)
+        }
+        let fingerprint = before.fingerprint(adding: addition, replacing: eventID)
         guard apply else { return Outcome(status: "preview", before: before, after: nil, fingerprint: fingerprint, problems: []) }
         guard let expectedFingerprint, !expectedFingerprint.isEmpty else { throw Invalid.fingerprintRequired }
         guard expectedFingerprint == fingerprint, try reread() == before else { throw Invalid.stale }
         // Reuse the exact original objects and order. Never reconstruct predicates,
         // action sets, recurrences or end events. Never retry or roll back this write.
-        do { try await write(originalObjects + [newObject]) }
+        do { try await write(plannedObjects) }
         catch {
             return Outcome(status: error is CallbackTimeout ? "unverified" : "failed", before: before, after: try? reread(), fingerprint: fingerprint,
                            problems: ["updateEvents callback failed: \(error.localizedDescription). The operation may have applied; inspect before retrying."])
@@ -210,7 +244,7 @@ enum CharacteristicEventAppend {
         else {
             if after.homeID != before.homeID || after.triggerID != before.triggerID { reasons.append("Home or automation identity changed.") }
             if after.guards != before.guards || after.unsupported != before.unsupported { reasons.append("Preserved guard or linked-action metadata changed.") }
-            if eventCounts(after.events) != eventCounts(before.events + [addition]) {
+            if eventCounts(after.events) != eventCounts(planned) {
                 reasons.append("The stored event types, targets, values, or multiplicities differ from the plan.")
             }
         }
@@ -218,6 +252,18 @@ enum CharacteristicEventAppend {
         if !verified { reasons.append("No write retry or rollback was attempted.") }
         return Outcome(status: verified ? "verified" : "unverified", before: before, after: after,
                        fingerprint: fingerprint, problems: reasons)
+    }
+
+    static func replacementIndex(in events: [Event], id: UUID) throws -> Int {
+        let matches = events.indices.filter { UUID(uuidString: events[$0].id) == id }
+        guard matches.count == 1, let index = matches.first else { throw Invalid.eventNotUnique }
+        let event = events[index]
+        guard event.signature == "characteristic", event.characteristicID != nil,
+              let value = event.value, value.hasPrefix("number:") || value.hasPrefix("float32:"),
+              events.filter({ EventMeaning($0) == EventMeaning(event) }).count == 1 else {
+            throw Invalid.unsupportedSource
+        }
+        return index
     }
 
     /// Float fingerprints use normalized HAP Float32 bits, so NSNumber float vs

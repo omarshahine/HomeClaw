@@ -1506,12 +1506,12 @@ final class SocketServer: @unchecked Sendable {
                     homeID: args["home_id"] as? String
                 )
 
-            case "append_automation_event":
-                let request = try CharacteristicEventAppend.Request(args)
-                result = try await hk.appendAutomationEvent(
+            case "append_automation_event", "retarget_automation_event":
+                let request = try CharacteristicEventAppend.Request(args, retarget: command == "retarget_automation_event")
+                result = try await hk.editCharacteristicAutomationEvent(
                     id: request.id, accessoryID: request.accessoryID, characteristic: request.characteristic, value: request.value,
                     serviceName: request.serviceName, serviceID: request.serviceID, serviceIndex: request.serviceIndex,
-                    homeID: request.homeID, apply: request.apply, fingerprint: request.fingerprint)
+                    homeID: request.homeID, apply: request.apply, fingerprint: request.fingerprint, replacing: request.replacedEventID)
 
             case "edit_automation":
                 // Modify-in-place verb (preserves the trigger UUID). Every field is
