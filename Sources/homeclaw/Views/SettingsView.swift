@@ -1,28 +1,39 @@
 import SwiftUI
 
+enum SettingsTab: Hashable {
+    case home, devices, eventLog, webhook, integrations, about
+}
+
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    @Published var selection: SettingsTab = .home
+}
+
 struct SettingsView: View {
+    @ObservedObject var navigation: SettingsNavigation
+
     var body: some View {
-        TabView {
-            Tab("HomeKit", systemImage: "house") {
+        TabView(selection: $navigation.selection) {
+            Tab("HomeKit", systemImage: "house", value: SettingsTab.home) {
                 HomeKitSettingsView()
             }
-            Tab("Devices", systemImage: "list.bullet.rectangle") {
+            Tab("Devices", systemImage: "list.bullet.rectangle", value: SettingsTab.devices) {
                 DeviceFilterSettingsView()
             }
-            Tab("Event Log", systemImage: "clock.arrow.circlepath") {
+            Tab("Event Log", systemImage: "clock.arrow.circlepath", value: SettingsTab.eventLog) {
                 EventLogSettingsView()
             }
-            Tab("Webhook", systemImage: "arrow.up.right.square") {
+            Tab("Webhook", systemImage: "arrow.up.right.square", value: SettingsTab.webhook) {
                 WebhookSettingsView()
             }
-            Tab("Integrations", systemImage: "puzzlepiece") {
+            Tab("Integrations", systemImage: "puzzlepiece", value: SettingsTab.integrations) {
                 #if APP_STORE
                 AppStoreIntegrationsView()
                 #else
                 IntegrationsSettingsView()
                 #endif
             }
-            Tab("About", systemImage: "info.circle") {
+            Tab("About", systemImage: "info.circle", value: SettingsTab.about) {
                 AboutSettingsView()
             }
         }
@@ -33,46 +44,106 @@ struct SettingsView: View {
 // MARK: - About
 
 struct AboutSettingsView: View {
+    @ObservedObject private var starPrompt = GitHubStarPrompt.shared
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
-
-            Image("AppIconImage")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 128, height: 128)
-                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
-
-            Text(AppConfig.appName)
-                .font(.largeTitle)
-                .fontWeight(.bold)
-
-            Text("Version \(AppConfig.version) (\(AppConfig.build))")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 12) {
-                Link(destination: URL(string: "https://github.com/omarshahine/HomeClaw")!) {
-                    Label("GitHub Repository", systemImage: "link")
+        ScrollView {
+            VStack(spacing: 20) {
+                if starPrompt.visible {
+                    GitHubStarNote(
+                        star: { (UIApplication.shared.delegate as? HomeClawApp)?.requestRepositoryStar() },
+                        dismiss: starPrompt.dismiss
+                    )
                 }
-                Link(destination: URL(string: "https://github.com/omarshahine/HomeClaw/issues")!) {
-                    Label("Report an Issue", systemImage: "exclamationmark.bubble")
-                }
-            }
-            .font(.body)
 
-            Spacer()
+                Image("AppIconImage")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 128, height: 128)
+                    .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
 
-            VStack(spacing: 4) {
-                Link("Icon designed by Matthew Skiles", destination: URL(string: "https://matthewskiles.com")!)
-                    .font(.footnote)
-                Text("\u{00A9} Omar Shahine")
-                    .font(.footnote)
+                Text(AppConfig.appName)
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+
+                Text("Version \(AppConfig.version) (\(AppConfig.build))")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
+
+                VStack(spacing: 12) {
+                    Button {
+                        (UIApplication.shared.delegate as? HomeClawApp)?.requestRepositoryStar()
+                    } label: {
+                        Label(starPrompt.starred ? "Starred" : "Star HomeClaw on GitHub",
+                              systemImage: starPrompt.starred ? "star.fill" : "star")
+                    }
+                    .disabled(starPrompt.starred || starPrompt.requestingStar)
+                    Link(destination: URL(string: "https://github.com/omarshahine/HomeClaw/issues")!) {
+                        Label("Report an Issue", systemImage: "exclamationmark.bubble")
+                    }
+                }
+                .font(.body)
+
+                VStack(spacing: 4) {
+                    Link("Icon designed by Matthew Skiles", destination: URL(string: "https://matthewskiles.com")!)
+                        .font(.footnote)
+                    Text("\u{00A9} Omar Shahine")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .padding(40)
+            .frame(maxWidth: .infinity)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: scenePhase == .active && starPrompt.pending) {
+            guard scenePhase == .active, starPrompt.pending else { return }
+            await (UIApplication.shared.delegate as? HomeClawApp)?.refreshRepositoryStar()
+            guard !Task.isCancelled else { return }
+            starPrompt.showIfPending()
+        }
+        .onDisappear { starPrompt.dismiss() }
+    }
+}
+
+struct GitHubStarNote: View {
+    let star: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Group {
+                if let portrait = UIImage(named: "GitHubStarPortrait") {
+                    Image(uiImage: portrait).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "person.crop.circle.fill").resizable().scaledToFit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 56, height: 56)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Hey, I'm Omar, and I'm the developer of HomeClaw. If you love this app, please consider starring it on GitHub. I'll only ever ask this once.")
+                    .fixedSize(horizontal: false, vertical: true)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { actions }
+                    VStack(alignment: .leading, spacing: 8) { actions }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityIdentifier("github-star-note")
+    }
+
+    @ViewBuilder private var actions: some View {
+        Button("Star on GitHub", systemImage: "star.fill", action: star)
+            .buttonStyle(.borderedProminent)
+        Button("No Thanks", action: dismiss)
+            .buttonStyle(.bordered)
     }
 }
 

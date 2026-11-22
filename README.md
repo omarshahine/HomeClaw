@@ -1524,6 +1524,22 @@ homeclaw-cli status
 codesign -d --entitlements :- "/Applications/HomeClaw.app"
 ```
 
+## Star HomeClaw on GitHub
+
+The menu bar and Settings → About offer a Star HomeClaw on GitHub button.
+After five completed client actions (verified device controls, successful
+scene executions, or successful webhook deliveries), a one-time note can
+appear in About. The app never opens Settings in the background. Launches,
+polling, test webhooks, previews, and unverified controls do not count. The
+counter and dismissal stay in local preferences and are not sent anywhere.
+
+Mac App Store builds open the repository in your browser and do not check
+your GitHub account; HomeClaw cannot tell whether you have already starred it.
+Local builds can check the star using the GitHub CLI when Settings is active
+and use your existing GitHub CLI login if you explicitly click Star. If the
+CLI is missing or the star request fails, the button opens the repository in
+your browser instead.
+
 ## License
 
 [MIT](LICENSE) -- Copyright (c) 2025 Omar Shahine

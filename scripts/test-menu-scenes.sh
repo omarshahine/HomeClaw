@@ -8,7 +8,7 @@ evidence="$(cd "$evidence" && pwd)"
 python3 Tests/MenuSceneTests/prepare.py "$PWD" "$evidence"
 xcrun swiftc -swift-version 6 -strict-concurrency=complete \
   -module-cache-path "$evidence/ModuleCache" -parse-as-library \
-  Sources/homeclaw/Shared/MenuScenePolicy.swift \
+  Sources/homeclaw/Shared/MenuScenePolicy.swift Sources/macOSBridge/LocalGitHubStar.swift \
   Tests/MenuSceneTests/Stubs.swift Tests/MenuSceneTests/Runner.swift \
   "$evidence/BridgeProtocols.swift" "$evidence/MacOSController.swift" "$evidence/ExtractedMethods.swift" \
   -o "$evidence/MenuSceneTests"
