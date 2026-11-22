@@ -590,6 +590,9 @@ final class HomeEventLogger {
                 } else {
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 200
                     await WebhookCircuitBreaker.shared.recordSuccess(httpStatus: status)
+                    if let http = response as? HTTPURLResponse {
+                        await GitHubStarPrompt.shared.record(.webhookDelivery(httpStatus: http.statusCode))
+                    }
                     await webhookLog.log(
                         outcome: .delivered,
                         triggerID: triggerID, triggerLabel: triggerLabel,

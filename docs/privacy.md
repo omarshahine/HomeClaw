@@ -6,7 +6,7 @@ HomeClaw is a Mac app that exposes Apple HomeKit accessories through a CLI, an M
 
 ## Short version
 
-HomeClaw collects nothing. All HomeKit data stays on your Mac. There is no analytics, no telemetry, no account, and no third-party service involved.
+HomeClaw collects nothing. All HomeKit data stays on your Mac. There is no analytics, no telemetry, and no HomeClaw account.
 
 ## What HomeClaw accesses
 
@@ -24,6 +24,15 @@ HomeClaw collects nothing. All HomeKit data stays on your Mac. There is no analy
 ## Webhooks (optional)
 
 HomeClaw can be configured to push HomeKit events to a webhook endpoint that **you specify and control** (for example, an OpenClaw instance running on your own infrastructure). HomeClaw never sends events to any endpoint without explicit configuration. You are responsible for the privacy posture of any webhook destination you configure.
+
+## GitHub stars (optional)
+
+The one-time About note uses a count of completed actions stored on your Mac.
+No action details or use counts are sent to GitHub. Mac App Store builds only
+open the public project page when you click the star button. Local builds can
+check whether you already starred the project when Settings is active, and
+send a star request if you click the button, using your existing GitHub CLI
+login. HomeClaw does not read or store its credentials.
 
 ## App Store Connect API key & TestFlight
 

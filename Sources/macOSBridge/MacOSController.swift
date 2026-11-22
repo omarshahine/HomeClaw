@@ -157,6 +157,7 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             menu.addItem(item)
         }
 
+        addAppItems(to: menu)
         addStandardItems(to: menu)
     }
 
@@ -468,6 +469,15 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let starred = iOSBridge?.hasStarredRepository == true
+        let starItem = NSMenuItem(
+            title: starred ? "Starred on GitHub" : "Star HomeClaw on GitHub",
+            action: starred ? nil : #selector(starRepository),
+            keyEquivalent: "")
+        starItem.target = self
+        starItem.image = NSImage(systemSymbolName: starred ? "star.fill" : "star", accessibilityDescription: nil)
+        menu.addItem(starItem)
     }
 
     private func addStandardItems(to menu: NSMenu) {
@@ -738,6 +748,25 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     @objc private func openSettings() {
         iOSBridge?.openSettings()
     }
+
+    @objc private func starRepository() {
+        iOSBridge?.requestRepositoryStar?()
+    }
+
+    #if !APP_STORE
+    // Release sets APP_STORE for both bridge and Catalyst host, so shipping
+    // binaries contain no GitHub CLI action or account lookup.
+    @objc public func githubRepositoryStarStatus(_ completion: @escaping @MainActor (NSNumber?) -> Void) {
+        Task { @MainActor in
+            let response = await LocalGitHubStar.run(method: "GET")
+            completion(response?.status.map { NSNumber(value: $0 == 204) })
+        }
+    }
+
+    @objc public func starGitHubRepository(_ completion: @escaping @MainActor (Bool) -> Void) {
+        Task { @MainActor in completion(await LocalGitHubStar.run(method: "PUT")?.success == true) }
+    }
+    #endif
 
     @objc private func quitApp() {
         iOSBridge?.quitApp()

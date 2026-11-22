@@ -1735,6 +1735,9 @@ final class SocketServer: @unchecked Sendable {
                 return encodeResponse(success: false, error: "Unknown command: \(command)")
             }
 
+            if !HomeKitManager.isDemoMode, let use = GitHubStarUse.socket(command: command, result: result) {
+                GitHubStarPrompt.shared.record(use)
+            }
             return encodeResponse(success: true, data: result)
         } catch {
             return encodeResponse(success: false, error: error.localizedDescription)

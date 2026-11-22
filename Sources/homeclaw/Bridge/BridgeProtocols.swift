@@ -12,6 +12,8 @@ import Foundation
     /// stale menu self-heals on the next click instead of waiting for a push.
     func currentMenuData() -> [String: Any]
     func openSettings()
+    @objc optional var hasStarredRepository: Bool { get }
+    @objc optional func requestRepositoryStar()
     func quitApp()
     func controlAccessory(id: String, characteristic: String, value: String)
     func triggerScene(id: String)
@@ -28,4 +30,6 @@ import Foundation
     func updateMenuData(_ data: [String: Any])
     func showError(message: String)
     func flashError()
+    @objc optional func githubRepositoryStarStatus(_ completion: @escaping @MainActor (NSNumber?) -> Void)
+    @objc optional func starGitHubRepository(_ completion: @escaping @MainActor (Bool) -> Void)
 }

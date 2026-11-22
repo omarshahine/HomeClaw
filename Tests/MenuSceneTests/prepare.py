@@ -46,6 +46,7 @@ extension MacOSController {
         let menu = NSMenu()
         menu.autoenablesItems = false
         buildInteractiveMenu(from: data, into: menu)
+        addAppItems(to: menu)
         addStandardItems(to: menu)
         menu.update()
         return menu

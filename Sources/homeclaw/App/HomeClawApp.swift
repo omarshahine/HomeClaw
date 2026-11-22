@@ -20,6 +20,7 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
     private lazy var mcpServer = MCPServer()
     private var homeKitStatusSequence: UInt64 = 0
     private(set) lazy var httpIntegration = makeHTTPIntegration()
+    let settingsNavigation = SettingsNavigation()
 
     private func makeHTTPIntegration() -> HTTPIntegrationLifecycle {
         // Build closures outside the lazy initializer's isolation context.
@@ -118,7 +119,47 @@ class HomeClawApp: UIResponder, UIApplicationDelegate, Mac2iOS {
         refreshData()
     }
 
+    @objc var hasStarredRepository: Bool { GitHubStarPrompt.shared.starred }
+
+    @objc func requestRepositoryStar() {
+        guard !AppLaunchPolicy.suppressLiveServices, !UIRegressionEnvironment.enabled,
+              !HomeKitManager.isDemoMode else { return }
+        Task { @MainActor in
+            #if APP_STORE
+            let runCLI: (@MainActor () async -> Bool)? = nil
+            #else
+            let runCLI: (@MainActor () async -> Bool)? = { [weak self] in
+                guard let bridge = self?.macOSController, let star = bridge.starGitHubRepository else { return false }
+                return await withCheckedContinuation { continuation in
+                    star { continuation.resume(returning: $0) }
+                }
+            }
+            #endif
+            await GitHubStarPrompt.shared.requestStar(runCLI: runCLI) { url in
+                UIApplication.shared.open(url)
+            }
+        }
+    }
+
+    func refreshRepositoryStar() async {
+        #if !APP_STORE
+        guard !AppLaunchPolicy.suppressLiveServices, !UIRegressionEnvironment.enabled,
+              !HomeKitManager.isDemoMode,
+              let query = macOSController?.githubRepositoryStarStatus else { return }
+        await GitHubStarPrompt.shared.refreshStarred {
+            await withCheckedContinuation { continuation in
+                query { continuation.resume(returning: $0?.boolValue) }
+            }
+        }
+        #endif
+    }
+
     @objc func openSettings() {
+        // The fifth action only queues the request. Selecting About here is
+        // in response to a user opening Settings; no background action steals focus.
+        if GitHubStarPrompt.shared.pending {
+            settingsNavigation.selection = .about
+        }
         // Reuse stored session, or search open sessions, or create new
         let existingSession = Self.settingsSession
             ?? UIApplication.shared.openSessions.first { $0.configuration.name == "Settings" }
@@ -494,6 +535,12 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         AppLogger.app.info("Settings window reactivated")
     }
 
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        guard !GitHubStarPrompt.shared.pending,
+              let app = UIApplication.shared.delegate as? HomeClawApp else { return }
+        Task { @MainActor in await app.refreshRepositoryStar() }
+    }
+
     func sceneDidDisconnect(_ scene: UIScene) {
         window = nil
         HomeClawApp.settingsSession = nil
@@ -503,7 +550,7 @@ class SettingsSceneDelegate: UIResponder, UIWindowSceneDelegate {
         let w = UIWindow(windowScene: windowScene)
         guard let app = UIApplication.shared.delegate as? HomeClawApp else { return }
         w.rootViewController = UIHostingController(
-            rootView: SettingsView().environmentObject(app.httpIntegration))
+            rootView: SettingsView(navigation: app.settingsNavigation).environmentObject(app.httpIntegration))
         w.makeKeyAndVisible()
         self.window = w
 
