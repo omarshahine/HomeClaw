@@ -500,6 +500,65 @@ Conditions of a kind you don't replace are kept as they are, including ones Home
 
 Everything is validated before the first write. `--dry-run` shows `before`, `planned` and `changes`. A real run writes the predicate, weekdays, events, end events and name in that order; if a step fails, the steps already written are restored and the error says which. Afterwards the automation is re-read and compared with the plan: `"verified": false` lists the `mismatches`. Over MCP this is `homekit_automations` with `action: "edit"` (`new_name`, `time`, `weekdays`, `conditions`, `time_after`, `time_before`, `duration_seconds`, `clear_duration`; an empty array clears).
 
+### Appending a Characteristic Trigger Event
+
+`automations append-event` previews adding one event to an existing event automation.
+The new event is an **OR alternative**, evaluated against the same existing predicate.
+It does not replace the sensor being watched. Retargeting an existing event remains
+unsupported; do not use append as a replacement when the old sensor must stop firing.
+
+```bash
+# Preview. Use names that resolve uniquely, or UUIDs.
+homeclaw-cli automations append-event "Hall Lights" \
+  --accessory "Presence Sensor" --characteristic occupancy_detected --trigger-value true
+
+# Apply the exact previewed target/value while the automation is unchanged.
+homeclaw-cli automations append-event "Hall Lights" \
+  --accessory "Presence Sensor" --characteristic occupancy_detected --trigger-value true \
+  --apply --fingerprint FINGERPRINT_FROM_PREVIEW
+```
+
+The command always prints JSON. Over stdio MCP, use `homekit_automations` with
+`action: "append_event"`, `id`, `accessory_id`, `characteristic`, `trigger_value`,
+and optional `home_id`, `service_name`, `service_id` or `service_index`. Preview is
+the default; `apply: true` also requires the returned `fingerprint`. The native
+read-only HTTP transport does not expose automation mutations.
+
+The trigger characteristic must support notifications and have boolean or numeric
+metadata (`bool`, `uint8`, `uint16`, `uint32`, `int` or `float`). The value is required,
+finite, and checked against its format, bounds and enumerated values. Floating-point
+values normalize to HAP Float32, with the normalized value shown in the preview;
+overflow and nonzero values that underflow to zero are rejected. Missing/null
+values never mean “any change.” Ambiguous homes/accessories/services, duplicate
+characteristic/value events, and an existing any-change event for that characteristic
+are rejected. Under Selected Only, the new sensor and every linked scene action must
+be selected and resolved; unavailable selection fails closed. Unknown event or action
+payloads that cannot be fingerprinted are refused.
+
+Apply calls Apple's [event-array update API](https://developer.apple.com/documentation/homekit/hmeventtrigger/updateevents(_:completionhandler:))
+once with the original event objects in order plus the new event. It preserves the
+trigger UUID, predicate object (including opaque predicates), scene links and actions,
+enabled state, recurrences, end events and execute-once setting. A fingerprint binds
+the proposal and the current event/guard/action snapshot, including device selection.
+It is valid only in the current app session; restart or a changed snapshot requires
+a new preview.
+
+HomeKit provides no compare-and-swap revision for this operation. Another client can
+race the final check and write. Afterwards HomeClaw re-enumerates the trigger from the
+current HomeKit home graph. `status: "verified"` means that public-API readback matches
+the planned event types, targets, values and counts, plus the preserved guards, not
+independent iCloud confirmation. HomeKit can regenerate event IDs and reorder these
+OR alternatives. HomeClaw retains original objects in the request, not their persisted
+IDs or array positions. The pre-write fingerprint still checks the exact snapshot. Callback failure
+returns `failed`; a missing callback after 15 seconds or missing/mismatched readback
+returns `unverified`. A late callback is ignored and the write may still apply later. Neither retries
+nor restores an old array over another client's changes. Inspect the rule before
+retrying either outcome. The CLI exits nonzero for failed/unverified outcomes.
+
+In a live disabled, actionless fixture, HomeKit persisted both events and changed their
+IDs and order. Independent sync and live behavior with linked scenes or opaque predicates
+are not yet qualified. Demo-app event editing is unavailable.
+
 ### Replacing an Accessory in Automations
 
 You swapped a bulb, a switch, or a shade. Now every automation that used the old one needs the new one. `automations migrate-actions` plans that move and tells you, per action set, what it can and can't do.
