@@ -519,7 +519,7 @@ a new preview.
 HomeKit provides no compare-and-swap revision for this operation. Another client can
 race the final check and write. Afterwards HomeClaw re-enumerates the trigger from the
 current HomeKit home graph. `status: "verified"` means that public-API readback matches
-the plan and preserved guards, not independent iCloud confirmation. Callback failure
+the planned event types, targets, values and counts, plus the preserved guards, not\nindependent iCloud confirmation. HomeKit can regenerate event IDs and reorder these\nOR alternatives. HomeClaw retains original objects in the request, not their persisted\nIDs or array positions. The pre-write fingerprint still checks the exact snapshot. Callback failure
 returns `failed`; a missing callback after 15 seconds or missing/mismatched readback
 returns `unverified`. A late callback is ignored and the write may still apply later. Neither retries
 nor restores an old array over another client's changes. Inspect the rule before

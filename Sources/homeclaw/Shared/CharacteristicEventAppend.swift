@@ -94,6 +94,26 @@ enum CharacteristicEventAppend {
         let value: String?
     }
 
+    /// HomeKit can regenerate event identifiers and reorder OR alternatives
+    /// when persisting updateEvents. A multiset still detects drops, additions,
+    /// changed targets/values and extra copies of any event.
+    private struct EventMeaning: Hashable {
+        let signature: String
+        let characteristicID: String?
+        let value: String?
+        init(_ event: Event) {
+            self.signature = event.signature
+            self.characteristicID = event.characteristicID
+            self.value = event.value
+        }
+    }
+
+    private static func eventCounts(_ events: [Event]) -> [EventMeaning: Int] {
+        events.reduce(into: [:]) { counts, event in
+            counts[EventMeaning(event), default: 0] += 1
+        }
+    }
+
     struct Snapshot: Codable, Equatable {
         let homeID: String
         let triggerID: String
@@ -137,7 +157,7 @@ enum CharacteristicEventAppend {
             var result: [String: Any] = [
                 "status": status, "verified": status == "verified", "dry_run": status == "preview",
                 "fingerprint": fingerprint,
-                "warning": "Events are OR alternatives evaluated against the existing predicate. HomeKit provides no compare-and-swap; another client can race this operation. Fingerprints are valid only in this app session.",
+                "warning": "Events are OR alternatives evaluated against the existing predicate. HomeKit may change event IDs and order. HomeKit provides no compare-and-swap; another client can race this operation. Fingerprints are valid only in this app session.",
             ]
             if let after { result["observed_fingerprint"] = after.fingerprint() }
             if !problems.isEmpty { result["problems"] = problems }
@@ -149,6 +169,8 @@ enum CharacteristicEventAppend {
     static func run<Token>(
         before: Snapshot, addition: Event, originalObjects: [Token], newObject: Token,
         apply: Bool, expectedFingerprint: String?,
+        unchangedReadbackRechecks: Int = 0,
+        pauseReadback: @MainActor () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) },
         reread: @MainActor () throws -> Snapshot,
         write: @MainActor ([Token]) async throws -> Void
     ) async throws -> Outcome {
@@ -169,15 +191,33 @@ enum CharacteristicEventAppend {
                            problems: ["updateEvents callback failed: \(error.localizedDescription). The operation may have applied; inspect before retrying."])
         }
         let after: Snapshot
-        do { after = try reread() }
-        catch {
+        do {
+            var observed = try reread()
+            // A successful callback can precede readback visibility. Only wait while
+            // the snapshot is *exactly* unchanged. A divergent snapshot is evidence
+            // of a possible concurrent edit, not permission to keep retrying.
+            for _ in 0..<min(3, max(0, unchangedReadbackRechecks)) where observed == before {
+                try await pauseReadback()
+                observed = try reread()
+            }
+            after = observed
+        } catch {
             return Outcome(status: "unverified", before: before, after: nil, fingerprint: fingerprint,
                            problems: ["Readback failed: \(error.localizedDescription). Inspect before retrying."])
         }
-        let expected = Snapshot(homeID: before.homeID, triggerID: before.triggerID,
-                                events: before.events + [addition], guards: before.guards, unsupported: before.unsupported)
-        return Outcome(status: after == expected ? "verified" : "unverified", before: before, after: after, fingerprint: fingerprint,
-                       problems: after == expected ? [] : ["Readback differs from the planned events or preserved guards. No rollback or retry was attempted."])
+        var reasons: [String] = []
+        if after == before { reasons.append("HomeKit still returned the pre-write snapshot.") }
+        else {
+            if after.homeID != before.homeID || after.triggerID != before.triggerID { reasons.append("Home or automation identity changed.") }
+            if after.guards != before.guards || after.unsupported != before.unsupported { reasons.append("Preserved guard or linked-action metadata changed.") }
+            if eventCounts(after.events) != eventCounts(before.events + [addition]) {
+                reasons.append("The stored event types, targets, values, or multiplicities differ from the plan.")
+            }
+        }
+        let verified = reasons.isEmpty
+        if !verified { reasons.append("No write retry or rollback was attempted.") }
+        return Outcome(status: verified ? "verified" : "unverified", before: before, after: after,
+                       fingerprint: fingerprint, problems: reasons)
     }
 
     /// Float fingerprints use normalized HAP Float32 bits, so NSNumber float vs

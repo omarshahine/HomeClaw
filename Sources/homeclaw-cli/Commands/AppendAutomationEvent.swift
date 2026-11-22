@@ -8,7 +8,7 @@ struct AppendAutomationEvent: ParsableCommand {
         commandName: "append-event", abstract: "Preview or append one characteristic event to an existing automation",
         discussion: """
         Events are OR alternatives evaluated against the automation's unchanged predicate.
-        Preview first, then pass --apply --fingerprint with the preview fingerprint.
+        HomeKit can regenerate event IDs and reorder the alternatives.\n        Preview first, then pass --apply --fingerprint with the preview fingerprint.
         Only finite boolean/numeric values are supported. Retargeting is not supported.
         HomeKit has no compare-and-swap: another client can race the write. A failed or
         unverified result must be inspected before retrying; no automatic rollback occurs.

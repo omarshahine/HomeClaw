@@ -100,7 +100,67 @@ private func verifyCharacteristicEventAppend() async throws {
     let timedOut = try await CharacteristicEventAppend.run(before: before, addition: c, originalObjects: [first,second], newObject: added,
         apply: true, expectedFingerprint: fingerprint, reread: { before }, write: { _ in writes += 1; throw CharacteristicEventAppend.CallbackTimeout() })
     try expect(timedOut.status == "unverified" && writes == 1, "callback timeout was verified, retried or called failed")
-    print("PASS append transaction: preview, object/order/guard preservation, target-bound fingerprints, duplicate/any-change rejection, stale/concurrent guards, callback and readback failure; no HomeKit")
+    writes = 0
+    var polls = 0, pauses = 0
+    let settles = try await CharacteristicEventAppend.run(before: before, addition: c,
+        originalObjects: [first,second], newObject: added, apply: true, expectedFingerprint: fingerprint,
+        unchangedReadbackRechecks: 3, pauseReadback: { pauses += 1 },
+        reread: { polls += 1; return polls >= 4 ? expected : before },
+        write: { _ in writes += 1 })
+    try expect(settles.status == "verified" && writes == 1 && pauses == 2, "bounded readback did not settle or retried the write")
+    writes = 0; polls = 0; pauses = 0
+    let divergence = try await CharacteristicEventAppend.run(before: before, addition: c,
+        originalObjects: [first,second], newObject: added, apply: true, expectedFingerprint: fingerprint,
+        unchangedReadbackRechecks: 3, pauseReadback: { pauses += 1 },
+        reread: { polls += 1; return polls > 1 ? changed : before },
+        write: { _ in writes += 1 })
+    try expect(divergence.status == "unverified" && writes == 1 && pauses == 0 && !divergence.problems.isEmpty,
+               "divergent readback should remain unverified and should not be polled")
+    writes = 0; pauses = 0
+    let exhausted = try await CharacteristicEventAppend.run(before: before, addition: c,
+        originalObjects: [first,second], newObject: added, apply: true, expectedFingerprint: fingerprint,
+        unchangedReadbackRechecks: 9, pauseReadback: { pauses += 1 }, reread: { before },
+        write: { _ in writes += 1 })
+    try expect(exhausted.status == "unverified" && pauses == 3 && writes == 1, "readback wait was not bounded")
+    // Shape observed in real HomeKit: the daemon assigns new IDs to all saved
+    // events and reorders them. Only the post-write event comparison is semantic.
+    let movedC = CharacteristicEventAppend.Event(id: "server-motion", signature: c.signature, characteristicID: c.characteristicID, value: c.value)
+    let movedA = CharacteristicEventAppend.Event(id: "server-calendar", signature: a.signature, characteristicID: a.characteristicID, value: a.value)
+    let movedB = CharacteristicEventAppend.Event(id: "server-prior-motion", signature: b.signature, characteristicID: b.characteristicID, value: b.value)
+    let accepted = CharacteristicEventAppend.Snapshot(homeID: before.homeID, triggerID: before.triggerID,
+        events: [movedC, movedA, movedB], guards: before.guards, unsupported: [])
+    let wrongValue = CharacteristicEventAppend.Event(id: movedC.id, signature: c.signature,
+        characteristicID: c.characteristicID, value: "number:0")
+    let wrongTarget = CharacteristicEventAppend.Event(id: movedC.id, signature: c.signature,
+        characteristicID: "not-the-proposed-sensor", value: c.value)
+    let wrongTime = CharacteristicEventAppend.Event(id: movedA.id, signature: "calendar:13:30", characteristicID: nil, value: nil)
+    let mutationCases: [(String, CharacteristicEventAppend.Snapshot, Bool)] = [
+        ("daemon IDs/order", accepted, true),
+        ("wrong event value", .init(homeID: before.homeID, triggerID: before.triggerID, events: [wrongValue,movedA,movedB], guards: before.guards, unsupported: []), false),
+        ("wrong target", .init(homeID: before.homeID, triggerID: before.triggerID, events: [wrongTarget,movedA,movedB], guards: before.guards, unsupported: []), false),
+        ("original schedule changed", .init(homeID: before.homeID, triggerID: before.triggerID, events: [movedC,wrongTime,movedB], guards: before.guards, unsupported: []), false),
+        ("lost event and duplicate with same array size", .init(homeID: before.homeID, triggerID: before.triggerID, events: [movedC,movedA,movedA], guards: before.guards, unsupported: []), false),
+        ("changed guard", .init(homeID: before.homeID, triggerID: before.triggerID, events: accepted.events, guards: ["changed":"condition"], unsupported: []), false),
+        ("changed rule identity", .init(homeID: before.homeID, triggerID: "another-rule", events: accepted.events, guards: before.guards, unsupported: []), false),
+    ]
+    for (label, observed, shouldVerify) in mutationCases {
+        writes = 0; polls = 0
+        let result = try await CharacteristicEventAppend.run(before: before, addition: c,
+            originalObjects: [first,second], newObject: added, apply: true, expectedFingerprint: fingerprint,
+            reread: { polls += 1; return polls == 1 ? before : observed }, write: { _ in writes += 1 })
+        try expect((result.status == "verified") == shouldVerify && writes == 1, "semantic postwrite check: " + label)
+    }
+    writes = 0
+    let prewriteChangedID = CharacteristicEventAppend.Snapshot(homeID: before.homeID, triggerID: before.triggerID,
+        events: [movedA,b], guards: before.guards, unsupported: [])
+    do {
+        _ = try await CharacteristicEventAppend.run(before: before, addition: c,
+            originalObjects: [first,second], newObject: added, apply: true, expectedFingerprint: fingerprint,
+            reread: { prewriteChangedID }, write: { _ in writes += 1 })
+        throw Failure(text: "semantic tolerance leaked into strict prewrite consent")
+    } catch CharacteristicEventAppend.Invalid.stale { }
+    try expect(writes == 0, "a changed prewrite event identity wrote")
+    print("PASS append transaction including bounded readback and strict semantic preservation; no HomeKit")
 }
 
 private func verifyAppendValuesAndRequests() throws {

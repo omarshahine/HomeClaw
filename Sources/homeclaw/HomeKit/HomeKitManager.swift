@@ -3611,7 +3611,7 @@ final class HomeKitManager: NSObject, Observable {
         let addition = Self.eventAppendEvent(event).event
         let outcome = try await CharacteristicEventAppend.run(
             before: before, addition: addition, originalObjects: originalObjects, newObject: event as HMEvent,
-            apply: apply, expectedFingerprint: fingerprint,
+            apply: apply, expectedFingerprint: fingerprint, unchangedReadbackRechecks: 3,
             reread: {
                 guard let currentHome = self.homeManager?.homes.first(where: { $0.uniqueIdentifier == home.uniqueIdentifier }),
                       let current = currentHome.triggers.first(where: { $0.uniqueIdentifier == trigger.uniqueIdentifier }) as? HMEventTrigger else {
@@ -3632,7 +3632,7 @@ final class HomeKitManager: NSObject, Observable {
                            "characteristic": characteristic, "characteristic_id": target.uniqueIdentifier.uuidString,
                            "value": typed.stringValue]
         result["existing_event_ids"] = before.events.map(\.id)
-        result["verification_scope"] = "Re-enumerated current HomeKit objects after the callback; not independent iCloud confirmation. Unknown event/action payloads are refused. Opaque predicates are retained by identity, never decoded or rebuilt."
+        result["verification_scope"] = "Re-enumerated current HomeKit objects after the callback and compared event behavior and preserved guards; event IDs and order can change. Not independent iCloud confirmation. Unknown event/action payloads are refused. Opaque predicates are retained by identity, never decoded or rebuilt."
         return result
     }
 
