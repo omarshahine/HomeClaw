@@ -222,6 +222,9 @@ targets:
         INFOPLIST_FILE: Sources/macOSBridge/Info.plist
         SKIP_INSTALL: YES
         MACOSX_DEPLOYMENT_TARGET: "15.0"
+      configs:
+        Release:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) APP_STORE"
 
   # ─── UI Tests (App Store screenshot capture) ──────────────
   # Drives demo-mode HomeClaw via XCUITest to capture App Store screenshots.

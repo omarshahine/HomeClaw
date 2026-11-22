@@ -139,22 +139,27 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     private func rebuildMenu() {
         guard let menu else { return }
         menu.removeAllItems()
+        populateMenu(menu, data: menuData, ready: currentReady)
+    }
 
-        // Use full menu data if available, otherwise show basic status
-        if let menuData, menuData["ready"] as? Bool == true {
-            buildInteractiveMenu(from: menuData, into: menu)
-        } else if currentReady {
+    private func populateMenu(_ menu: NSMenu, data: [String: Any]?, ready: Bool) {
+        // Use full menu data if available, otherwise show basic status.
+        if let data, data["ready"] as? Bool == true {
+            buildInteractiveMenu(from: data, into: menu)
+        } else if ready {
             let statusText = currentHomeNames.isEmpty
                 ? "Connected"
                 : currentHomeNames.joined(separator: ", ")
             let item = NSMenuItem(title: statusText, action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "house.fill", accessibilityDescription: nil)
             menu.addItem(item)
+            addAppItems(to: menu)
         } else {
             let item = NSMenuItem(
                 title: "Waiting for HomeKit\u{2026}", action: nil, keyEquivalent: "")
             item.image = NSImage(systemSymbolName: "house", accessibilityDescription: nil)
             menu.addItem(item)
+            addAppItems(to: menu)
         }
 
         addStandardItems(to: menu)
@@ -468,6 +473,15 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
             keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        let starred = iOSBridge?.hasStarredRepository == true
+        let starItem = NSMenuItem(
+            title: starred ? "Starred on GitHub" : "Star HomeClaw on GitHub",
+            action: starred ? nil : #selector(starRepository),
+            keyEquivalent: "")
+        starItem.target = self
+        starItem.image = NSImage(systemSymbolName: starred ? "star.fill" : "star", accessibilityDescription: nil)
+        menu.addItem(starItem)
     }
 
     private func addStandardItems(to menu: NSMenu) {
@@ -738,6 +752,25 @@ public class MacOSController: NSObject, iOS2Mac, NSMenuDelegate {
     @objc private func openSettings() {
         iOSBridge?.openSettings()
     }
+
+    @objc private func starRepository() {
+        iOSBridge?.requestRepositoryStar?()
+    }
+
+    #if !APP_STORE
+    // Release sets APP_STORE for both bridge and Catalyst host, so shipping
+    // binaries contain no GitHub CLI action or account lookup.
+    @objc public func githubRepositoryStarStatus(_ completion: @escaping @MainActor (NSNumber?) -> Void) {
+        Task { @MainActor in
+            let response = await LocalGitHubStar.run(method: "GET")
+            completion(response?.status.map { NSNumber(value: $0 == 204) })
+        }
+    }
+
+    @objc public func starGitHubRepository(_ completion: @escaping @MainActor (Bool) -> Void) {
+        Task { @MainActor in completion(await LocalGitHubStar.run(method: "PUT")?.success == true) }
+    }
+    #endif
 
     @objc private func quitApp() {
         iOSBridge?.quitApp()

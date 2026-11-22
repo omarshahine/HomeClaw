@@ -3,6 +3,8 @@ import Foundation
 
 @MainActor final class TrapBridge: NSObject, Mac2iOS {
     var calls: [String] = []
+    @objc var hasStarredRepository = false
+    @objc func requestRepositoryStar() { calls.append("requestRepositoryStar") }
     var isLaunchAtLoginEnabled: Bool { false }
     func setLaunchAtLogin(_ enabled: Bool) { calls.append("setLaunchAtLogin") }
     func refreshData() { calls.append("refreshData") }
@@ -23,6 +25,34 @@ import Foundation
         do { try await run() }
         catch { FileHandle.standardError.write(Data("FAIL \(error)\n".utf8)); exit(1) }
     }
+    @MainActor static func checkGitHubCLI(in directory: URL) async throws {
+        let fake = directory.appendingPathComponent("fake-gh")
+        let script = """
+        #!/bin/sh
+        test "$GH_PROMPT_DISABLED" = 1 || exit 92
+        test "$1" = api && test "$2" = --hostname && test "$3" = github.com || exit 93
+        test "$4" = --method && test "$6" = --include && test "$7" = --silent || exit 94
+        test "$8" = user/starred/omarshahine/HomeClaw || exit 95
+        case "$5" in
+            GET) echo 'HTTP/2.0 404 Not Found'; exit 1 ;;
+            PUT) echo 'HTTP/2.0 204 No Content'; exit 0 ;;
+            HANG) exec /bin/sleep 10 ;;
+        esac
+        exit 96
+        """
+        try Data(script.utf8).write(to: fake, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fake.path)
+        let unavailable = await LocalGitHubStar.run(method: "GET", executable: nil, timeout: 1)
+        try require(unavailable == nil, "A missing CLI must fall back")
+        let status = await LocalGitHubStar.run(method: "GET", executable: fake, timeout: 1)
+        try require(status?.status == 404 && status?.success == false, "Definitive missing star failed")
+        let starred = await LocalGitHubStar.run(method: "PUT", executable: fake, timeout: 1)
+        try require(starred?.status == 204 && starred?.success == true, "Fake authenticated star failed")
+        let timedOut = await LocalGitHubStar.run(method: "HANG", executable: fake, timeout: 0.1)
+        try require(timedOut == nil, "Unresponsive fake CLI did not time out")
+        print("PASS menu star routing and no-credential CLI injection, missing executable, 404, 204, timeout")
+    }
+
     @MainActor static func run() async throws {
         NSApplication.shared.setActivationPolicy(.prohibited)
         let output = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -51,6 +81,25 @@ import Foundation
         let wantedIDs = Set(wanted.map { $0.uniqueIdentifier.uuidString })
         let selectedAll = Set(home.accessories.map { $0.uniqueIdentifier.uuidString })
         let base = manager.buildMenuData()
+        for menu in [controller.fixtureMenu(base), controller.fixtureMenu(nil, ready: true), controller.fixtureMenu(nil)] {
+            for title in ["Launch at Login", "Settings…", "Star HomeClaw on GitHub"] {
+                try require(menu.items.filter { $0.title == title }.count == 1,
+                            "Expected one \(title) command in each menu state")
+            }
+        }
+        let starMenu = controller.fixtureMenu(base)
+        let starItem = starMenu.items.first { $0.title == "Star HomeClaw on GitHub" }
+        try require(starItem?.action != nil, "Star menu command is missing")
+        if let starItem, let action = starItem.action { _ = controller.perform(action) }
+        try require(bridge.calls == ["requestRepositoryStar"], "Star menu did not reach its fake delegate exactly once")
+        bridge.calls = []
+        bridge.hasStarredRepository = true
+        let starredMenu = controller.fixtureMenu(base)
+        try require(starredMenu.items.contains { $0.title == "Starred on GitHub" && $0.action == nil },
+                    "A known star should show a non-actionable status")
+        bridge.hasStarredRepository = false
+        try await checkGitHubCLI(in: output)
+
         let originalScenes = try JSONSerialization.data(withJSONObject: base["scenes"]!, options: [.sortedKeys])
         var cases: [[String: Any]] = []
 

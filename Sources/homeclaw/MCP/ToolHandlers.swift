@@ -795,6 +795,12 @@ enum ToolHandlers {
                 default: throw HomeKitManager.ControlError.invalidArgument("unsupported tool")
                 }
             }()
+            // Native HTTP's default policy still denies mutating actions. If a
+            // local host permits this path, count it here (it does not use the
+            // Unix socket and therefore cannot be counted there).
+            if !HomeKitManager.isDemoMode, let use = GitHubStarUse.nativeMCP(tool: name, action: string(args, "action"), result: result) {
+                GitHubStarPrompt.shared.record(use)
+            }
             return json(result)
         } catch let error as AccessoryWriteFailure {
             return json(["error": error.localizedDescription, "error_code": error.code])
