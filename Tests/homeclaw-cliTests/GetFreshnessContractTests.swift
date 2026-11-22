@@ -28,6 +28,18 @@ struct GetFreshnessContractTests {
         let detail = try #require(response.data?.value as? [String: Any])
         #expect(Get.refreshContractError(noRefresh: false, detail: detail) == nil)
     }
+    @Test("An attested read can coexist with an explicitly last-known vendor row")
+    func acceptsLastKnownVendorRow() throws {
+        let json = #"{"success":true,"data":{"refreshed":true,"read_attempted":1,"read_succeeded":1,"read_skipped_unmapped":1,"services":[{"characteristics":[{"name":"power","value":"true","read":{"succeeded":true,"observed_at":"2026-09-10T14:00:00.125Z"}},{"name":"vendor","value":"cached","value_source":"last_known"}]}]}}"#
+        let response = try JSONDecoder().decode(SocketClient.CLIResponse.self, from: Data(json.utf8))
+        let detail = try #require(response.data?.value as? [String: Any])
+        #expect(Get.refreshContractError(noRefresh: false, detail: detail) == nil)
+        let services = try #require(detail["services"] as? [[String: Any]])
+        let rows = try #require(services.first?["characteristics"] as? [[String: Any]])
+        #expect(rows.last?["value_source"] as? String == "last_known")
+        #expect(rows.last?["read"] == nil)
+    }
+
     @Test("Unattested or inconsistent freshness fails closed")
     func rejectsUnattestedPayloads() {
         let invalid = [

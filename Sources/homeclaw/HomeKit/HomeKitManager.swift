@@ -470,8 +470,9 @@ final class HomeKitManager: NSObject, Observable {
         return result
     }
 
-    /// - Parameter refresh: when `true` (default) live-reads dynamic
-    ///   characteristics before serializing. Pass `false` to skip all live reads
+    /// - Parameter refresh: when `true` (default) live-reads supported
+    ///   readable characteristics before serializing. Unmapped vendor UUIDs
+    ///   retain their last-known values. Pass `false` to skip all live reads
     ///   and return last-known + static values only. Static metadata (serial
     ///   number, model, firmware, manufacturer) never needs a live read, so a
     ///   non-refreshing get is instant — the right choice for whole-home metadata
@@ -483,7 +484,7 @@ final class HomeKitManager: NSObject, Observable {
         guard isAccessoryAllowed(accessory) else { return nil }
         let readReport: AccessoryReadReport?
         if refresh {
-            let report = await readAllValues(for: accessory)
+            let report = await readSupportedValues(for: accessory)
             readReport = report
             updateCacheFromAccessory(accessory, readReport: report)
         } else {
@@ -5223,24 +5224,27 @@ final class HomeKitManager: NSObject, Observable {
 
     // MARK: - Value Reading
 
-    /// Reads all readable characteristic values for a single accessory.
-    /// Call before AccessoryModel.accessoryDetail() so cached values are populated.
-    private func readAllValues(for accessory: HMAccessory) async -> AccessoryReadReport {
+    /// Refreshes supported readable values before serializing accessory detail.
+    /// Skip unmapped vendor UUIDs so an unrelated vendor read cannot fail
+    /// the sweep. Their rows are kept, without a live-read attestation.
+    private func readSupportedValues(for accessory: HMAccessory) async -> AccessoryReadReport {
         var report = AccessoryReadReport()
-        services: for service in accessory.services {
+        for service in accessory.services {
             for characteristic in service.characteristics {
-                // A cancelled caller (e.g. an HTTP client that disconnected)
-                // gets no benefit from the rest of the sweep.
-                if Task.isCancelled { break services }
-                if characteristic.properties.contains(HMCharacteristicPropertyReadable) {
-                    let attestation = accessory.isReachable
-                        ? await readValueWithTimeout(characteristic)
-                        : .completed(succeeded: false)
-                    report.record(
-                        characteristicID: characteristic.uniqueIdentifier,
-                        attestation: attestation
-                    )
+                guard characteristic.properties.contains(HMCharacteristicPropertyReadable) else { continue }
+                let id = characteristic.uniqueIdentifier
+                let type = characteristic.characteristicType
+                let mapped = CharacteristicMapper.name(for: type) != type
+                guard AccessoryReadReport.requiresLiveRead(characteristicType: type, isMapped: mapped) else {
+                    report.skipUnmapped(characteristicID: id)
+                    continue
                 }
+                // Don't start additional reads after cancellation. Still record
+                // every required row so a partial sweep can't appear complete.
+                let attestation = !Task.isCancelled && accessory.isReachable
+                    ? await readValueWithTimeout(characteristic)
+                    : .completed(succeeded: false)
+                report.record(characteristicID: id, attestation: attestation)
             }
         }
         return report
@@ -5275,7 +5279,7 @@ final class HomeKitManager: NSObject, Observable {
         return await withCheckedContinuation {
             (continuation: CheckedContinuation<CharacteristicReadAttestation, Never>) in
             // Cancellable timer leg: when HomeKit responds before the deadline we
-            // cancel it, so a large readAllValues loop (50–100+ characteristics)
+            // cancel it, so a large readSupportedValues loop (50–100+ characteristics)
             // doesn't leave a burst of no-op main-thread wakeups draining 6s later.
             let timerWork = DispatchWorkItem {
                 guard guardBox.claim() else { return }
