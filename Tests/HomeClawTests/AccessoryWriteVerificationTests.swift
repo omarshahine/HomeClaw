@@ -29,12 +29,12 @@ private func verifyReadback() async throws {
         return (outcome, calls, timeouts)
     }
 
-    let immediate = await poll { _, _ in (.zero, .matches) }
-    try expect(immediate.0 == .confirmed && immediate.1 == [.zero], "Immediate confirmation should stop at one read")
+    let immediate = await poll { _, _ in (.zero, .matches("true")) }
+    try expect(immediate.0 == .confirmed(value: "true") && immediate.1 == [.zero], "Immediate confirmation should stop at one read")
 
     for delay in [1, 2, 3, 4] {
-        let result = await poll { time, _ in (.zero, time >= .seconds(delay) ? .matches : .differs("true")) }
-        try expect(result.0 == .confirmed && result.1.last == .seconds(delay), "Delayed bridge did not confirm at \(delay)s")
+        let result = await poll { time, _ in (.zero, time >= .seconds(delay) ? .matches("true") : .differs("true")) }
+        try expect(result.0 == .confirmed(value: "true") && result.1.last == .seconds(delay), "Delayed bridge did not confirm at \(delay)s")
     }
 
     let direct = await poll(bridged: false) { _, _ in (.zero, .differs("true")) }
@@ -45,6 +45,15 @@ private func verifyReadback() async throws {
 
     // Failed reads must not attest a matching notification/cache value. The
     // adapter reports unavailable, not the cached value, on a failed read.
+    func matchingStaleCache() -> String? {
+        // A failed live read left a matching cached model value.
+        "true"
+    }
+    let staleCache = AccessoryWriteVerification.observe(
+        succeeded: false, value: matchingStaleCache(),
+        matches: { $0 == "true" }, format: { $0 }
+    )
+    try expect(staleCache == .unavailable, "Do not treat a matching stale cache as live")
     let noFreshValue = await poll { _, _ in (.zero, .unavailable) }
     try expect(noFreshValue.0 == .unconfirmed(lastRead: nil), "Failed reads cannot confirm")
 
@@ -53,8 +62,37 @@ private func verifyReadback() async throws {
 
     let hung = await poll { _, timeout in (.nanoseconds(Int64(timeout * 1e9)), .unavailable) }
     try expect(hung.1 == [.zero, .seconds(2), .seconds(4)] && hung.2 == [1.5, 1.5, 1.0], "Per-read deadline must be clamped")
-    let lateMatch = await poll { _, _ in (.seconds(6), .matches) }
+    let lateMatch = await poll { _, _ in (.seconds(6), .matches("true")) }
     try expect(lateMatch.0 == .unconfirmed(lastRead: nil), "Do not accept a read result after the deadline")
+
+    // A stale unrelated channel still appears in the service summary, but
+    // only the exact target's captured value receives a "verified" marker.
+    let serviceSummaries = [
+        ["name": "target", "state_source": "last_known", "power": "false"],
+        ["name": "untargeted", "state_source": "last_known", "power": "false"],
+    ]
+    var summary: [String: Any] = ["services": serviceSummaries, "state": ["power": "false"]]
+    summary.merge(AccessoryWriteVerification.successFields(
+        confirmedValue: "true", verificationRequested: true, lastKnownValue: "false"
+    )) { _, current in current }
+    try expect(summary["value"] as? String == "true" && summary["verified"] as? Bool == true,
+               "Do not replace the verified target with a later cached value")
+    try expect(summary["state_source"] as? String == "last_known"
+               && summary["services"] as? [[String: String]] == serviceSummaries,
+               "Do not mark unrelated state as live or overwrite shared multi-channel values")
+
+    let skipped = AccessoryWriteVerification.successFields(
+        confirmedValue: nil, verificationRequested: false, lastKnownValue: "false"
+    )
+    try expect(skipped["value"] as? String == "false" && skipped["verified"] == nil
+               && skipped["verification_skipped"] as? String == "disabled",
+               "Explicit opt-out still returns the last-known value without verification")
+    let writeOnly = AccessoryWriteVerification.successFields(
+        confirmedValue: nil, verificationRequested: true, lastKnownValue: nil
+    )
+    try expect(writeOnly["value"] == nil && writeOnly["verified"] == nil
+               && writeOnly["verification_skipped"] as? String == "not_readable",
+               "Write-only controls must not claim verification")
 
     let rejected = AccessoryWriteFailure.failed("Not authorized")
     let unconfirmed = AccessoryWriteFailure.unconfirmed("no fresh value was returned")

@@ -702,16 +702,12 @@ final class HomeKitManager: NSObject, Observable {
             throw AccessoryWriteFailure.failed("\(error.localizedDescription)")
         }
 
-        // Refresh the accessory, then confirm the written characteristic last so its
-        // outcome is the authoritative one behind `verified`. The explicit read is
-        // needed on top of `readInterestingValues` because that only refreshes the
-        // subset it considers interesting, and it discards whether a read succeeded.
-        await readInterestingValues(for: accessory)
+        // Confirm only the written characteristic. An unrelated serial refresh
+        // can delay this read until after the client's request times out.
         let isReadable = hmCharacteristic.properties.contains(HMCharacteristicPropertyReadable)
         let verification = verify && isReadable
             ? await confirmWrite(of: parsedValue, on: hmCharacteristic, bridged: accessory.isBridged)
             : nil
-        updateCacheFromAccessory(accessory)
 
         // A HomeKit write callback is not proof that the device changed.
         // Keep the command failed when requested readback cannot confirm it.
@@ -739,16 +735,29 @@ final class HomeKitManager: NSObject, Observable {
         // readback explicitly.
         result["characteristic"] = characteristic
         result["service"] = targetService.dictionary
-        if let current = hmCharacteristic.value {
-            result["value"] = CharacteristicMapper.formatValue(
-                current, for: hmCharacteristic.characteristicType
-            )
-        }
-        if case .confirmed = verification {
-            result["verified"] = true
+        let confirmedValue: String?
+        if case .confirmed(let observedValue) = verification {
+            confirmedValue = observedValue
+            let name = CharacteristicMapper.name(for: hmCharacteristic.characteristicType)
+            // The cache is keyed by name, so do not assign one channel's fresh
+            // value to a flattened entry shared by more than one channel.
+            if AccessoryModel.isInterestingState(name),
+               accessory.services.lazy.flatMap(\.characteristics).filter({
+                   CharacteristicMapper.name(for: $0.characteristicType) == name
+               }).prefix(2).count == 1 {
+                cache.mergeValues(for: accessory.uniqueIdentifier.uuidString, state: [name: observedValue])
+                cache.save()
+            }
         } else {
-            result["verification_skipped"] = verify ? "not_readable" : "disabled"
+            confirmedValue = nil
         }
+        result.merge(AccessoryWriteVerification.successFields(
+            confirmedValue: confirmedValue,
+            verificationRequested: verify,
+            lastKnownValue: hmCharacteristic.value.map {
+                CharacteristicMapper.formatValue($0, for: hmCharacteristic.characteristicType)
+            }
+        )) { _, current in current }
         return result
     }
 
@@ -763,11 +772,11 @@ final class HomeKitManager: NSObject, Observable {
             sleep: { try await Task.sleep(for: $0) },
             read: { timeout in
                 let read = await self.readValueWithTimeout(characteristic, timeout: timeout)
-                // An error or timeout cannot attest the observable value, even
-                // if a cached value or notification matches the request.
-                guard read.succeeded, let current = characteristic.value else { return .unavailable }
-                if Self.valuesMatch(current, parsedValue, step: step) { return .matches }
-                return .differs(CharacteristicMapper.formatValue(current, for: characteristic.characteristicType))
+                return AccessoryWriteVerification.observe(
+                    succeeded: read.succeeded, value: characteristic.value,
+                    matches: { Self.valuesMatch($0, parsedValue, step: step) },
+                    format: { CharacteristicMapper.formatValue($0, for: characteristic.characteristicType) }
+                )
             }
         )
     }
@@ -5213,20 +5222,6 @@ final class HomeKitManager: NSObject, Observable {
     }
 
     // MARK: - Value Reading
-
-    /// Reads current values for "interesting" state characteristics on an accessory.
-    /// Call before AccessoryModel.accessorySummary() so cached values are populated.
-    private func readInterestingValues(for accessory: HMAccessory) async {
-        guard accessory.isReachable else { return }
-        for service in accessory.services {
-            for characteristic in service.characteristics {
-                let name = CharacteristicMapper.name(for: characteristic.characteristicType)
-                if AccessoryModel.isInterestingState(name) {
-                    _ = await readValueWithTimeout(characteristic)
-                }
-            }
-        }
-    }
 
     /// Reads all readable characteristic values for a single accessory.
     /// Call before AccessoryModel.accessoryDetail() so cached values are populated.

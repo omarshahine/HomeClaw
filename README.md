@@ -396,8 +396,11 @@ homeclaw-cli automations add-condition "Porch Lights" \
 
 For readable characteristics, HomeClaw normally requires a fresh read of the
 targeted service to confirm a write. Bridged accessories get up to five seconds
-of readback polling after the accessory refresh. Each control request issues the
-write only once.
+of readback polling. Control does not wait on unrelated accessory reads and issues
+the write only once. The generic `state` map is last-known; use the verified
+`value` and service selector for the targeted characteristic, or run a fresh
+`get` for the rest of the accessory. The readback budget begins after the
+HomeKit write callback; it is not a whole-request timeout.
 
 - `verified: true`: a fresh read matched the requested value.
 - `write_failed`: HomeKit reported an error on the write itself.
