@@ -519,14 +519,18 @@ a new preview.
 HomeKit provides no compare-and-swap revision for this operation. Another client can
 race the final check and write. Afterwards HomeClaw re-enumerates the trigger from the
 current HomeKit home graph. `status: "verified"` means that public-API readback matches
-the planned event types, targets, values and counts, plus the preserved guards, not\nindependent iCloud confirmation. HomeKit can regenerate event IDs and reorder these\nOR alternatives. HomeClaw retains original objects in the request, not their persisted\nIDs or array positions. The pre-write fingerprint still checks the exact snapshot. Callback failure
+the planned event types, targets, values and counts, plus the preserved guards, not
+independent iCloud confirmation. HomeKit can regenerate event IDs and reorder these
+OR alternatives. HomeClaw retains original objects in the request, not their persisted
+IDs or array positions. The pre-write fingerprint still checks the exact snapshot. Callback failure
 returns `failed`; a missing callback after 15 seconds or missing/mismatched readback
 returns `unverified`. A late callback is ignored and the write may still apply later. Neither retries
 nor restores an old array over another client's changes. Inspect the rule before
 retrying either outcome. The CLI exits nonzero for failed/unverified outcomes.
 
-This path has synthetic transaction/parser tests. The live HomeKit adapter has not
-been qualified against a real household, and demo-app event editing is unavailable.
+In a live disabled, actionless fixture, HomeKit persisted both events and changed their
+IDs and order. Independent sync and live behavior with linked scenes or opaque predicates
+are not yet qualified. Demo-app event editing is unavailable.
 
 ### Replacing an Accessory in Automations
 

@@ -28,14 +28,17 @@ read/CRUD/not-found/reset/JSON-serializability checks — all pass. This unlocks
 
 The append-only `CharacteristicEventAppend` transaction runs without HomeKit.
 `CharacteristicEventAppendTests` covers preview/no-write, preserving original object
-identity/order in the submitted array and opaque guards, daemon-assigned event IDs and\nordering on readback without ignoring changed event content or counts, binding consent to the exact proposal, stale and
+identity/order in the submitted array and opaque guards, daemon-assigned event IDs and
+ordering on readback without ignoring changed event content or counts, binding consent
+to the exact proposal, stale and
 concurrent changes, duplicate and any-change overlap, malformed explicit values,
 callback failure, readback failure/mismatch, and no retry/rollback. CLI and Node
 routing have separate fixture tests, and native/Node descriptors remain in the schema
 parity fixture. HTTP policy tests reject the new mutation action.
 
 The production adapter resolves public HomeKit objects and calls `updateEvents` once.
-These tests do not qualify real sensor notification support, HomeKit daemon acceptance,
+A real disabled, actionless fixture persisted both events but regenerated their IDs and
+changed their order. The synthetic tests do not qualify sensor firing, linked scenes,
 opaque predicate proxy identity stability, or iCloud propagation. Unknown event/action
 payloads are refused. Demo-app event editing is deliberately unavailable. Retargeting
 is deferred. A callback/readback mismatch stays failed/unverified and never causes an
