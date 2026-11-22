@@ -176,6 +176,7 @@ export const TOOLS: ToolDef[] = [
 	{
 		name: 'homekit_set',
 		optional: true,
+		reportOnFailure: true,
 		description:
 			'Control a HomeKit accessory. Set power, brightness, temperature, lock state, blind position, etc. Use UUID for disambiguation when names collide. Use dry_run to validate without actuating.',
 		parameters: Type.Object({

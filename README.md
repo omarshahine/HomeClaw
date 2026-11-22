@@ -392,6 +392,25 @@ homeclaw-cli automations add-condition "Porch Lights" \
 - Two actions on the same accessory and property are allowed when they target different services. The same service twice is rejected.
 - `get-scene`, `automations get`, and dry-run previews emit `service_name`, `service_id`, and `service_index` on rows whose accessory has more than one service carrying that property, so their JSON round-trips through `import-scene` / `update-scene` without collapsing gangs. Rows on single-service accessories are unchanged.
 
+### Confirming a Control Write
+
+For readable characteristics, HomeClaw normally requires a fresh read of the
+targeted service to confirm a write. Bridged accessories get up to five seconds
+of readback polling after the accessory refresh. Each control request issues the
+write only once.
+
+- `verified: true`: a fresh read matched the requested value.
+- `write_failed`: HomeKit reported an error on the write itself.
+- `write_unconfirmed`: HomeKit accepted the write, but no fresh read confirmed
+  the requested value within the verification window. The device may still
+  apply it. Check the current state with a fresh read before writing again.
+
+Unconfirmed and failed writes are both errors, not successful control responses.
+`set --json` prints the error code as JSON and exits nonzero; MCP preserves the
+error result and exposes the code. Write-only controls and explicit `--no-verify`
+(MCP `verify: false`) still report why verification was skipped rather than claiming
+the device changed.
+
 ### Discovering Multi-Channel Accessories
 
 JSON results from `list`, `search`, `rooms` and `device-map` include a compact

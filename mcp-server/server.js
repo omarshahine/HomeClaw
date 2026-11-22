@@ -77,6 +77,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return {
       content: [{ type: 'text', text: error.message }],
       isError: true,
+      ...(error.homeclawCode && {
+        structuredContent: { error: error.message, error_code: error.homeclawCode },
+      }),
     };
   }
 });

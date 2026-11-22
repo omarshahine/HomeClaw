@@ -27,8 +27,12 @@ test('bundled stdio MCP server discovers an app launched after initialization', 
     socket.on('data', chunk => {
       data += chunk;
       if (!data.includes('\n')) return;
-      requests.push(JSON.parse(data));
-      socket.end(JSON.stringify({ success: true, data: { fixture: true } }));
+      const request = JSON.parse(data);
+      requests.push(request);
+      const response = request.command === 'control'
+        ? { success: false, error: 'Write unconfirmed: fixture readback', error_code: 'write_unconfirmed' }
+        : { success: true, data: { fixture: true } };
+      socket.end(JSON.stringify(response));
     });
   });
   t.after(async () => {
@@ -56,4 +60,16 @@ test('bundled stdio MCP server discovers an app launched after initialization', 
   assert.equal(result.isError, undefined);
   assert.deepEqual(JSON.parse(result.content[0].text), { fixture: true });
   assert.deepEqual(requests, [{ command: 'status', args: {} }]);
+
+  const write = await client.callTool({
+    name: 'homekit_accessories',
+    arguments: { action: 'control', accessory_id: 'fixture', characteristic: 'power', value: 'true' },
+  });
+  assert.equal(write.isError, true);
+  assert.equal(write.content[0].text, 'Write unconfirmed: fixture readback');
+  assert.deepEqual(write.structuredContent, {
+    error: 'Write unconfirmed: fixture readback',
+    error_code: 'write_unconfirmed',
+  });
+  assert.equal(requests.filter(request => request.command === 'control').length, 1);
 });

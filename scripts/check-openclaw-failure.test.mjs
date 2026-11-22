@@ -1,6 +1,7 @@
 // OpenClaw tool failure payloads (#120 review). migrate-actions prints its JSON
 // report and then exits nonzero when an apply fails or does not verify; the
 // tool must still hand that report (rollback, added, removed) to the agent.
+// set keeps the machine-readable write outcome on its nonzero exit.
 // Every other tool keeps the original { success, error } shape.
 //
 // Imports the TypeScript source directly (Node strips erasable types).
@@ -41,9 +42,9 @@ test('errors without stdout or stderr', () => {
 	assert.deepEqual(failurePayload(new Error('boom'), true), { success: false, error: 'boom' });
 });
 
-test('only migrate_actions opts in', () => {
+test('only set and migrate_actions opt in', () => {
 	const optedIn = TOOLS.filter((tool) => tool.reportOnFailure).map((tool) => tool.name);
-	assert.deepEqual(optedIn, ['homekit_automations_migrate_actions']);
+	assert.deepEqual(optedIn, ['homekit_set', 'homekit_automations_migrate_actions']);
 });
 
 test('migrate_actions builds a single --replace-accessory and rejects separators in names', () => {
@@ -53,4 +54,11 @@ test('migrate_actions builds a single --replace-accessory and rejects separators
 		['automations', 'migrate-actions', '--replace-accessory', 'OLD=A,B', '--apply', '--json'],
 	);
 	assert.throws(() => tool.buildArgs({ old_accessory: 'a=b', new_accessories: ['C'] }), /UUID/);
+});
+
+test('set keeps the unconfirmed result distinct from success', () => {
+	const report = { success: false, error: 'Write unconfirmed', error_code: 'write_unconfirmed' };
+	const payload = failurePayload(cliError(JSON.stringify(report), 'Error: Write unconfirmed'), true);
+	assert.equal(payload.success, false);
+	assert.equal(payload.report.error_code, 'write_unconfirmed');
 });
