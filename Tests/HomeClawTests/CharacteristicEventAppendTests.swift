@@ -201,6 +201,14 @@ private func verifyFloatTargets() throws {
     try expect(parse("1e308") == nil, "Double-finite Float overflow must fail")
     try expect(parse("1e39") == nil, "Float overflow must fail")
     try expect(parse("1e-80") == nil, "Nonzero Float underflow must fail")
+    for value in ["1e-400", "-0.001E-400", "0x1p-2000"] {
+        try expect(parse(value) == nil, "Double underflow must not become a zero trigger: \(value)")
+        try expect(CharacteristicEventAppend.value(value, format: "uint8", minimum: nil, maximum: nil, valid: nil) == nil,
+                   "Underflow must not become a zero integer trigger: \(value)")
+    }
+    for value in ["0", "-0.000e-400", "+0.0E-50", "0x0p-2000"] {
+        try expect(parse(value)?.floatValue == 0, "An explicit zero must remain valid: \(value)")
+    }
     try expect(parse("1e-40")?.floatValue != 0, "Representable subnormal must survive")
     guard let normalized = parse("0.1") else { throw Failure(text: "Normal Float target rejected") }
     try expect(normalized.doubleValue == Double(Float(0.1)), "Preview must normalize to HAP Float32")

@@ -506,6 +506,9 @@ Everything is validated before the first write. `--dry-run` shows `before`, `pla
 The new event is an **OR alternative**, evaluated against the same existing predicate.
 It does not replace the sensor being watched. Retargeting an existing event remains
 unsupported; do not use append as a replacement when the old sensor must stop firing.
+Use `automations get` (MCP `action: "get"`) to inspect the existing events,
+conditions and linked actions before applying. Use it again to inspect the observed
+state if HomeClaw reports an unverified result.
 
 ```bash
 # Preview. Use names that resolve uniquely, or UUIDs.
