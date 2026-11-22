@@ -1,4 +1,5 @@
 New
+- Add another explicit-value trigger to an existing automation without recreating it. The new trigger is an OR alternative; the original conditions and linked actions stay in place.
 - Automation conditions now support numeric thresholds such as less than, at most, greater than and at least, including decimal values, through the CLI and MCP tools.
 - Pick a button or switch: scenes and automations can now target one service on accessories that have several of the same kind, such as a dual relay or a multi-gang switch. Add service_name, service_id or service_index to an action or condition. Scenes read back with the service they use, so you can export and re-import them without losing it. When a row could match more than one service, HomeClaw now tells you instead of quietly picking the first.
 - Edit an automation in place: the new automations edit command changes an automation's name, time, weekdays, conditions, time window or auto-revert without deleting and recreating it. Preview with --dry-run, and HomeClaw checks the result after writing.
