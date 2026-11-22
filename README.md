@@ -504,8 +504,8 @@ Everything is validated before the first write. `--dry-run` shows `before`, `pla
 
 `automations append-event` previews adding one event to an existing event automation.
 The new event is an **OR alternative**, evaluated against the same existing predicate.
-It does not replace the sensor being watched. Retargeting an existing event remains
-unsupported; do not use append as a replacement when the old sensor must stop firing.
+It does not replace the sensor being watched. Use `retarget-event` to replace one
+existing trigger instead.
 Use `automations get` (MCP `action: "get"`) to inspect the existing events,
 conditions and linked actions before applying. Use it again to inspect the observed
 state if HomeClaw reports an unverified result.
@@ -561,6 +561,41 @@ retrying either outcome. The CLI exits nonzero for failed/unverified outcomes.
 In a live disabled, actionless fixture, HomeKit persisted both events and changed their
 IDs and order. Independent sync and live behavior with linked scenes or opaque predicates
 are not yet qualified. Demo-app event editing is unavailable.
+
+### Retargeting a Characteristic Trigger Event
+
+Use `automations get` with `--json` to identify the current `id` in the appropriate
+`events` row. Use the event UUID, not the automation UUID or row position. For
+example, replace a door motion event with a presence sensor without re-creating
+the automation or changing its other OR alternatives:
+
+```bash
+homeclaw-cli automations get "Hall Lights" --json
+
+# Preview: nothing is written. The result shows replaced_event, event and fingerprint.
+homeclaw-cli automations retarget-event "Hall Lights" --event-id CURRENT_EVENT_UUID \
+  --accessory "Presence Sensor" --characteristic occupancy_detected --trigger-value true
+
+# Apply only the exact previewed replacement.
+homeclaw-cli automations retarget-event "Hall Lights" --event-id CURRENT_EVENT_UUID \
+  --accessory "Presence Sensor" --characteristic occupancy_detected --trigger-value true \
+  --apply --fingerprint FINGERPRINT_FROM_PREVIEW
+```
+
+Over stdio MCP, use `homekit_automations` with `action: "retarget_event"`, the
+same fields as append and a required `event_id`. The source must be an existing
+explicit boolean/numeric characteristic event. Any-change sources, duplicate or
+ambiguous events, and a replacement identical to the source are refused. If the
+old sensor is used by other trigger events, they remain; condition references
+and linked scenes are not retargeted. In Selected Only, both sensors and all linked
+action accessories must be selected.
+
+Apply replaces only the selected event in the submitted array and calls
+`updateEvents` once. Preview consent is bound to the operation, source UUID,
+replacement and current snapshot; an append fingerprint cannot authorize
+retarget. The same readback, race and no-retry limitations as append apply. Because
+HomeKit may reassign event UUIDs after either edit, run `automations get` again
+before selecting any event for another edit.
 
 ### Replacing an Accessory in Automations
 

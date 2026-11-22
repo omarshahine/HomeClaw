@@ -10,10 +10,46 @@ struct AppendAutomationEvent: ParsableCommand {
         Events are OR alternatives evaluated against the automation's unchanged predicate.
         HomeKit can regenerate event IDs and reorder the alternatives.
         Preview first, then pass --apply --fingerprint with the preview fingerprint.
-        Only finite boolean/numeric values are supported. Retargeting is not supported.
+        Only finite boolean/numeric values are supported. Use retarget-event to replace an existing event.
         HomeKit has no compare-and-swap: another client can race the write. A failed or
         unverified result must be inspected before retrying; no automatic rollback occurs.
         """)
+    @OptionGroup var options: CharacteristicEventEditOptions
+
+    func validate() throws { try options.validate() }
+    func socketArgs() -> [String: Any] { options.socketArgs() }
+    func run() throws { try options.run(command: "append_automation_event", args: socketArgs()) }
+}
+
+struct RetargetAutomationEvent: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "retarget-event", abstract: "Preview or replace one explicit characteristic trigger in place",
+        discussion: """
+        Get the current event UUID from automations get. The replacement is an OR
+        alternative under the rule's unchanged predicate and scene links. HomeKit
+        can regenerate event IDs, so identify the event again after each edit.
+        Preview first; apply requires the fingerprint from this exact proposal.
+        No automatic retry or rollback occurs.
+        """)
+    @OptionGroup var options: CharacteristicEventEditOptions
+    @Option(name: .customLong("event-id"), help: "Current event UUID from automations get") var eventID: String
+
+    func validate() throws {
+        try options.validate()
+        guard UUID(uuidString: eventID.trimmingCharacters(in: .whitespacesAndNewlines)) != nil else {
+            throw ValidationError("--event-id must be a current event UUID from automations get")
+        }
+    }
+
+    func socketArgs() -> [String: Any] {
+        var args = options.socketArgs()
+        args["event_id"] = eventID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return args
+    }
+    func run() throws { try options.run(command: "retarget_automation_event", args: socketArgs()) }
+}
+
+struct CharacteristicEventEditOptions: ParsableArguments {
     @Argument(help: "Automation name or UUID") var id: String
     @Option(name: .long, help: "Accessory name or UUID") var accessory: String
     @Option(name: .long, help: "Characteristic name, for example motion_detected") var characteristic: String
@@ -22,7 +58,7 @@ struct AppendAutomationEvent: ParsableCommand {
     @Option(name: .customLong("service-id")) var serviceID: String?
     @Option(name: .customLong("service-index")) var serviceIndex: Int?
     @Option(name: .long) var home: String?
-    @Flag(name: .long, help: "Apply the previewed append operation") var apply = false
+    @Flag(name: .long, help: "Apply the previewed event edit") var apply = false
     @Option(name: .long, help: "Fingerprint from a fresh preview in this app session") var fingerprint: String?
     @Flag(name: .long) var json = false
 
@@ -44,8 +80,8 @@ struct AppendAutomationEvent: ParsableCommand {
         return args
     }
 
-    func run() throws {
-        let response = try SocketClient.sendAny(command: "append_automation_event", args: socketArgs())
+    func run(command: String, args: [String: Any]) throws {
+        let response = try SocketClient.sendAny(command: command, args: args)
         guard response.success else { throw CommandFailure(response.error ?? "Unknown error") }
         // Always show status/fingerprint/warnings, including unverified outcomes.
         printJSON(response.data?.value)

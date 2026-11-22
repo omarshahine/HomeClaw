@@ -24,9 +24,9 @@ branches; (2) a standalone harness drives the `DemoFixtures` model through 47
 read/CRUD/not-found/reset/JSON-serializability checks — all pass. This unlocks **P3**
 (the end-to-end harness that boots the demo app and drives the CLI over the socket).
 
-## Characteristic event append coverage (issue #173)
+## Characteristic event append and retarget coverage (issue #173)
 
-The append-only `CharacteristicEventAppend` transaction runs without HomeKit.
+The one-shot `CharacteristicEventAppend` transaction runs without HomeKit.
 `CharacteristicEventAppendTests` covers preview/no-write, preserving original object
 identity/order in the submitted array and opaque guards, daemon-assigned event IDs and
 ordering on readback without ignoring changed event content or counts, binding consent
@@ -34,14 +34,18 @@ to the exact proposal, stale and
 concurrent changes, duplicate and any-change overlap, malformed explicit values,
 callback failure, readback failure/mismatch, and no retry/rollback. CLI and Node
 routing have separate fixture tests, and native/Node descriptors remain in the schema
-parity fixture. HTTP policy tests reject the new mutation action.
+parity fixture. HTTP policy tests reject both mutation actions, including preview requests.
 
 The production adapter resolves public HomeKit objects and calls `updateEvents` once.
 A real disabled, actionless fixture persisted both events but regenerated their IDs and
 changed their order. The synthetic tests do not qualify sensor firing, linked scenes,
 opaque predicate proxy identity stability, or iCloud propagation. Unknown event/action
-payloads are refused. Demo-app event editing is deliberately unavailable. Retargeting
-is deferred. A callback/readback mismatch stays failed/unverified and never causes an
+payloads are refused. Demo-app event editing is deliberately unavailable.
+Retarget coverage checks exact UUID selection, unchanged other events and their
+written object identities, retarget-vs-append consent separation, no-op, duplicate
+and any-change refusal, ID churn before the write, and stale duplicate/wrong-target
+readback after the write. No live retarget is qualified here.
+A callback/readback mismatch stays failed/unverified and never causes an
 old event array to be restored over another client's edit.
 
 ## 1. Why this exists

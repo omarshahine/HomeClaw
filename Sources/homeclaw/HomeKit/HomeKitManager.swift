@@ -3553,20 +3553,21 @@ final class HomeKitManager: NSObject, Observable {
         ] as [String: Any]
     }
 
-    // MARK: - Append one characteristic trigger event (issue #173)
+    // MARK: - Edit one characteristic trigger event (issue #173)
 
     private static let eventAppendSession = UUID().uuidString
 
-    /// Preview by default. Appends one OR alternative without rebuilding any
-    /// existing event, predicate, action-set link or scheduling property.
-    func appendAutomationEvent(
+    /// Preview by default. Appends or replaces one OR alternative without
+    /// rebuilding unrelated events, predicates, action links or scheduling.
+    func editCharacteristicAutomationEvent(
         id: String, accessoryID: String, characteristic: String, value: String,
         serviceName: String? = nil, serviceID: String? = nil, serviceIndex: Int? = nil,
-        homeID: String? = nil, apply: Bool = false, fingerprint: String? = nil
+        homeID: String? = nil, apply: Bool = false, fingerprint: String? = nil, replacing eventID: UUID? = nil
     ) async throws -> [String: Any] {
+        let operation = eventID == nil ? "append-event" : "retarget-event"
         await waitForReady()
         guard !Self.isDemoMode else {
-            throw ControlError.invalidArgument("append-event is not available through demo state; use the synthetic transaction tests")
+            throw ControlError.invalidArgument("\(operation) is not available through demo state; use the synthetic transaction tests")
         }
         let candidates: [HMHome]
         if let homeID {
@@ -3574,9 +3575,9 @@ final class HomeKitManager: NSObject, Observable {
                 || $0.name.localizedCaseInsensitiveCompare(homeID) == .orderedSame }
         } else { candidates = filteredHomes(homeID: nil) }
         guard candidates.count == 1, let home = candidates.first else {
-            throw ControlError.invalidArgument("append-event requires one unambiguous home; pass its UUID")
+            throw ControlError.invalidArgument("\(operation) requires one unambiguous home; pass its UUID")
         }
-        let trigger = try resolveEventTrigger(id: id, in: home, operation: "append-event")
+        let trigger = try resolveEventTrigger(id: id, in: home, operation: operation)
         guard let accessory = try findAccessory(id: accessoryID, homeID: home.uniqueIdentifier.uuidString) else {
             throw ControlError.accessoryNotFound(accessoryID)
         }
@@ -3606,12 +3607,33 @@ final class HomeKitManager: NSObject, Observable {
             throw ControlError.invalidArgument("An explicit finite boolean/numeric trigger value matching the characteristic's format, bounds and valid values is required")
         }
         let originalObjects = trigger.events
-        let before = Self.eventAppendSnapshot(trigger, home: home)
+        let before = Self.eventAppendSnapshot(trigger, home: home, events: originalObjects)
+        var sourceDetails: [String: String]?
+        if let eventID {
+            let index = try CharacteristicEventAppend.replacementIndex(in: before.events, id: eventID)
+            guard let source = originalObjects[index] as? HMCharacteristicEvent<NSCopying>,
+                  source.uniqueIdentifier == eventID,
+                  let sourceService = source.characteristic.service,
+                  let sourceAccessory = sourceService.accessory,
+                  home.accessories.contains(where: { $0.uniqueIdentifier == sourceAccessory.uniqueIdentifier }),
+                  isAccessoryAllowed(sourceAccessory), HomeClawConfig.shared.filterMode != "allowlist"
+                    || HomeClawConfig.shared.allowedIDs?.contains(sourceAccessory.uniqueIdentifier.uuidString) == true else {
+                throw ControlError.invalidArgument("The existing event accessory is excluded or not available in this home")
+            }
+            sourceDetails = [
+                "id": eventID.uuidString,
+                "accessory_id": sourceAccessory.uniqueIdentifier.uuidString,
+                "service_id": sourceService.uniqueIdentifier.uuidString,
+                "characteristic": CharacteristicMapper.name(for: source.characteristic.characteristicType),
+                "characteristic_id": source.characteristic.uniqueIdentifier.uuidString,
+                "value": (source.triggerValue as? NSNumber)?.stringValue ?? "",
+            ]
+        }
         let event = HMCharacteristicEvent<NSCopying>(characteristic: target, triggerValue: typed)
         let addition = Self.eventAppendEvent(event).event
         let outcome = try await CharacteristicEventAppend.run(
             before: before, addition: addition, originalObjects: originalObjects, newObject: event as HMEvent,
-            apply: apply, expectedFingerprint: fingerprint, unchangedReadbackRechecks: 3,
+            apply: apply, expectedFingerprint: fingerprint, replacing: eventID, unchangedReadbackRechecks: 3,
             reread: {
                 guard let currentHome = self.homeManager?.homes.first(where: { $0.uniqueIdentifier == home.uniqueIdentifier }),
                       let current = currentHome.triggers.first(where: { $0.uniqueIdentifier == trigger.uniqueIdentifier }) as? HMEventTrigger else {
@@ -3631,6 +3653,7 @@ final class HomeKitManager: NSObject, Observable {
                            "service_id": service.uniqueIdentifier.uuidString,
                            "characteristic": characteristic, "characteristic_id": target.uniqueIdentifier.uuidString,
                            "value": typed.stringValue]
+        if let sourceDetails { result["replaced_event"] = sourceDetails }
         result["existing_event_ids"] = before.events.map(\.id)
         result["verification_scope"] = "Re-enumerated current HomeKit objects after the callback and compared event behavior and preserved guards; event IDs and order can change. Not independent iCloud confirmation. Unknown event/action payloads are refused. Opaque predicates are retained by identity, never decoded or rebuilt."
         return result
@@ -3671,8 +3694,10 @@ final class HomeKitManager: NSObject, Observable {
         return (.init(id: id, signature: signature, characteristicID: nil, value: nil), unsupported)
     }
 
-    private static func eventAppendSnapshot(_ trigger: HMEventTrigger, home: HMHome) -> CharacteristicEventAppend.Snapshot {
-        let events = trigger.events.map(eventAppendEvent)
+    private static func eventAppendSnapshot(
+        _ trigger: HMEventTrigger, home: HMHome, events objects: [HMEvent]? = nil
+    ) -> CharacteristicEventAppend.Snapshot {
+        let events = (objects ?? trigger.events).map(eventAppendEvent)
         let ends = trigger.endEvents.map(eventAppendEvent)
         var unsupported = (events + ends).filter(\.unsupported).map { "unsupported event \($0.event.signature)" }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]

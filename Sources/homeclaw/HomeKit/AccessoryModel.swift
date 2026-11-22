@@ -653,6 +653,7 @@ enum AccessoryModel {
                 let isButton = charType == HMCharacteristicTypeInputEvent
 
                 var eventDict: [String: Any] = [
+                    "id": event.uniqueIdentifier.uuidString,
                     "type": "characteristic",
                     "characteristic": CharacteristicMapper.name(for: charType),
                     "trigger_type": isButton ? "button" : "characteristic",
@@ -662,6 +663,7 @@ enum AccessoryModel {
                     eventDict["accessory_id"] = accessory.uniqueIdentifier.uuidString
                 }
                 if let service = characteristic.service {
+                    eventDict["service_id"] = service.uniqueIdentifier.uuidString
                     eventDict["service_type"] = CharacteristicMapper.serviceCategory(for: service.serviceType) ?? service.serviceType
                 }
                 if isButton {

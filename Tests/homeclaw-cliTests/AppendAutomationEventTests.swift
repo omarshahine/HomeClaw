@@ -37,3 +37,29 @@ struct AppendAutomationEventTests {
         #expect(throws: (any Error).self) { try AppendAutomationEvent.parse(["Rule", "--accessory", "Sensor", "--characteristic", "motion_detected"]) }
     }
 }
+
+@Suite("RetargetAutomationEvent CLI")
+struct RetargetAutomationEventTests {
+    let base = ["Rule", "--accessory", "Sensor", "--characteristic", "motion_detected", "--trigger-value", "true"]
+    @Test func requiresExactUUIDAndPreviewsByDefault() throws {
+        #expect(throws: (any Error).self) { try RetargetAutomationEvent.parse(base) }
+        #expect(throws: (any Error).self) {
+            try RetargetAutomationEvent.parse(base + ["--event-id", "first"]).validate()
+        }
+        let id = UUID().uuidString
+        let command = try RetargetAutomationEvent.parse(base + ["--event-id", id])
+        try command.validate()
+        #expect(command.socketArgs()["event_id"] as? String == id)
+        #expect(command.socketArgs()["apply"] as? Bool == false)
+    }
+
+    @Test func applyRequiresProposalFingerprintAndKeepsServiceSelector() throws {
+        let args = base + ["--event-id", UUID().uuidString, "--apply", "--service-index", "2"]
+        #expect(throws: (any Error).self) { try RetargetAutomationEvent.parse(args).validate() }
+        let command = try RetargetAutomationEvent.parse(args + ["--fingerprint", "precise"])
+        try command.validate()
+        #expect(command.socketArgs()["apply"] as? Bool == true)
+        #expect(command.socketArgs()["fingerprint"] as? String == "precise")
+        #expect(command.socketArgs()["service_index"] as? Int == 2)
+    }
+}

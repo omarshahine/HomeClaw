@@ -177,3 +177,23 @@ test('append_event forwards malformed service index for strict shared server rej
   await handleAutomations({...append,service_index:null},send);
   assert.equal(calls[0][1].service_index,null);
 });
+
+const eventUUID = '43AF1FB2-C5B9-454F-B673-686C165C7CAB';
+test('retarget_event forwards exact event UUID and previews by default', async () => {
+  const {calls,send} = fakeSend();
+  await handleAutomations({...append,action:'retarget_event',event_id:eventUUID},send);
+  assert.equal(calls[0][0],'retarget_automation_event');
+  assert.equal(calls[0][1].event_id,eventUUID);
+  assert.equal(calls[0][1].apply,false);
+  assert.equal(calls[0][1].trigger_value,append.trigger_value);
+  await handleAutomations({...append,action:'retarget_event',event_id:eventUUID,apply:true,fingerprint:'precise'},send);
+  assert.equal(calls[1][1].fingerprint,'precise');
+});
+test('retarget_event rejects missing/ambiguous selectors and malformed apply before sending', async () => {
+  const {calls,send} = fakeSend();
+  for (const patch of [{event_id:undefined},{event_id:null},{event_id:'first'},{apply:1},{apply:true},{apply:true,fingerprint:'ok',dry_run:true}]) {
+    await assert.rejects(handleAutomations({...append,action:'retarget_event',event_id:eventUUID,...patch},send));
+  }
+  await assert.rejects(handleAutomations({...append,event_id:eventUUID},send));
+  assert.equal(calls.length,0);
+});

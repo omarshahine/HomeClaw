@@ -190,6 +190,123 @@ private func verifyAppendValuesAndRequests() throws {
     print("PASS typed values and request validation; malformed/missing values, boolean apply and selectors fail closed")
 }
 
+@MainActor
+private func verifyCharacteristicEventRetarget() async throws {
+    typealias Edit = CharacteristicEventAppend
+    struct Failure: Error { let text: String }
+    func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
+        if !condition() { throw Failure(text: message) }
+    }
+    let sourceID = UUID()
+    let secondID = UUID()
+    let original = Edit.Event(id: sourceID.uuidString, signature: "characteristic", characteristicID: "old-sensor", value: "number:1")
+    let other = Edit.Event(id: secondID.uuidString, signature: "characteristic", characteristicID: "other-sensor", value: "number:0")
+    let clock = Edit.Event(id: UUID().uuidString, signature: "calendar:04:17", characteristicID: nil, value: nil)
+    let replacement = Edit.Event(id: UUID().uuidString, signature: "characteristic", characteristicID: "new-sensor", value: "number:1")
+    let guards = ["action_sets": "action-ids", "recurrences": "daily", "predicate": "opaque-id", "enabled": "false"]
+    func snapshot(_ events: [Edit.Event], guards: [String: String]? = nil) -> Edit.Snapshot {
+        .init(homeID: "home", triggerID: "rule", events: events, guards: guards ?? ["action_sets": "action-ids", "recurrences": "daily", "predicate": "opaque-id", "enabled": "false"], unsupported: [])
+    }
+    func reidentified(_ event: Edit.Event) -> Edit.Event {
+        .init(id: UUID().uuidString, signature: event.signature, characteristicID: event.characteristicID, value: event.value)
+    }
+    let before = snapshot([clock, original, other], guards: guards)
+    let clockObject = NSObject(), sourceObject = NSObject(), otherObject = NSObject(), newObject = NSObject()
+    let objects = [clockObject, sourceObject, otherObject]
+    var writes = 0
+    let preview = try await Edit.run(before: before, addition: replacement, originalObjects: objects,
+                                     newObject: newObject, apply: false, expectedFingerprint: nil, replacing: sourceID,
+                                     reread: { throw Failure(text: "preview reread") }, write: { _ in writes += 1 })
+    try expect(preview.status == "preview" && writes == 0, "Retarget preview must not write")
+    try expect(preview.fingerprint != before.fingerprint(adding: replacement), "Append consent must not authorize retarget")
+    try expect(preview.fingerprint != before.fingerprint(adding: replacement, replacing: secondID), "Consent must bind exact source UUID")
+    try expect(preview.fingerprint == before.fingerprint(adding: reidentified(replacement), replacing: sourceID), "Unpersisted replacement IDs must not invalidate consent")
+
+    for wrongFingerprint in [before.fingerprint(adding: replacement), before.fingerprint(adding: replacement, replacing: secondID)] {
+        do {
+            _ = try await Edit.run(before: before, addition: replacement, originalObjects: objects, newObject: newObject,
+                                   apply: true, expectedFingerprint: wrongFingerprint, replacing: sourceID,
+                                   reread: { before }, write: { _ in writes += 1 })
+            throw Failure(text: "Wrong operation or source consent accepted")
+        } catch Edit.Invalid.stale {}
+    }
+    do {
+        _ = try await Edit.run(before: before, addition: replacement, originalObjects: objects, newObject: newObject,
+                               apply: true, expectedFingerprint: preview.fingerprint, replacing: sourceID,
+                               reread: { snapshot([clock, reidentified(original), other]) }, write: { _ in writes += 1 })
+        throw Failure(text: "Source regenerated between preview and write accepted")
+    } catch Edit.Invalid.stale {}
+    try expect(writes == 0, "Stale operations must not write")
+
+    var observed = before
+    var pauses = 0
+    let applied = try await Edit.run(before: before, addition: replacement, originalObjects: objects,
+                                     newObject: newObject, apply: true, expectedFingerprint: preview.fingerprint,
+                                     replacing: sourceID, unchangedReadbackRechecks: 3, pauseReadback: {
+        pauses += 1
+        observed = snapshot([reidentified(other), reidentified(replacement), reidentified(clock)])
+    }, reread: { observed }, write: { submitted in
+        writes += 1
+        try expect(submitted.count == 3 && submitted[0] === clockObject && submitted[1] === newObject
+                   && submitted[2] === otherObject, "Only selected event object can change, at the same submitted position")
+    })
+    try expect(writes == 1 && pauses == 1 && applied.status == "verified", "Regenerated/reordered events after a transient exact match must verify")
+
+    for incorrect in [
+        snapshot([clock, original, other]),
+        snapshot([clock, original, other, replacement]),
+        snapshot([clock, replacement, replacement]),
+        snapshot([clock, original, replacement]),
+        snapshot([clock, replacement, other], guards: ["predicate": "changed"]),
+    ] {
+        var attempts = 0
+        let result = try await Edit.run(before: before, addition: replacement, originalObjects: objects, newObject: newObject,
+                                        apply: true, expectedFingerprint: preview.fingerprint, replacing: sourceID,
+                                        reread: { attempts == 0 ? before : incorrect }, write: { _ in attempts += 1 })
+        try expect(result.status == "unverified" && attempts == 1, "Dropped/wrong/duplicated or guard-changed readback must not verify or retry")
+    }
+
+    let anyChange = Edit.Event(id: sourceID.uuidString, signature: "characteristic", characteristicID: "old-sensor", value: "any_change")
+    let targetAnyChange = Edit.Event(id: secondID.uuidString, signature: "characteristic", characteristicID: "new-sensor", value: "any_change")
+    let targetDuplicate = Edit.Event(id: secondID.uuidString, signature: "characteristic", characteristicID: "new-sensor", value: "number:1")
+    for (events, id, addition) in [
+        ([clock, original, other], UUID(), replacement),
+        ([clock, original, original], sourceID, replacement),
+        ([clock, original, reidentified(original)], sourceID, replacement),
+        ([clock, anyChange, other], sourceID, replacement),
+        ([clock, original, other], UUID(uuidString: clock.id)!, replacement),
+        ([clock, original, targetAnyChange], sourceID, replacement),
+        ([clock, original, targetDuplicate], sourceID, replacement),
+        ([clock, original, other], sourceID, original),
+    ] {
+        do {
+            let invalid = snapshot(events)
+            _ = try await Edit.run(before: invalid, addition: addition, originalObjects: objects, newObject: newObject,
+                                   apply: true, expectedFingerprint: invalid.fingerprint(adding: addition, replacing: id),
+                                   replacing: id, reread: { invalid }, write: { _ in writes += 1 })
+            throw Failure(text: "Bad selection, duplicate, overlap or no-change proposal accepted")
+        } catch is Edit.Invalid {}
+    }
+    try expect(writes == 1, "No invalid proposal can write")
+    let oldButtonFalse = Edit.Event(id: UUID().uuidString, signature: "characteristic", characteristicID: "old-sensor", value: "number:0")
+    let changedValue = try await Edit.run(before: before, addition: oldButtonFalse, originalObjects: objects, newObject: newObject,
+                                          apply: false, expectedFingerprint: nil, replacing: sourceID,
+                                          reread: { before }, write: { _ in writes += 1 })
+    try expect(changedValue.status == "preview" && writes == 1, "Same characteristic with a different explicit value should be previewable")
+
+    let request = ["id": "rule", "accessory_id": "new", "characteristic": "motion_detected", "trigger_value": "true", "event_id": sourceID.uuidString]
+    let parsed = try Edit.Request(request, retarget: true)
+    try expect(parsed.replacedEventID == sourceID && !parsed.apply, "Retarget socket/MCP request must identify a UUID and default to preview")
+    for (args, retarget) in [(request, false), (request.filter { $0.key != "event_id" }, true),
+                             (request.merging(["event_id": "first"], uniquingKeysWith: { _, new in new }), true)] {
+        do {
+            _ = try Edit.Request(args, retarget: retarget)
+            throw Failure(text: "Invalid retarget request accepted")
+        } catch is Edit.Invalid {} catch let error as NSError where error.domain == "retarget-event" {}
+    }
+    print("PASS exact retarget selection; operation-bound consent; one-shot ordered write; transient/reordered semantic readback; unsupported/duplicate rejection")
+}
+
 private func verifyFloatTargets() throws {
     struct Failure: Error { let text: String }
     func expect(_ value: @autoclosure () -> Bool, _ text: String) throws {
@@ -252,6 +369,7 @@ private func verifyFloatTargets() throws {
 @main struct EventAppendTestRunner {
     @MainActor static func main() async throws {
         try await verifyCharacteristicEventAppend()
+        try await verifyCharacteristicEventRetarget()
         try verifyAppendValuesAndRequests()
         try verifyFloatTargets()
         try await verifyCallbackRace()
@@ -260,11 +378,16 @@ private func verifyFloatTargets() throws {
 #else
 @MainActor final class CharacteristicEventAppendTests: XCTestCase {
     func testOneShotAppendTransaction() async throws { try await verifyCharacteristicEventAppend() }
+    func testOneShotRetargetTransaction() async throws { try await verifyCharacteristicEventRetarget() }
     func testTypedValuesAndWireRequests() throws { try verifyAppendValuesAndRequests() }
     func testMissingAndLateCallbackRace() async throws { try await verifyCallbackRace() }
     func testFiniteFloatTargetsAndCanonicalFingerprint() throws { try verifyFloatTargets() }
     func testReadOnlyHTTPRejectsAppendEvent() {
-        XCTAssertFalse(HTTPToolPolicy.readOnly.allowsCall(name: "homekit_automations", arguments: ["action":"append_event", "apply":true]))
+        for action in ["append_event", "retarget_event"] {
+            for apply in [false, true] {
+                XCTAssertFalse(HTTPToolPolicy.readOnly.allowsCall(name: "homekit_automations", arguments: ["action": action, "apply": apply]))
+            }
+        }
     }
 }
 #endif
