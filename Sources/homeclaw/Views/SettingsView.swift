@@ -544,7 +544,15 @@ private struct DeviceFilterSettingsView: View {
 private extension View {
     // macOS 26+ Catalyst leaves a stale top scroll-edge blur over rows under pinned headers.
     @ViewBuilder func hidingTopScrollEdgeEffect() -> some View {
-        if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .top) } else { self }
+        #if targetEnvironment(macCatalyst)
+        if #available(macCatalyst 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
     }
 }
 
