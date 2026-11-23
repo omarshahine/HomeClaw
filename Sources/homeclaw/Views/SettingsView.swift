@@ -414,6 +414,7 @@ private struct DeviceFilterSettingsView: View {
                     }
                 }
                 .listStyle(.inset)
+                .hidingTopScrollEdgeEffect()
                 .disabled(filterMode == "all")
                 .opacity(filterMode == "all" ? 0.5 : 1.0)
 
@@ -537,6 +538,13 @@ private struct DeviceFilterSettingsView: View {
         if selectedHome.isEmpty, let firstName = homeNames.first {
             selectedHome = firstName
         }
+    }
+}
+
+private extension View {
+    // macOS 26+ Catalyst leaves a stale top scroll-edge blur over rows under pinned headers.
+    @ViewBuilder func hidingTopScrollEdgeEffect() -> some View {
+        if #available(iOS 26.0, *) { scrollEdgeEffectHidden(true, for: .top) } else { self }
     }
 }
 
@@ -1095,6 +1103,7 @@ private struct WebhookSettingsView: View {
                     }
                 }
                 .listStyle(.inset)
+                .hidingTopScrollEdgeEffect()
 
                 // Bottom toolbar
                 HStack {
