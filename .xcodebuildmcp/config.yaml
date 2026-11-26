@@ -1,2 +1,12 @@
 schemaVersion: 1
-enabledWorkflows: ["simulator", "macos"]
+enabledWorkflows:
+- simulator
+- macos
+- swift-package
+experimentalWorkflowDiscovery: false
+incrementalBuildsEnabled: false
+sessionDefaults:
+  projectPath: ./HomeClaw.xcodeproj
+  scheme: HomeClaw
+  configuration: Debug
+  platform: macOS

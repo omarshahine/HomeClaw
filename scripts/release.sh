@@ -218,7 +218,7 @@ require_clean_tree() {
 # A machine with several Xcodes installed otherwise archives against whatever
 # `xcode-select` points at, invisibly — a release built on the wrong toolchain
 # is not something to discover from App Store Connect. Resolution order:
-# DEVELOPER_DIR, XCODE_APP, .xcode-version, xcode-select. Betas and release
+# DEVELOPER_DIR, XCODE_APP, .xcode-version, stable Xcode. Betas and release
 # builds live side by side, so .xcode-version is matched on
 # CFBundleShortVersionString, not the app name.
 resolve_toolchain() {
@@ -237,6 +237,8 @@ resolve_toolchain() {
 Installed: ${installed[*]}
 Install it, or override for this run: XCODE_APP=/Applications/Xcode.app scripts/release.sh <command>"
   fi
+  # Fall back to stable Xcode after explicit and pinned selections.
+  export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
   if [[ -n "${DEVELOPER_DIR:-}" ]]; then
     [[ -d "$DEVELOPER_DIR" ]] || die "DEVELOPER_DIR does not exist: $DEVELOPER_DIR"
     export DEVELOPER_DIR
