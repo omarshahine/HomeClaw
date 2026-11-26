@@ -1,5 +1,9 @@
 # HomeClaw
 
+## Xcode tool routing
+
+Follow [the Xcode golden path](Documentation/Development/Xcode-Golden-Path.md) for stable toolchain selection, native MCP readiness, pinned XcodeBuildMCP capabilities, worktree paths, and the existing release route. Run `setup-xcode-mcp --check` first. Restart the agent client after changing MCP configuration. Configuration-only changes use parser, shell-syntax, and mocked toolchain checks; they do not require an app build or installation.
+
 HomeClaw exposes Apple HomeKit accessories via a CLI tool, plugins for Claude Code and OpenClaw, and a stdio MCP server for Claude Desktop. It uses a unified Mac Catalyst architecture with an AppKit bridge bundle for the macOS menu bar.
 
 ## Architecture
