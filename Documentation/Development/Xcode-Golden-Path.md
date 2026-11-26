@@ -6,7 +6,7 @@ After changing MCP configuration, restart the agent/client so its tool catalog r
 
 The default project is `HomeClaw.xcodeproj`, scheme `HomeClaw`, configuration Debug. Select the Mac Catalyst destination for the app. There is no iPhone app destination or default simulator.
 
-Use native Xcode MCP for supported project, build, test, preview, and runtime operations. Use XcodeBuildMCP for supported native macOS CLI/bridge and Swift Package operations when the native server lacks the required capability. Its 2.7.0 macOS tool does not expose a Catalyst variant selector. At the first XcodeBuildMCP action, call `session_show_defaults`; replace stale defaults with the active worktree’s resolved physical project path. Do not reuse another checkout’s paths or settings. For a run, use the combined build-and-run operation.
+Use native Xcode MCP for supported project, build, test, preview, and runtime operations. Use XcodeBuildMCP for supported native macOS CLI/bridge and Swift Package operations when the native server lacks the required capability. Its 2.7.0 macOS tool does not expose a Catalyst variant selector. At the first XcodeBuildMCP action, call `session_show_defaults`. If the project, scheme or destination is missing or stale, call `session_set_defaults` with the active worktree’s resolved physical project path, scheme and destination, and `persist: false`, before invoking an action. Do not reuse another checkout’s paths or settings. For a run, use the combined build-and-run operation.
 
 Use Codex native controls for app and simulator UI interaction. The project configuration does not add the `ui-automation` or `xcode-ide` proxy workflow. Do not start a second native bridge or Device Hub instance.
 
